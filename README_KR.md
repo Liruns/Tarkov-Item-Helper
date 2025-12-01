@@ -41,9 +41,9 @@ Escape from Tarkov 퀘스트 및 은신처 진행 상황을 추적하는 Windows
 ## 스크린샷
 
 <!-- 스크린샷 추가 예정 -->
-![퀘스트 목록](screenshots/quests.png)
-![은신처](screenshots/hideout.png)
-![필요 아이템](screenshots/items.png)
+![퀘스트 목록](screenshots/quests_ko.png)
+![은신처](screenshots/hideout_ko.png)
+![필요 아이템](screenshots/items_ko.png)
 
 ## 설치 방법
 
