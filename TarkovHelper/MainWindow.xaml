@@ -48,7 +48,7 @@
                     </Button>
                     <!-- Language Selector -->
                     <ComboBox x:Name="CmbLanguage" Width="60" Margin="0,0,16,0"
-                              SelectionChanged="CmbLanguage_SelectionChanged" SelectedIndex="0">
+                              SelectionChanged="CmbLanguage_SelectionChanged">
                         <ComboBoxItem Content="EN" Tag="EN"/>
                         <ComboBoxItem Content="KO" Tag="KO"/>
                         <ComboBoxItem Content="JA" Tag="JA"/>

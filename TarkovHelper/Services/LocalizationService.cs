@@ -198,9 +198,9 @@ public class LocalizationService : INotifyPropertyChanged
     // Quest Tab
     public string SearchQuestsPlaceholder => CurrentLanguage switch
     {
-        AppLanguage.KO => "퀘스트 검색 (영어/한국어/상인)...",
-        AppLanguage.JA => "クエスト検索（EN/JA/トレーダー）...",
-        _ => "Search quests (EN/KO/Trader)..."
+        AppLanguage.KO => "퀘스트 검색 (영어/한국어/일본어/상인)...",
+        AppLanguage.JA => "クエスト検索（EN/KO/JA/トレーダー）...",
+        _ => "Search quests (EN/KO/JA/Trader)..."
     };
 
     public string HideCompleted => CurrentLanguage switch
@@ -482,9 +482,9 @@ public class LocalizationService : INotifyPropertyChanged
 
     public string EnterQuestName => CurrentLanguage switch
     {
-        AppLanguage.KO => "퀘스트 이름 입력 (영어/한국어)...",
-        AppLanguage.JA => "クエスト名を入力（EN/JA）...",
-        _ => "Enter quest name (EN/KO)..."
+        AppLanguage.KO => "퀘스트 이름 입력 (영어/한국어/일본어)...",
+        AppLanguage.JA => "クエスト名を入力（EN/KO/JA）...",
+        _ => "Enter quest name (EN/KO/JA)..."
     };
 
     public string SetInProgress => CurrentLanguage switch

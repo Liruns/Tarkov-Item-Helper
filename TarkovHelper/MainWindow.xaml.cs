@@ -617,7 +617,7 @@ public partial class MainWindow : Window
 
         searchWindow.Content = mainGrid;
 
-        // 검색 로직 - 영어와 한국어 둘 다 검색 가능
+        // 검색 로직 - 영어, 한국어, 일본어 모두 검색 가능
         searchBox.TextChanged += (s, args) =>
         {
             var text = searchBox.Text.Trim();
@@ -631,14 +631,18 @@ public partial class MainWindow : Window
                 .Where(t =>
                     t.NameEn.Contains(text, StringComparison.OrdinalIgnoreCase) ||
                     t.NameKo.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                    t.NameJa.Contains(text, StringComparison.OrdinalIgnoreCase) ||
                     t.TraderName.Contains(text, StringComparison.OrdinalIgnoreCase))
                 .Take(50)
                 .Select(t => new
                 {
                     Quest = t,
-                    Display = _loc.IsEnglish
-                        ? $"{t.NameEn} ({t.NameKo}) - {t.TraderName}"
-                        : $"{t.NameKo} ({t.NameEn}) - {t.TraderName}",
+                    Display = _loc.CurrentLanguage switch
+                    {
+                        AppLanguage.KO => $"{t.NameKo} ({t.NameEn}) - {t.TraderName}",
+                        AppLanguage.JA => $"{t.NameJa} ({t.NameEn}) - {t.TraderName}",
+                        _ => $"{t.NameEn} ({t.NameKo}) - {t.TraderName}"
+                    },
                     IsCompleted = _progressManager.IsQuestCompleted(t.Id)
                 })
                 .OrderBy(x => x.IsCompleted)
