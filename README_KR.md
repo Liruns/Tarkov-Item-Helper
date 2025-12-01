@@ -1,7 +1,8 @@
 # TarkovHelper
 
-[![ko](https://img.shields.io/badge/lang-한국어-red.svg)](README_KR.md)
 [![en](https://img.shields.io/badge/lang-English-blue.svg)](README.md)
+[![ko](https://img.shields.io/badge/lang-한국어-red.svg)](README_KR.md)
+[![ja](https://img.shields.io/badge/lang-日本語-green.svg)](README_JA.md)
 
 <a href="https://buymeacoffee.com/zeliperstap" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="30"></a>
 
@@ -34,7 +35,7 @@ Escape from Tarkov 퀘스트 및 은신처 진행 상황을 추적하는 Windows
 - 게임 설치 폴더 자동 탐지
 
 ### 다국어 지원
-- 한국어 / 영어 지원
+- 한국어 / 영어 / 일본어 지원
 - 실시간 언어 전환
 
 ## 스크린샷

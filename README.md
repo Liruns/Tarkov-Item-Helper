@@ -1,7 +1,8 @@
 # TarkovHelper
 
-[![ko](https://img.shields.io/badge/lang-한국어-red.svg)](README_KR.md)
 [![en](https://img.shields.io/badge/lang-English-blue.svg)](README.md)
+[![ko](https://img.shields.io/badge/lang-한국어-red.svg)](README_KR.md)
+[![ja](https://img.shields.io/badge/lang-日本語-green.svg)](README_JA.md)
 
 <a href="https://buymeacoffee.com/zeliperstap" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="30"></a>
 
@@ -34,7 +35,7 @@ A Windows desktop application for tracking Escape from Tarkov quest and hideout 
 - Auto-detect game installation folder
 
 ### Multi-language Support
-- Korean / English support
+- English / Korean / Japanese support
 - Real-time language switching
 
 ## Screenshots
