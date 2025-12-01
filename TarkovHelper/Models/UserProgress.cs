@@ -53,6 +53,7 @@ public class RequiredItemSummary
     public string ItemId { get; set; } = string.Empty;
     public string ItemNameEn { get; set; } = string.Empty;
     public string ItemNameKo { get; set; } = string.Empty;
+    public string ItemNameJa { get; set; } = string.Empty;
     public string? IconLink { get; set; }
     public string? WikiLink { get; set; }
 
@@ -169,6 +170,7 @@ public class ItemQuestSource
     public string QuestId { get; set; } = string.Empty;
     public string QuestNameEn { get; set; } = string.Empty;
     public string QuestNameKo { get; set; } = string.Empty;
+    public string QuestNameJa { get; set; } = string.Empty;
     public string TraderName { get; set; } = string.Empty;
     public string? WikiLink { get; set; }
     public int Count { get; set; }
@@ -183,6 +185,7 @@ public class ItemHideoutSource
     public string StationId { get; set; } = string.Empty;
     public string StationNameEn { get; set; } = string.Empty;
     public string StationNameKo { get; set; } = string.Empty;
+    public string StationNameJa { get; set; } = string.Empty;
     public int Level { get; set; }
     public int Count { get; set; }
     public bool FoundInRaid { get; set; }

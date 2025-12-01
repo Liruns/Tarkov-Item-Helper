@@ -227,6 +227,7 @@ public class UserProgressManager
                             ItemId = item.ItemId,
                             ItemNameEn = itemData?.NameEn ?? item.ItemId,
                             ItemNameKo = itemData?.NameKo ?? item.ItemId,
+                            ItemNameJa = itemData?.NameJa ?? item.ItemId,
                             IconLink = itemData?.IconLink,
                             WikiLink = itemData?.WikiLink
                         };
@@ -248,6 +249,7 @@ public class UserProgressManager
                         QuestId = task.Id,
                         QuestNameEn = task.NameEn,
                         QuestNameKo = task.NameKo,
+                        QuestNameJa = task.NameJa,
                         TraderName = task.TraderName,
                         WikiLink = task.WikiLink,
                         Count = item.Count,
@@ -289,6 +291,7 @@ public class UserProgressManager
                             ItemId = req.ItemId,
                             ItemNameEn = itemData?.NameEn ?? req.ItemNameEn,
                             ItemNameKo = itemData?.NameKo ?? req.ItemNameKo,
+                            ItemNameJa = itemData?.NameJa ?? req.ItemNameJa,
                             IconLink = itemData?.IconLink,
                             WikiLink = itemData?.WikiLink
                         };
@@ -310,6 +313,7 @@ public class UserProgressManager
                         StationId = station.Id,
                         StationNameEn = station.NameEn,
                         StationNameKo = station.NameKo,
+                        StationNameJa = station.NameJa,
                         Level = level.Level,
                         Count = req.Count,
                         FoundInRaid = req.FoundInRaid

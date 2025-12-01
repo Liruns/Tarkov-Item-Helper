@@ -317,8 +317,8 @@ public partial class MainWindow : Window
 
     private void ShowQuestDetails(TaskData quest)
     {
-        var primaryName = _loc.GetDisplayName(quest.NameEn, quest.NameKo);
-        var secondaryName = _loc.GetSecondaryName(quest.NameEn, quest.NameKo);
+        var primaryName = _loc.GetDisplayName(quest.NameEn, quest.NameKo, quest.NameJa);
+        var secondaryName = _loc.GetSecondaryName(quest.NameEn, quest.NameKo, quest.NameJa);
 
         TxtQuestDetailTitle.Text = primaryName;
         TxtQuestDetailSubtitle.Text = $"{secondaryName}\n{quest.TraderName} | {_loc.Level} {quest.MinPlayerLevel}\nID: {quest.Id}";
@@ -422,7 +422,7 @@ public partial class MainWindow : Window
         };
         panel.Children.Add(checkMark);
 
-        var primaryName = _loc.GetDisplayName(prereq.NameEn, prereq.NameKo);
+        var primaryName = _loc.GetDisplayName(prereq.NameEn, prereq.NameKo, prereq.NameJa);
         var name = new TextBlock
         {
             Text = $"{primaryName} ({prereq.TraderName})",
@@ -483,7 +483,7 @@ public partial class MainWindow : Window
                 itemPanel.Children.Add(iconBorder);
 
                 var itemDisplayName = itemData != null
-                    ? _loc.GetDisplayName(itemData.NameEn, itemData.NameKo)
+                    ? _loc.GetDisplayName(itemData.NameEn, itemData.NameKo, itemData.NameJa)
                     : item.ItemId;
                 var itemName = new TextBlock
                 {
@@ -676,8 +676,8 @@ public partial class MainWindow : Window
             var prereqs = TaskDatasetManager.GetAllPrerequisites(dataset, quest.Id);
             var incompletePrereqs = prereqs.Where(id => !_progressManager.IsQuestCompleted(id)).ToList();
 
-            var questDisplayName = _loc.GetDisplayName(quest.NameEn, quest.NameKo);
-            var message = _loc.FormatSetInProgressConfirm(quest.NameEn, quest.NameKo) + "\n\n";
+            var questDisplayName = _loc.GetDisplayName(quest.NameEn, quest.NameKo, quest.NameJa);
+            var message = _loc.FormatSetInProgressConfirm(quest.NameEn, quest.NameKo, quest.NameJa) + "\n\n";
             if (incompletePrereqs.Count > 0)
             {
                 message += _loc.FormatPrerequisiteCompleteCount(incompletePrereqs.Count) + "\n\n";
@@ -686,7 +686,7 @@ public partial class MainWindow : Window
                     var prereq = _progressManager.GetQuest(prereqId);
                     if (prereq != null)
                     {
-                        var prereqName = _loc.GetDisplayName(prereq.NameEn, prereq.NameKo);
+                        var prereqName = _loc.GetDisplayName(prereq.NameEn, prereq.NameKo, prereq.NameJa);
                         message += $"  - {prereqName}\n";
                     }
                 }
@@ -742,8 +742,8 @@ public partial class MainWindow : Window
 
     private void ShowHideoutDetails(HideoutStationViewModel vm)
     {
-        var primaryName = _loc.GetDisplayName(vm.Station.NameEn, vm.Station.NameKo);
-        var secondaryName = _loc.GetSecondaryName(vm.Station.NameEn, vm.Station.NameKo);
+        var primaryName = _loc.GetDisplayName(vm.Station.NameEn, vm.Station.NameKo, vm.Station.NameJa);
+        var secondaryName = _loc.GetSecondaryName(vm.Station.NameEn, vm.Station.NameKo, vm.Station.NameJa);
         TxtHideoutDetailTitle.Text = $"{primaryName}";
         TxtHideoutDetailSubtitle.Text = secondaryName;
 
@@ -796,7 +796,7 @@ public partial class MainWindow : Window
             {
                 var currentLevel = _progressManager.GetHideoutLevel(req.StationId);
                 var isMet = currentLevel >= req.Level;
-                var stationName = _loc.GetDisplayName(req.StationNameEn, req.StationNameKo);
+                var stationName = _loc.GetDisplayName(req.StationNameEn, req.StationNameKo, req.StationNameJa);
                 AddRequirementItem($"{stationName} Lv.{req.Level}", isMet);
             }
         }
@@ -894,11 +894,11 @@ public partial class MainWindow : Window
 
         // Name - localized
         var primaryName = itemData != null
-            ? _loc.GetDisplayName(itemData.NameEn, itemData.NameKo)
-            : _loc.GetDisplayName(req.ItemNameEn, req.ItemNameKo);
+            ? _loc.GetDisplayName(itemData.NameEn, itemData.NameKo, itemData.NameJa)
+            : _loc.GetDisplayName(req.ItemNameEn, req.ItemNameKo, req.ItemNameJa);
         var secondaryName = itemData != null
-            ? _loc.GetSecondaryName(itemData.NameEn, itemData.NameKo)
-            : _loc.GetSecondaryName(req.ItemNameEn, req.ItemNameKo);
+            ? _loc.GetSecondaryName(itemData.NameEn, itemData.NameKo, itemData.NameJa)
+            : _loc.GetSecondaryName(req.ItemNameEn, req.ItemNameKo, req.ItemNameJa);
 
         var namePanel = new StackPanel { Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         namePanel.Children.Add(new TextBlock { Text = primaryName, FontWeight = FontWeights.SemiBold });
@@ -1067,8 +1067,8 @@ public partial class MainWindow : Window
 
     private void ShowItemDetails(RequiredItemSummary item)
     {
-        var primaryName = _loc.GetDisplayName(item.ItemNameEn, item.ItemNameKo);
-        var secondaryName = _loc.GetSecondaryName(item.ItemNameEn, item.ItemNameKo);
+        var primaryName = _loc.GetDisplayName(item.ItemNameEn, item.ItemNameKo, item.ItemNameJa);
+        var secondaryName = _loc.GetSecondaryName(item.ItemNameEn, item.ItemNameKo, item.ItemNameJa);
 
         TxtItemDetailTitle.Text = primaryName;
         TxtItemDetailSubtitle.Text = $"{secondaryName}\n{_loc.FormatTotalDetails(item.TotalCount, item.QuestNormalCount + item.QuestFirCount, item.HideoutNormalCount + item.HideoutFirCount)}";
@@ -1131,8 +1131,8 @@ public partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         // Quest info - localized
-        var primaryName = _loc.GetDisplayName(source.QuestNameEn, source.QuestNameKo);
-        var secondaryName = _loc.GetSecondaryName(source.QuestNameEn, source.QuestNameKo);
+        var primaryName = _loc.GetDisplayName(source.QuestNameEn, source.QuestNameKo, source.QuestNameJa);
+        var secondaryName = _loc.GetSecondaryName(source.QuestNameEn, source.QuestNameKo, source.QuestNameJa);
 
         var infoPanel = new StackPanel();
         infoPanel.Children.Add(new TextBlock
@@ -1222,8 +1222,8 @@ public partial class MainWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         // Hideout info - localized
-        var primaryName = _loc.GetDisplayName(source.StationNameEn, source.StationNameKo);
-        var secondaryName = _loc.GetSecondaryName(source.StationNameEn, source.StationNameKo);
+        var primaryName = _loc.GetDisplayName(source.StationNameEn, source.StationNameKo, source.StationNameJa);
+        var secondaryName = _loc.GetSecondaryName(source.StationNameEn, source.StationNameKo, source.StationNameJa);
 
         var infoPanel = new StackPanel();
 
@@ -1401,7 +1401,7 @@ public partial class MainWindow : Window
 
                 var quest = _progressManager.GetQuest(e.QuestId);
                 var questName = quest != null
-                    ? _loc.GetDisplayName(quest.NameEn, quest.NameKo)
+                    ? _loc.GetDisplayName(quest.NameEn, quest.NameKo, quest.NameJa)
                     : e.QuestId;
 
                 TxtStatus.Text = _loc.FormatQuestCompletedFromLog(questName);
@@ -1717,8 +1717,9 @@ public class LocalizedNameConverter : IMultiValueConverter
 
         var nameEn = values[0]?.ToString() ?? string.Empty;
         var nameKo = values[1]?.ToString() ?? string.Empty;
+        var nameJa = values.Length > 2 ? values[2]?.ToString() : null;
 
-        return Services.LocalizationService.Instance.GetDisplayName(nameEn, nameKo);
+        return Services.LocalizationService.Instance.GetDisplayName(nameEn, nameKo, nameJa);
     }
 
     public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
@@ -1735,8 +1736,9 @@ public class LocalizedSecondaryNameConverter : IMultiValueConverter
 
         var nameEn = values[0]?.ToString() ?? string.Empty;
         var nameKo = values[1]?.ToString() ?? string.Empty;
+        var nameJa = values.Length > 2 ? values[2]?.ToString() : null;
 
-        return Services.LocalizationService.Instance.GetSecondaryName(nameEn, nameKo);
+        return Services.LocalizationService.Instance.GetSecondaryName(nameEn, nameKo, nameJa);
     }
 
     public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
