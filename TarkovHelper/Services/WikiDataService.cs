@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -136,6 +137,8 @@ namespace TarkovHelper.Services
                     foreach (Match match in matches)
                     {
                         var questName = FixMojibake(match.Groups[1].Value);
+                        // Decode HTML entities (e.g., &#39; -> ')
+                        questName = WebUtility.HtmlDecode(questName);
                         if (!seen.Contains(questName))
                         {
                             seen.Add(questName);
