@@ -14,12 +14,17 @@ namespace TarkovHelper.Services
         public static QuestProgressService Instance => _instance ??= new QuestProgressService();
 
         private const string ProgressFileName = "quest_progress.json";
+        private const string ObjectiveProgressFileName = "objective_progress.json";
 
         private Dictionary<string, QuestStatus> _questProgress = new();
         private Dictionary<string, TarkovTask> _tasksByNormalizedName = new();
         private List<TarkovTask> _allTasks = new();
 
+        // Objective progress: key = "questNormalizedName:objectiveIndex", value = completed
+        private Dictionary<string, bool> _objectiveProgress = new();
+
         public event EventHandler? ProgressChanged;
+        public event EventHandler<ObjectiveProgressChangedEventArgs>? ObjectiveProgressChanged;
 
         /// <summary>
         /// Initialize service with task data
@@ -39,6 +44,7 @@ namespace TarkovHelper.Services
             }
 
             LoadProgress();
+            LoadObjectiveProgress();
         }
 
         /// <summary>
@@ -260,6 +266,94 @@ namespace TarkovHelper.Services
             return (_allTasks.Count, locked, active, done, failed, levelLocked);
         }
 
+        #region Objective Progress
+
+        /// <summary>
+        /// Get objective completion status
+        /// </summary>
+        public bool IsObjectiveCompleted(string questNormalizedName, int objectiveIndex)
+        {
+            var key = $"{questNormalizedName}:{objectiveIndex}";
+            return _objectiveProgress.TryGetValue(key, out var completed) && completed;
+        }
+
+        /// <summary>
+        /// Set objective completion status
+        /// </summary>
+        public void SetObjectiveCompleted(string questNormalizedName, int objectiveIndex, bool completed)
+        {
+            var key = $"{questNormalizedName}:{objectiveIndex}";
+
+            if (completed)
+            {
+                _objectiveProgress[key] = true;
+            }
+            else
+            {
+                _objectiveProgress.Remove(key);
+            }
+
+            SaveObjectiveProgress();
+            ObjectiveProgressChanged?.Invoke(this, new ObjectiveProgressChangedEventArgs(questNormalizedName, objectiveIndex, completed));
+        }
+
+        /// <summary>
+        /// Get all completed objective indices for a quest
+        /// </summary>
+        public HashSet<int> GetCompletedObjectives(string questNormalizedName)
+        {
+            var result = new HashSet<int>();
+            var prefix = $"{questNormalizedName}:";
+
+            foreach (var kvp in _objectiveProgress)
+            {
+                if (kvp.Key.StartsWith(prefix) && kvp.Value)
+                {
+                    var indexStr = kvp.Key.Substring(prefix.Length);
+                    if (int.TryParse(indexStr, out var index))
+                    {
+                        result.Add(index);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Clear all objective progress for a quest
+        /// </summary>
+        public void ClearObjectiveProgress(string questNormalizedName)
+        {
+            var prefix = $"{questNormalizedName}:";
+            var keysToRemove = _objectiveProgress.Keys.Where(k => k.StartsWith(prefix)).ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                _objectiveProgress.Remove(key);
+            }
+
+            if (keysToRemove.Count > 0)
+            {
+                SaveObjectiveProgress();
+                ObjectiveProgressChanged?.Invoke(this, new ObjectiveProgressChangedEventArgs(questNormalizedName, -1, false));
+            }
+        }
+
+        /// <summary>
+        /// Get objective completion count for a quest
+        /// </summary>
+        public (int Completed, int Total) GetObjectiveProgress(TarkovTask task)
+        {
+            if (task.NormalizedName == null || task.Objectives == null)
+                return (0, 0);
+
+            var completedSet = GetCompletedObjectives(task.NormalizedName);
+            return (completedSet.Count, task.Objectives.Count);
+        }
+
+        #endregion
+
         #region Persistence
 
         private void SaveProgress()
@@ -320,6 +414,68 @@ namespace TarkovHelper.Services
             }
         }
 
+        private void SaveObjectiveProgress()
+        {
+            try
+            {
+                var filePath = Path.Combine(AppEnv.DataPath, ObjectiveProgressFileName);
+                Directory.CreateDirectory(AppEnv.DataPath);
+
+                var options = new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                };
+
+                var json = JsonSerializer.Serialize(_objectiveProgress, options);
+                File.WriteAllText(filePath, json);
+            }
+            catch
+            {
+                // Ignore save failures
+            }
+        }
+
+        private void LoadObjectiveProgress()
+        {
+            try
+            {
+                var filePath = Path.Combine(AppEnv.DataPath, ObjectiveProgressFileName);
+
+                if (!File.Exists(filePath))
+                    return;
+
+                var json = File.ReadAllText(filePath);
+                var progressData = JsonSerializer.Deserialize<Dictionary<string, bool>>(json);
+
+                if (progressData != null)
+                {
+                    _objectiveProgress = progressData;
+                }
+            }
+            catch
+            {
+                // Use empty progress on load failure
+                _objectiveProgress.Clear();
+            }
+        }
+
         #endregion
+    }
+
+    /// <summary>
+    /// Event args for objective progress changes
+    /// </summary>
+    public class ObjectiveProgressChangedEventArgs : EventArgs
+    {
+        public string QuestNormalizedName { get; }
+        public int ObjectiveIndex { get; }
+        public bool IsCompleted { get; }
+
+        public ObjectiveProgressChangedEventArgs(string questNormalizedName, int objectiveIndex, bool isCompleted)
+        {
+            QuestNormalizedName = questNormalizedName;
+            ObjectiveIndex = objectiveIndex;
+            IsCompleted = isCompleted;
+        }
     }
 }
