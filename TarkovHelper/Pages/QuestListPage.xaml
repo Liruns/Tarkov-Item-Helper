@@ -304,6 +304,7 @@
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal" Margin="0,4"
                                                     Cursor="Hand"
+                                                    Opacity="{Binding ItemOpacity}"
                                                     MouseLeftButtonDown="ItemName_Click">
                                             <StackPanel.Style>
                                                 <Style TargetType="StackPanel">
@@ -319,22 +320,33 @@
                                             <Border Width="32" Height="32" CornerRadius="4"
                                                     Background="{StaticResource BackgroundMediumBrush}"
                                                     Margin="0,0,8,0">
-                                                <Image Source="{Binding IconSource}"
-                                                       Width="28" Height="28"
-                                                       Stretch="Uniform"
-                                                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                <Grid>
+                                                    <Image Source="{Binding IconSource}"
+                                                           Width="28" Height="28"
+                                                           Stretch="Uniform"
+                                                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                    <!-- Fulfilled checkmark overlay -->
+                                                    <TextBlock Text="&#x2713;" FontSize="16" FontWeight="Bold"
+                                                               Foreground="{StaticResource SuccessBrush}"
+                                                               HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                               Margin="0,0,1,0"
+                                                               Visibility="{Binding FulfilledVisibility}"/>
+                                                </Grid>
                                             </Border>
                                             <!-- Item Info -->
                                             <StackPanel VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding DisplayText}" FontSize="12">
+                                                    <TextBlock Text="{Binding DisplayText}" FontSize="12"
+                                                               TextDecorations="{Binding TextDecorations}">
                                                         <TextBlock.Style>
                                                             <Style TargetType="TextBlock">
                                                                 <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
                                                                 <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsFulfilled}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                                                    </DataTrigger>
                                                                     <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=StackPanel}}" Value="True">
                                                                         <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
-                                                                        <Setter Property="TextDecorations" Value="Underline"/>
                                                                     </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>

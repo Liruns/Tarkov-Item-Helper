@@ -39,6 +39,15 @@ namespace TarkovHelper.Pages
         public int FIRCount { get; set; }
         public bool HasMixedFIR => FIRCount > 0 && FIRCount < TotalCount;
 
+        // Item identifier for fulfillment check
+        public string ItemNormalizedName { get; set; } = string.Empty;
+
+        // Fulfillment status
+        public bool IsFulfilled { get; set; }
+        public TextDecorationCollection? TextDecorations => IsFulfilled ? System.Windows.TextDecorations.Strikethrough : null;
+        public double ItemOpacity => IsFulfilled ? 0.6 : 1.0;
+        public Visibility FulfilledVisibility => IsFulfilled ? Visibility.Visible : Visibility.Collapsed;
+
         public static string FormatCountDisplay(string itemName, int totalCount, int firCount)
         {
             if (firCount == 0)
@@ -56,6 +65,7 @@ namespace TarkovHelper.Pages
         private readonly LocalizationService _loc = LocalizationService.Instance;
         private readonly HideoutProgressService _progressService = HideoutProgressService.Instance;
         private readonly ImageCacheService _imageCache = ImageCacheService.Instance;
+        private readonly ItemInventoryService _inventoryService = ItemInventoryService.Instance;
         private List<HideoutModuleViewModel> _allModuleViewModels = new();
         private bool _isInitializing = true;
         private bool _isUnloaded = false;
@@ -331,10 +341,19 @@ namespace TarkovHelper.Pages
                     foreach (var itemReq in nextLevel.ItemRequirements)
                     {
                         var itemName = GetLocalizedItemName(itemReq);
+
+                        // Calculate fulfillment status
+                        var requiredFir = itemReq.FoundInRaid ? itemReq.Count : 0;
+                        var fulfillmentInfo = _inventoryService.GetFulfillmentInfo(
+                            itemReq.ItemNormalizedName, itemReq.Count, requiredFir);
+                        var isFulfilled = fulfillmentInfo.Status == Models.ItemFulfillmentStatus.Fulfilled;
+
                         var vm = new RequirementViewModel
                         {
                             DisplayText = $"{itemName} x{itemReq.Count}",
-                            FoundInRaid = itemReq.FoundInRaid
+                            FoundInRaid = itemReq.FoundInRaid,
+                            ItemNormalizedName = itemReq.ItemNormalizedName,
+                            IsFulfilled = isFulfilled
                         };
 
                         if (!string.IsNullOrEmpty(itemReq.IconLink))
@@ -419,13 +438,20 @@ namespace TarkovHelper.Pages
                     var totalCount = kvp.Value.TotalCount;
                     var firCount = kvp.Value.FIRCount;
 
+                    // Calculate fulfillment status
+                    var fulfillmentInfo = _inventoryService.GetFulfillmentInfo(
+                        kvp.Value.Item.ItemNormalizedName, totalCount, firCount);
+                    var isFulfilled = fulfillmentInfo.Status == Models.ItemFulfillmentStatus.Fulfilled;
+
                     var vm = new RequirementViewModel
                     {
                         DisplayText = RequirementViewModel.FormatCountDisplay(itemName, totalCount, firCount),
                         TotalCount = totalCount,
                         FIRCount = firCount,
                         // Only show FIR badge if ALL items are FIR (not mixed)
-                        FoundInRaid = firCount > 0 && firCount == totalCount
+                        FoundInRaid = firCount > 0 && firCount == totalCount,
+                        ItemNormalizedName = kvp.Value.Item.ItemNormalizedName,
+                        IsFulfilled = isFulfilled
                     };
 
                     if (!string.IsNullOrEmpty(kvp.Value.Item.IconLink))

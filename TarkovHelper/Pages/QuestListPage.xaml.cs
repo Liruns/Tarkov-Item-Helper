@@ -42,6 +42,12 @@ namespace TarkovHelper.Pages
 
         // Navigation identifier
         public string ItemNormalizedName { get; set; } = string.Empty;
+
+        // Fulfillment status
+        public bool IsFulfilled { get; set; }
+        public TextDecorationCollection? TextDecorations => IsFulfilled ? System.Windows.TextDecorations.Strikethrough : null;
+        public double ItemOpacity => IsFulfilled ? 0.6 : 1.0;
+        public Visibility FulfilledVisibility => IsFulfilled ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -61,6 +67,7 @@ namespace TarkovHelper.Pages
         private readonly LocalizationService _loc = LocalizationService.Instance;
         private readonly QuestProgressService _progressService = QuestProgressService.Instance;
         private readonly ImageCacheService _imageCache = ImageCacheService.Instance;
+        private readonly ItemInventoryService _inventoryService = ItemInventoryService.Instance;
         private List<QuestViewModel> _allQuestViewModels = new();
         private List<string> _traders = new();
         private List<string> _maps = new();
@@ -1211,11 +1218,18 @@ namespace TarkovHelper.Pages
             {
                 if (_isUnloaded) return; // Check if page was unloaded
 
+                // Calculate fulfillment status
+                var requiredFir = item.FoundInRaid ? item.Amount : 0;
+                var fulfillmentInfo = _inventoryService.GetFulfillmentInfo(
+                    item.ItemNormalizedName, item.Amount, requiredFir);
+                var isFulfilled = fulfillmentInfo.Status == Models.ItemFulfillmentStatus.Fulfilled;
+
                 var vm = new RequiredItemViewModel
                 {
                     FoundInRaid = item.FoundInRaid,
                     RequirementType = item.Requirement,
-                    ItemNormalizedName = item.ItemNormalizedName // For navigation
+                    ItemNormalizedName = item.ItemNormalizedName, // For navigation
+                    IsFulfilled = isFulfilled
                 };
 
                 // Get localized item name

@@ -222,18 +222,39 @@
                                         <ItemsControl x:Name="NextLevelItemsList" Margin="0,0,0,12">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                                                    <StackPanel Orientation="Horizontal" Margin="0,4"
+                                                                Opacity="{Binding ItemOpacity}">
                                                         <!-- Item Icon -->
                                                         <Border Width="28" Height="28" CornerRadius="3"
                                                                 Background="{StaticResource BackgroundMediumBrush}"
                                                                 Margin="0,0,8,0">
-                                                            <Image Source="{Binding IconSource}"
-                                                                   Width="24" Height="24"
-                                                                   Stretch="Uniform"/>
+                                                            <Grid>
+                                                                <Image Source="{Binding IconSource}"
+                                                                       Width="24" Height="24"
+                                                                       Stretch="Uniform"/>
+                                                                <!-- Fulfilled checkmark overlay -->
+                                                                <TextBlock Text="&#x2713;" FontSize="14" FontWeight="Bold"
+                                                                           Foreground="{StaticResource SuccessBrush}"
+                                                                           HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                                           Margin="0,0,1,0"
+                                                                           Visibility="{Binding FulfilledVisibility}"/>
+                                                            </Grid>
                                                         </Border>
                                                         <TextBlock Text="{Binding DisplayText}"
-                                                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="14"
-                                                                   VerticalAlignment="Center"/>
+                                                                   TextDecorations="{Binding TextDecorations}"
+                                                                   FontSize="14"
+                                                                   VerticalAlignment="Center">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsFulfilled}" Value="True">
+                                                                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                         <!-- FIR Badge -->
                                                         <Border Padding="5,2" CornerRadius="2" Margin="6,0,0,0"
                                                                 Background="{StaticResource WarningBrush}"
@@ -300,18 +321,39 @@
                                 <ItemsControl x:Name="TotalRemainingItemsList">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4">
+                                            <StackPanel Orientation="Horizontal" Margin="0,4"
+                                                        Opacity="{Binding ItemOpacity}">
                                                 <!-- Item Icon -->
                                                 <Border Width="28" Height="28" CornerRadius="3"
                                                         Background="{StaticResource BackgroundMediumBrush}"
                                                         Margin="0,0,8,0">
-                                                    <Image Source="{Binding IconSource}"
-                                                           Width="24" Height="24"
-                                                           Stretch="Uniform"/>
+                                                    <Grid>
+                                                        <Image Source="{Binding IconSource}"
+                                                               Width="24" Height="24"
+                                                               Stretch="Uniform"/>
+                                                        <!-- Fulfilled checkmark overlay -->
+                                                        <TextBlock Text="&#x2713;" FontSize="14" FontWeight="Bold"
+                                                                   Foreground="{StaticResource SuccessBrush}"
+                                                                   HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                                   Margin="0,0,1,0"
+                                                                   Visibility="{Binding FulfilledVisibility}"/>
+                                                    </Grid>
                                                 </Border>
                                                 <TextBlock Text="{Binding DisplayText}"
-                                                           Foreground="{StaticResource TextPrimaryBrush}" FontSize="14"
-                                                           VerticalAlignment="Center"/>
+                                                           TextDecorations="{Binding TextDecorations}"
+                                                           FontSize="14"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsFulfilled}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                                 <!-- FIR Badge -->
                                                 <Border Padding="5,2" CornerRadius="2" Margin="6,0,0,0"
                                                         Background="{StaticResource WarningBrush}"
