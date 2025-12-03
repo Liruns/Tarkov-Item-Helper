@@ -8,75 +8,133 @@
              Background="{StaticResource BackgroundDarkBrush}">
 
     <UserControl.Resources>
-        <!-- Item List Item Template -->
+        <!-- Small Button Style for Quantity Controls -->
+        <Style x:Key="QuantityButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="MinWidth" Value="28"/>
+            <Setter Property="MinHeight" Value="22"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="1,0"/>
+        </Style>
+
+        <!-- Item List Item Template with Inventory Controls -->
         <DataTemplate x:Key="ItemListTemplate">
-            <Border x:Name="ItemBorder" Padding="12,8" BorderThickness="0,0,0,1"
+            <Border x:Name="ItemBorder" Padding="12,6" BorderThickness="0,0,0,1"
                     BorderBrush="{StaticResource BorderBrush}"
-                    Background="Transparent">
+                    Background="Transparent"
+                    Opacity="{Binding ItemOpacity}">
                 <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="40"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="90"/>
-                        <ColumnDefinition Width="90"/>
-                        <ColumnDefinition Width="90"/>
+                        <ColumnDefinition Width="100"/>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="70"/>
                     </Grid.ColumnDefinitions>
 
                     <!-- Item Icon -->
-                    <Border Grid.Column="0" Width="36" Height="36"
+                    <Border Grid.Column="0" Grid.RowSpan="2" Width="36" Height="36"
                             CornerRadius="4" Background="{StaticResource BackgroundLightBrush}"
                             VerticalAlignment="Center">
-                        <Image Source="{Binding IconSource}"
-                               Width="32" Height="32"
-                               Stretch="Uniform"
-                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <Grid>
+                            <Image Source="{Binding IconSource}"
+                                   Width="32" Height="32"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <!-- Fulfilled checkmark overlay -->
+                            <TextBlock Text="&#x2713;" FontSize="20" FontWeight="Bold"
+                                       Foreground="{StaticResource SuccessBrush}"
+                                       HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                       Margin="0,0,2,0"
+                                       Visibility="{Binding FulfilledVisibility}"/>
+                        </Grid>
                     </Border>
 
                     <!-- Item Name -->
-                    <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="1" Grid.Row="0" Margin="12,0,8,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding DisplayName}" FontSize="14"
+                            <TextBlock Text="{Binding DisplayName}" FontSize="13"
                                        Foreground="{StaticResource TextPrimaryBrush}"
-                                       TextTrimming="CharacterEllipsis"/>
-                            <Border Padding="5,2" CornerRadius="2" Margin="8,0,0,0"
+                                       TextTrimming="CharacterEllipsis"
+                                       TextDecorations="{Binding NameTextDecorations}"/>
+                            <Border Padding="4,1" CornerRadius="2" Margin="6,0,0,0"
                                     Background="{StaticResource WarningBrush}"
                                     Visibility="{Binding FirVisibility}">
-                                <TextBlock Text="FIR" FontSize="10" Foreground="White"/>
+                                <TextBlock Text="FIR" FontSize="9" Foreground="White"/>
                             </Border>
                         </StackPanel>
-                        <TextBlock Text="{Binding SubtitleName}" FontSize="11"
+                        <TextBlock Text="{Binding SubtitleName}" FontSize="10"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    Visibility="{Binding SubtitleVisibility}"
                                    TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
 
+                    <!-- Owned Quantity Display -->
+                    <StackPanel Grid.Column="2" Grid.Row="0" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="Owned: " FontSize="10"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding OwnedDisplay}" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource SuccessBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Quick Quantity Buttons Row -->
+                    <StackPanel Grid.Column="1" Grid.Row="1" Grid.ColumnSpan="2"
+                                Orientation="Horizontal" Margin="12,4,0,0">
+                        <TextBlock Text="FIR:" FontSize="9" Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <Button Content="-1" Style="{StaticResource QuantityButtonStyle}"
+                                Click="BtnFirMinus1_Click"/>
+                        <TextBlock Text="{Binding OwnedFirQuantity}" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimaryBrush}" MinWidth="20"
+                                   TextAlignment="Center" VerticalAlignment="Center" Margin="2,0"/>
+                        <Button Content="+1" Style="{StaticResource QuantityButtonStyle}"
+                                Click="BtnFirPlus1_Click"/>
+
+                        <TextBlock Text="Non:" FontSize="9" Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center" Margin="10,0,4,0"/>
+                        <Button Content="-1" Style="{StaticResource QuantityButtonStyle}"
+                                Click="BtnNonFirMinus1_Click"/>
+                        <TextBlock Text="{Binding OwnedNonFirQuantity}" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimaryBrush}" MinWidth="20"
+                                   TextAlignment="Center" VerticalAlignment="Center" Margin="2,0"/>
+                        <Button Content="+1" Style="{StaticResource QuantityButtonStyle}"
+                                Click="BtnNonFirPlus1_Click"/>
+                    </StackPanel>
+
                     <!-- Quest Count -->
-                    <StackPanel Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="Quest" FontSize="10"
+                    <StackPanel Grid.Column="3" Grid.RowSpan="2" VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="Quest" FontSize="9"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    HorizontalAlignment="Center"/>
-                        <TextBlock Text="{Binding QuestDisplay}" FontSize="14"
+                        <TextBlock Text="{Binding QuestDisplay}" FontSize="13"
                                    Foreground="{StaticResource TextPrimaryBrush}"
                                    HorizontalAlignment="Center" FontWeight="SemiBold"/>
                     </StackPanel>
 
                     <!-- Hideout Count -->
-                    <StackPanel Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="Hideout" FontSize="10"
+                    <StackPanel Grid.Column="4" Grid.RowSpan="2" VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="Hideout" FontSize="9"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    HorizontalAlignment="Center"/>
-                        <TextBlock Text="{Binding HideoutDisplay}" FontSize="14"
+                        <TextBlock Text="{Binding HideoutDisplay}" FontSize="13"
                                    Foreground="{StaticResource TextPrimaryBrush}"
                                    HorizontalAlignment="Center" FontWeight="SemiBold"/>
                     </StackPanel>
 
                     <!-- Total Count -->
-                    <StackPanel Grid.Column="5" VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="Total" FontSize="10"
+                    <StackPanel Grid.Column="5" Grid.RowSpan="2" VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="Need" FontSize="9"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    HorizontalAlignment="Center"/>
-                        <TextBlock Text="{Binding TotalDisplay}" FontSize="14"
+                        <TextBlock Text="{Binding TotalDisplay}" FontSize="13"
                                    Foreground="{StaticResource AccentBrush}"
                                    HorizontalAlignment="Center" FontWeight="Bold"/>
                     </StackPanel>
@@ -98,7 +156,20 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <ContentPresenter/>
+                        <Border x:Name="Border" Background="{TemplateBinding Background}"
+                                BorderThickness="0,0,0,0">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLightBrush}"/>
+                                <Setter TargetName="Border" Property="BorderThickness" Value="3,0,0,0"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundMediumBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -137,27 +208,44 @@
                 <!-- Filter Toggles -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <!-- Source Filter -->
-                    <ComboBox x:Name="CmbSource" Width="120" Margin="0,0,16,0"
+                    <ComboBox x:Name="CmbSource" Width="100" Margin="0,0,8,0"
                               SelectionChanged="CmbSource_SelectionChanged">
                         <ComboBoxItem Content="All" Tag="All" IsSelected="True"/>
                         <ComboBoxItem Content="Quest" Tag="Quest"/>
                         <ComboBoxItem Content="Hideout" Tag="Hideout"/>
                     </ComboBox>
 
+                    <!-- Fulfillment Filter -->
+                    <ComboBox x:Name="CmbFulfillment" Width="100" Margin="0,0,8,0"
+                              SelectionChanged="CmbFulfillment_SelectionChanged">
+                        <ComboBoxItem Content="All Status" Tag="All" IsSelected="True"/>
+                        <ComboBoxItem Content="Not Started" Tag="NotStarted"/>
+                        <ComboBoxItem Content="In Progress" Tag="InProgress"/>
+                        <ComboBoxItem Content="Fulfilled" Tag="Fulfilled"/>
+                    </ComboBox>
+
                     <!-- FIR Filter -->
                     <CheckBox x:Name="ChkFirOnly" Content="FIR Only"
                               Foreground="{StaticResource TextPrimaryBrush}"
                               VerticalContentAlignment="Center"
-                              Margin="0,0,16,0" Cursor="Hand"
+                              Margin="0,0,8,0" Cursor="Hand"
+                              Checked="Filter_Changed" Unchecked="Filter_Changed"/>
+
+                    <!-- Hide Fulfilled -->
+                    <CheckBox x:Name="ChkHideFulfilled" Content="Hide Fulfilled"
+                              Foreground="{StaticResource TextPrimaryBrush}"
+                              VerticalContentAlignment="Center"
+                              Margin="0,0,8,0" Cursor="Hand"
                               Checked="Filter_Changed" Unchecked="Filter_Changed"/>
 
                     <!-- Sort By -->
-                    <ComboBox x:Name="CmbSort" Width="120"
+                    <ComboBox x:Name="CmbSort" Width="110"
                               SelectionChanged="CmbSort_SelectionChanged">
                         <ComboBoxItem Content="Name" Tag="Name" IsSelected="True"/>
                         <ComboBoxItem Content="Total Count" Tag="Total"/>
                         <ComboBoxItem Content="Quest Count" Tag="Quest"/>
-                        <ComboBoxItem Content="Hideout Count" Tag="Hideout"/>
+                        <ComboBoxItem Content="Hideout" Tag="Hideout"/>
+                        <ComboBoxItem Content="Progress" Tag="Progress"/>
                     </ComboBox>
                 </StackPanel>
             </Grid>
@@ -304,7 +392,7 @@
                                     </StackPanel>
 
                                     <StackPanel Grid.Column="2" HorizontalAlignment="Center">
-                                        <TextBlock Text="Total" FontSize="11"
+                                        <TextBlock Text="Need" FontSize="11"
                                                    Foreground="{StaticResource TextSecondaryBrush}"
                                                    HorizontalAlignment="Center"/>
                                         <TextBlock x:Name="TxtDetailTotalCount" FontSize="18" FontWeight="Bold"
@@ -312,6 +400,113 @@
                                                    HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Grid>
+                            </Border>
+
+                            <!-- Inventory Input Section -->
+                            <TextBlock Text="Your Inventory" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       Margin="0,0,0,8"/>
+                            <Border Background="{StaticResource BackgroundDarkBrush}"
+                                    CornerRadius="4" Padding="12" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <!-- FIR Quantity Row -->
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="80"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border Padding="4,2" CornerRadius="2" Margin="0,0,6,0"
+                                                    Background="{StaticResource WarningBrush}">
+                                                <TextBlock Text="FIR" FontSize="9" Foreground="White"/>
+                                            </Border>
+                                            <TextBlock Text="Qty:" FontSize="12"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button Content="-5" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailFirMinus5_Click"/>
+                                            <Button Content="-1" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailFirMinus1_Click"/>
+                                            <Border Background="{StaticResource BackgroundMediumBrush}"
+                                                    CornerRadius="4" Padding="8,4" Margin="4,0"
+                                                    MinWidth="40">
+                                                <TextBlock x:Name="TxtDetailOwnedFir" Text="0"
+                                                           FontSize="14" FontWeight="Bold"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                                           HorizontalAlignment="Center"/>
+                                            </Border>
+                                            <Button Content="+1" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailFirPlus1_Click"/>
+                                            <Button Content="+5" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailFirPlus5_Click"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Non-FIR Quantity Row -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="80"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="Non-FIR:" FontSize="12"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center"/>
+
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button Content="-5" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailNonFirMinus5_Click"/>
+                                            <Button Content="-1" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailNonFirMinus1_Click"/>
+                                            <Border Background="{StaticResource BackgroundMediumBrush}"
+                                                    CornerRadius="4" Padding="8,4" Margin="4,0"
+                                                    MinWidth="40">
+                                                <TextBlock x:Name="TxtDetailOwnedNonFir" Text="0"
+                                                           FontSize="14" FontWeight="Bold"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                                           HorizontalAlignment="Center"/>
+                                            </Border>
+                                            <Button Content="+1" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailNonFirPlus1_Click"/>
+                                            <Button Content="+5" Style="{StaticResource QuantityButtonStyle}"
+                                                    Click="BtnDetailNonFirPlus5_Click"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Fulfillment Status -->
+                                    <Border Margin="0,12,0,0" Padding="8" CornerRadius="4"
+                                            Background="{StaticResource BackgroundMediumBrush}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="Progress" FontSize="10"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                <ProgressBar x:Name="DetailProgressBar"
+                                                             Height="6" Margin="0,4,8,0"
+                                                             Minimum="0" Maximum="100" Value="0"
+                                                             Foreground="{StaticResource AccentBrush}"
+                                                             Background="{StaticResource BackgroundDarkBrush}"/>
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock x:Name="TxtDetailFulfillmentStatus"
+                                                           Text="Not Started"
+                                                           FontSize="12" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           HorizontalAlignment="Right"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
                             </Border>
 
                             <!-- Quest Requirements Section -->
@@ -324,7 +519,7 @@
                                     <ItemsControl x:Name="QuestRequirementsList">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border Padding="4" Margin="0,2"
+                                                <Border x:Name="QuestItemBorder" Padding="4" Margin="0,2"
                                                         Background="{StaticResource BackgroundMediumBrush}"
                                                         CornerRadius="4">
                                                     <Grid>
@@ -334,10 +529,24 @@
                                                             <ColumnDefinition Width="Auto"/>
                                                         </Grid.ColumnDefinitions>
 
-                                                        <StackPanel Grid.Column="0" Margin="4,0">
-                                                            <TextBlock Text="{Binding QuestName}"
-                                                                       Foreground="{StaticResource TextPrimaryBrush}"
-                                                                       FontSize="12" TextWrapping="Wrap"/>
+                                                        <StackPanel Grid.Column="0" Margin="4,0"
+                                                                    Cursor="Hand"
+                                                                    MouseLeftButtonDown="QuestName_Click">
+                                                            <TextBlock x:Name="QuestNameText"
+                                                                       Text="{Binding QuestName}"
+                                                                       FontSize="12" TextWrapping="Wrap">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=StackPanel}}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                                                                <Setter Property="TextDecorations" Value="Underline"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                             <TextBlock Text="{Binding TraderName}"
                                                                        Foreground="{StaticResource TextSecondaryBrush}"
                                                                        FontSize="10"/>

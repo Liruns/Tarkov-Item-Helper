@@ -103,6 +103,16 @@ namespace TarkovHelper.Models
         public List<QuestChangeInfo> QuestsToComplete { get; set; } = new();
 
         /// <summary>
+        /// List of quests that are currently in progress (started but not completed/failed)
+        /// </summary>
+        public List<TarkovTask> InProgressQuests { get; set; } = new();
+
+        /// <summary>
+        /// List of quests that were completed (from log events)
+        /// </summary>
+        public List<TarkovTask> CompletedQuests { get; set; } = new();
+
+        /// <summary>
         /// Whether the sync was successful overall
         /// </summary>
         public bool Success => Errors.Count == 0 || TotalEventsFound > 0;

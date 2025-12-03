@@ -23,6 +23,11 @@ namespace TarkovHelper.Models
         /// <summary>
         /// Failed (user marked as failed)
         /// </summary>
-        Failed
+        Failed,
+
+        /// <summary>
+        /// Prerequisites met but player level too low
+        /// </summary>
+        LevelLocked
     }
 }

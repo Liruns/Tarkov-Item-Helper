@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _loc.LanguageChanged += OnLanguageChanged;
+        _settingsService.PlayerLevelChanged += OnPlayerLevelChanged;
 
         // Apply dark title bar
         SourceInitialized += (s, e) => EnableDarkTitleBar();
@@ -87,6 +88,9 @@ public partial class MainWindow : Window
             AppLanguage.JA => 2,
             _ => 0
         };
+
+        // Initialize player level UI
+        UpdatePlayerLevelUI();
 
         UpdateAllLocalizedText();
 
@@ -283,6 +287,53 @@ public partial class MainWindow : Window
             PageContent.Content = _itemsPage;
         }
     }
+
+    #region Player Level
+
+    /// <summary>
+    /// Update player level UI
+    /// </summary>
+    private void UpdatePlayerLevelUI()
+    {
+        var level = _settingsService.PlayerLevel;
+        TxtPlayerLevel.Text = level.ToString();
+
+        // Disable buttons at min/max level
+        BtnLevelDown.IsEnabled = level > SettingsService.MinPlayerLevel;
+        BtnLevelUp.IsEnabled = level < SettingsService.MaxPlayerLevel;
+    }
+
+    /// <summary>
+    /// Handle player level decrease
+    /// </summary>
+    private void BtnLevelDown_Click(object sender, RoutedEventArgs e)
+    {
+        _settingsService.PlayerLevel--;
+    }
+
+    /// <summary>
+    /// Handle player level increase
+    /// </summary>
+    private void BtnLevelUp_Click(object sender, RoutedEventArgs e)
+    {
+        _settingsService.PlayerLevel++;
+    }
+
+    /// <summary>
+    /// Handle player level change from settings service
+    /// </summary>
+    private void OnPlayerLevelChanged(object? sender, int newLevel)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            UpdatePlayerLevelUI();
+
+            // Refresh quest list if visible
+            _questListPage?.RefreshDisplay();
+        });
+    }
+
+    #endregion
 
     /// <summary>
     /// Open Buy me a coffee page
@@ -590,6 +641,36 @@ public partial class MainWindow : Window
 
     #endregion
 
+    #region Cross-Tab Navigation
+
+    /// <summary>
+    /// Navigate to Quests tab and select a specific quest
+    /// </summary>
+    public void NavigateToQuest(string questNormalizedName)
+    {
+        // Switch to Quests tab
+        TabQuests.IsChecked = true;
+        PageContent.Content = _questListPage;
+
+        // Request quest selection
+        _questListPage?.SelectQuest(questNormalizedName);
+    }
+
+    /// <summary>
+    /// Navigate to Items tab and select a specific item
+    /// </summary>
+    public void NavigateToItem(string itemNormalizedName)
+    {
+        // Switch to Items tab
+        TabItems.IsChecked = true;
+        PageContent.Content = _itemsPage;
+
+        // Request item selection
+        _itemsPage?.SelectItem(itemNormalizedName);
+    }
+
+    #endregion
+
     #region Quest Log Sync
 
     /// <summary>
@@ -661,7 +742,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// Sync quest progress from logs
     /// </summary>
-    private async void BtnSyncQuest_Click(object sender, RoutedEventArgs e)
+    private void BtnSyncQuest_Click(object sender, RoutedEventArgs e)
     {
         var logPath = _settingsService.LogFolderPath;
         if (string.IsNullOrEmpty(logPath) || !Directory.Exists(logPath))
@@ -679,8 +760,199 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Hide settings and show loading
+        // Hide settings overlay
         HideSettingsOverlay();
+
+        // Show wipe warning if not hidden
+        if (!_settingsService.HideWipeWarning)
+        {
+            ShowWipeWarningDialog(logPath);
+        }
+        else
+        {
+            // Proceed directly with sync
+            PerformQuestSync(logPath);
+        }
+    }
+
+    /// <summary>
+    /// Show wipe warning dialog
+    /// </summary>
+    private void ShowWipeWarningDialog(string logPath)
+    {
+        // Update localized text
+        UpdateWipeWarningLocalizedText();
+
+        // Set log path
+        TxtWipeWarningLogPath.Text = logPath;
+
+        // Reset checkbox
+        ChkHideWipeWarning.IsChecked = false;
+
+        WipeWarningOverlay.Visibility = Visibility.Visible;
+
+        var blurAnimation = new DoubleAnimation(0, 8, TimeSpan.FromMilliseconds(200));
+        BlurEffect.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, blurAnimation);
+    }
+
+    /// <summary>
+    /// Hide wipe warning dialog
+    /// </summary>
+    private void HideWipeWarningDialog()
+    {
+        var blurAnimation = new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(200));
+        blurAnimation.Completed += (s, e) =>
+        {
+            WipeWarningOverlay.Visibility = Visibility.Collapsed;
+        };
+        BlurEffect.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, blurAnimation);
+    }
+
+    /// <summary>
+    /// Close wipe warning dialog when clicking outside
+    /// </summary>
+    private void WipeWarningOverlay_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource == WipeWarningOverlay)
+        {
+            HideWipeWarningDialog();
+        }
+    }
+
+    /// <summary>
+    /// Close wipe warning dialog button click
+    /// </summary>
+    private void BtnCloseWipeWarning_Click(object sender, RoutedEventArgs e)
+    {
+        HideWipeWarningDialog();
+    }
+
+    /// <summary>
+    /// Update wipe warning dialog localized text
+    /// </summary>
+    private void UpdateWipeWarningLocalizedText()
+    {
+        TxtWipeWarningTitle.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "퀘스트 동기화 전 확인",
+            AppLanguage.JA => "クエスト同期前の確認",
+            _ => "Before Quest Sync"
+        };
+
+        TxtWipeWarningMessage.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "최근 계정 초기화(와이프)를 진행하셨나요?",
+            AppLanguage.JA => "最近アカウントをリセット（ワイプ）しましたか？",
+            _ => "Have you recently reset your account (wipe)?"
+        };
+
+        TxtWipeWarningDesc.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "계정 초기화 후 동기화를 진행하면 이전 시즌의 로그가 섞여 퀘스트 진행 상태가 올바르지 않게 표시될 수 있습니다.",
+            AppLanguage.JA => "アカウントリセット後に同期すると、以前のシーズンのログが混在し、クエストの進行状況が正しく表示されない場合があります。",
+            _ => "If you sync after a wipe, logs from the previous season may mix and quest progress may be displayed incorrectly."
+        };
+
+        TxtLogFolderPathLabel.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "📁 로그 폴더 위치:",
+            AppLanguage.JA => "📁 ログフォルダの場所:",
+            _ => "📁 Log folder location:"
+        };
+
+        TxtWipeWarningRecommendation.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "💡 권장 조치: 계정 초기화 이전 날짜의 로그 폴더를 삭제하거나 다른 위치로 백업해 주세요.",
+            AppLanguage.JA => "💡 推奨: ワイプ前の日付のログフォルダを削除するか、別の場所にバックアップしてください。",
+            _ => "💡 Recommended: Delete or backup log folders dated before the wipe."
+        };
+
+        ChkHideWipeWarning.Content = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "이 안내를 다시 보지 않기",
+            AppLanguage.JA => "この案内を再び表示しない",
+            _ => "Don't show this again"
+        };
+
+        BtnOpenLogFolder.Content = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "폴더 열기",
+            AppLanguage.JA => "フォルダを開く",
+            _ => "Open Folder"
+        };
+
+        BtnContinueSync.Content = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "계속 진행",
+            AppLanguage.JA => "続行",
+            _ => "Continue"
+        };
+    }
+
+    /// <summary>
+    /// Open log folder in explorer
+    /// </summary>
+    private void BtnOpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var logPath = _settingsService.LogFolderPath;
+        if (string.IsNullOrEmpty(logPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start("explorer.exe", logPath);
+        }
+        catch (Exception)
+        {
+            // Copy path to clipboard if can't open
+            try
+            {
+                Clipboard.SetText(logPath);
+                MessageBox.Show(
+                    _loc.CurrentLanguage switch
+                    {
+                        AppLanguage.KO => "폴더를 열 수 없습니다. 경로가 클립보드에 복사되었습니다.",
+                        AppLanguage.JA => "フォルダを開けませんでした。パスがクリップボードにコピーされました。",
+                        _ => "Could not open folder. Path has been copied to clipboard."
+                    },
+                    _loc.CurrentLanguage switch { AppLanguage.KO => "알림", AppLanguage.JA => "通知", _ => "Notice" },
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch
+            {
+                // Ignore clipboard errors
+            }
+        }
+    }
+
+    /// <summary>
+    /// Continue with sync after wipe warning
+    /// </summary>
+    private void BtnContinueSync_Click(object sender, RoutedEventArgs e)
+    {
+        // Save hide warning preference
+        if (ChkHideWipeWarning.IsChecked == true)
+        {
+            _settingsService.HideWipeWarning = true;
+        }
+
+        HideWipeWarningDialog();
+
+        var logPath = _settingsService.LogFolderPath;
+        if (!string.IsNullOrEmpty(logPath))
+        {
+            PerformQuestSync(logPath);
+        }
+    }
+
+    /// <summary>
+    /// Perform the actual quest sync
+    /// </summary>
+    private async void PerformQuestSync(string logPath)
+    {
         ShowLoadingOverlay(_loc.CurrentLanguage switch
         {
             AppLanguage.KO => "로그 파일 스캔 중...",
@@ -699,7 +971,8 @@ public partial class MainWindow : Window
 
             HideLoadingOverlay();
 
-            if (result.QuestsToComplete.Count == 0)
+            // Show result dialog even if no quests to complete (to show in-progress quests)
+            if (result.QuestsToComplete.Count == 0 && result.InProgressQuests.Count == 0)
             {
                 MessageBox.Show(
                     _loc.CurrentLanguage switch
@@ -859,26 +1132,42 @@ public partial class MainWindow : Window
         // Update dialog text
         TxtSyncResultTitle.Text = _loc.CurrentLanguage switch
         {
-            AppLanguage.KO => "퀘스트 동기화 결과",
-            AppLanguage.JA => "クエスト同期結果",
-            _ => "Quest Sync Result"
-        };
-
-        TxtSyncSummary.Text = _loc.CurrentLanguage switch
-        {
-            AppLanguage.KO => "다음 퀘스트가 완료 처리됩니다:",
-            AppLanguage.JA => "以下のクエストが完了としてマークされます:",
-            _ => "The following quests will be marked as completed:"
+            AppLanguage.KO => "퀘스트 동기화 완료",
+            AppLanguage.JA => "クエスト同期完了",
+            _ => "Quest Sync Complete"
         };
 
         var prereqCount = result.QuestsToComplete.Count(q => q.IsPrerequisite);
         var directCount = result.QuestsToComplete.Count - prereqCount;
+        var inProgressCount = result.InProgressQuests.Count;
+
+        // Update column headers
+        TxtCompletedQuestsHeader.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => $"완료된 퀘스트 ({result.QuestsToComplete.Count})",
+            AppLanguage.JA => $"完了したクエスト ({result.QuestsToComplete.Count})",
+            _ => $"Completed Quests ({result.QuestsToComplete.Count})"
+        };
+
+        TxtInProgressQuestsHeader.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => $"진행중 퀘스트 ({inProgressCount})",
+            AppLanguage.JA => $"進行中のクエスト ({inProgressCount})",
+            _ => $"In Progress ({inProgressCount})"
+        };
+
+        TxtSyncSummary.Text = _loc.CurrentLanguage switch
+        {
+            AppLanguage.KO => "요약:",
+            AppLanguage.JA => "概要:",
+            _ => "Summary:"
+        };
 
         TxtSyncStats.Text = _loc.CurrentLanguage switch
         {
-            AppLanguage.KO => $"총 {result.TotalEventsFound}개 이벤트 발견 | 직접 완료: {directCount} | 선행 퀘스트: {prereqCount}",
-            AppLanguage.JA => $"合計{result.TotalEventsFound}イベント発見 | 直接完了: {directCount} | 前提クエスト: {prereqCount}",
-            _ => $"Found {result.TotalEventsFound} events | Direct: {directCount} | Prerequisites: {prereqCount}"
+            AppLanguage.KO => $"├─ 로그에서 발견된 이벤트: {result.TotalEventsFound}\n├─ 자동 완료된 선행 퀘스트: {prereqCount}\n└─ 매칭 실패한 퀘스트 ID: {result.UnmatchedQuestIds.Count}",
+            AppLanguage.JA => $"├─ ログで見つかったイベント: {result.TotalEventsFound}\n├─ 自動完了した前提クエスト: {prereqCount}\n└─ マッチング失敗したクエストID: {result.UnmatchedQuestIds.Count}",
+            _ => $"├─ Events found in logs: {result.TotalEventsFound}\n├─ Prerequisites auto-completed: {prereqCount}\n└─ Unmatched quest IDs: {result.UnmatchedQuestIds.Count}"
         };
 
         BtnCancelSync.Content = _loc.CurrentLanguage switch
@@ -895,7 +1184,10 @@ public partial class MainWindow : Window
             _ => "Confirm"
         };
 
+        // Set data sources
         SyncQuestList.ItemsSource = _pendingSyncChanges;
+        InProgressQuestList.ItemsSource = result.InProgressQuests;
+
         SyncResultOverlay.Visibility = Visibility.Visible;
 
         var blurAnimation = new DoubleAnimation(0, 8, TimeSpan.FromMilliseconds(200));

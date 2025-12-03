@@ -1,6 +1,9 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using TarkovHelper.Models;
 using TarkovHelper.Services;
@@ -8,9 +11,9 @@ using TarkovHelper.Services;
 namespace TarkovHelper.Pages
 {
     /// <summary>
-    /// Aggregated item view model for display
+    /// Aggregated item view model for display with inventory tracking
     /// </summary>
-    public class AggregatedItemViewModel
+    public class AggregatedItemViewModel : INotifyPropertyChanged
     {
         public string ItemId { get; set; } = string.Empty;
         public string ItemNormalizedName { get; set; } = string.Empty;
@@ -29,6 +32,117 @@ namespace TarkovHelper.Pages
         public string? IconLink { get; set; }
         public string? WikiLink { get; set; }
 
+        // Inventory quantities (user's owned items)
+        private int _ownedFirQuantity;
+        private int _ownedNonFirQuantity;
+
+        public int OwnedFirQuantity
+        {
+            get => _ownedFirQuantity;
+            set
+            {
+                if (_ownedFirQuantity != value)
+                {
+                    _ownedFirQuantity = value;
+                    OnPropertyChanged(nameof(OwnedFirQuantity));
+                    OnPropertyChanged(nameof(OwnedTotalQuantity));
+                    OnPropertyChanged(nameof(FulfillmentStatus));
+                    OnPropertyChanged(nameof(ProgressPercent));
+                    OnPropertyChanged(nameof(IsFulfilled));
+                    OnPropertyChanged(nameof(FulfilledVisibility));
+                    OnPropertyChanged(nameof(ItemOpacity));
+                    OnPropertyChanged(nameof(NameTextDecorations));
+                    OnPropertyChanged(nameof(OwnedDisplay));
+                }
+            }
+        }
+
+        public int OwnedNonFirQuantity
+        {
+            get => _ownedNonFirQuantity;
+            set
+            {
+                if (_ownedNonFirQuantity != value)
+                {
+                    _ownedNonFirQuantity = value;
+                    OnPropertyChanged(nameof(OwnedNonFirQuantity));
+                    OnPropertyChanged(nameof(OwnedTotalQuantity));
+                    OnPropertyChanged(nameof(FulfillmentStatus));
+                    OnPropertyChanged(nameof(ProgressPercent));
+                    OnPropertyChanged(nameof(IsFulfilled));
+                    OnPropertyChanged(nameof(FulfilledVisibility));
+                    OnPropertyChanged(nameof(ItemOpacity));
+                    OnPropertyChanged(nameof(NameTextDecorations));
+                    OnPropertyChanged(nameof(OwnedDisplay));
+                }
+            }
+        }
+
+        public int OwnedTotalQuantity => OwnedFirQuantity + OwnedNonFirQuantity;
+
+        // Fulfillment calculation
+        public ItemFulfillmentStatus FulfillmentStatus
+        {
+            get
+            {
+                if (TotalFIRCount > 0)
+                {
+                    // FIR is required
+                    if (OwnedFirQuantity >= TotalFIRCount)
+                        return ItemFulfillmentStatus.Fulfilled;
+                    if (OwnedTotalQuantity > 0)
+                        return ItemFulfillmentStatus.PartiallyFulfilled;
+                    return ItemFulfillmentStatus.NotStarted;
+                }
+                else
+                {
+                    // Non-FIR OK
+                    if (OwnedTotalQuantity >= TotalCount)
+                        return ItemFulfillmentStatus.Fulfilled;
+                    if (OwnedTotalQuantity > 0)
+                        return ItemFulfillmentStatus.PartiallyFulfilled;
+                    return ItemFulfillmentStatus.NotStarted;
+                }
+            }
+        }
+
+        public double ProgressPercent
+        {
+            get
+            {
+                if (TotalCount == 0) return 100;
+
+                if (TotalFIRCount > 0)
+                {
+                    return Math.Min(100, (double)OwnedFirQuantity / TotalFIRCount * 100);
+                }
+                else
+                {
+                    return Math.Min(100, (double)OwnedTotalQuantity / TotalCount * 100);
+                }
+            }
+        }
+
+        public bool IsFulfilled => FulfillmentStatus == ItemFulfillmentStatus.Fulfilled;
+        public Visibility FulfilledVisibility => IsFulfilled ? Visibility.Visible : Visibility.Collapsed;
+        public double ItemOpacity => IsFulfilled ? 0.5 : 1.0;
+        public TextDecorationCollection? NameTextDecorations => IsFulfilled ? TextDecorations.Strikethrough : null;
+
+        // Owned display string
+        public string OwnedDisplay
+        {
+            get
+            {
+                if (OwnedTotalQuantity == 0)
+                    return "0";
+                if (OwnedNonFirQuantity == 0)
+                    return $"{OwnedFirQuantity}F";
+                if (OwnedFirQuantity == 0)
+                    return OwnedNonFirQuantity.ToString();
+                return $"{OwnedFirQuantity}F+{OwnedNonFirQuantity}";
+            }
+        }
+
         // Display strings for UI - shows FIR/non-FIR breakdown
         public string QuestDisplay => QuestCount > 0 ? FormatCountDisplay(QuestCount, QuestFIRCount) : "0";
         public string HideoutDisplay => HideoutCount > 0 ? FormatCountDisplay(HideoutCount, HideoutFIRCount) : "0";
@@ -44,6 +158,10 @@ namespace TarkovHelper.Pages
             var nonFirCount = total - firCount;
             return $"{firCount}F+{nonFirCount}";
         }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        protected void OnPropertyChanged(string propertyName) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
     /// <summary>
@@ -60,6 +178,9 @@ namespace TarkovHelper.Pages
         public string AmountDisplay => $"x{Amount}";
         public Visibility FirVisibility => FoundInRaid ? Visibility.Visible : Visibility.Collapsed;
         public Visibility WikiButtonVisibility => Task != null ? Visibility.Visible : Visibility.Collapsed;
+
+        // Navigation identifier
+        public string QuestNormalizedName { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -98,10 +219,13 @@ namespace TarkovHelper.Pages
         private readonly LocalizationService _loc = LocalizationService.Instance;
         private readonly QuestProgressService _questProgressService = QuestProgressService.Instance;
         private readonly HideoutProgressService _hideoutProgressService = HideoutProgressService.Instance;
+        private readonly ItemInventoryService _inventoryService = ItemInventoryService.Instance;
         private readonly ImageCacheService _imageCache = ImageCacheService.Instance;
         private List<AggregatedItemViewModel> _allItemViewModels = new();
         private Dictionary<string, TarkovItem>? _itemLookup;
         private bool _isInitializing = true;
+        private bool _isDataLoaded = false;
+        private string? _pendingItemSelection = null;
 
         // Currency items should count by reference count, not total amount
         private static readonly HashSet<string> CurrencyItems = new(StringComparer.OrdinalIgnoreCase)
@@ -117,8 +241,24 @@ namespace TarkovHelper.Pages
             _loc.LanguageChanged += OnLanguageChanged;
             _questProgressService.ProgressChanged += OnProgressChanged;
             _hideoutProgressService.ProgressChanged += OnProgressChanged;
+            _inventoryService.InventoryChanged += OnInventoryChanged;
 
             Loaded += ItemsPage_Loaded;
+        }
+
+        private void OnInventoryChanged(object? sender, EventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                // Update inventory quantities in view models
+                foreach (var vm in _allItemViewModels)
+                {
+                    var inventory = _inventoryService.GetInventory(vm.ItemNormalizedName);
+                    vm.OwnedFirQuantity = inventory.FirQuantity;
+                    vm.OwnedNonFirQuantity = inventory.NonFirQuantity;
+                }
+                UpdateDetailPanel();
+            });
         }
 
         private async void ItemsPage_Loaded(object sender, RoutedEventArgs e)
@@ -139,7 +279,16 @@ namespace TarkovHelper.Pages
 
                 await LoadItemsAsync();
                 _isInitializing = false;
+                _isDataLoaded = true;
                 ApplyFilters();
+
+                // Process pending selection if any
+                if (!string.IsNullOrEmpty(_pendingItemSelection))
+                {
+                    var pendingName = _pendingItemSelection;
+                    _pendingItemSelection = null;
+                    SelectItemInternal(pendingName);
+                }
             }
             finally
             {
@@ -255,13 +404,18 @@ namespace TarkovHelper.Pages
 
             _allItemViewModels = mergedItems.Values.ToList();
 
-            // Load icons asynchronously
+            // Load icons and inventory data
             foreach (var vm in _allItemViewModels)
             {
                 if (!string.IsNullOrEmpty(vm.IconLink))
                 {
                     vm.IconSource = await _imageCache.GetItemIconAsync(vm.IconLink);
                 }
+
+                // Load inventory quantities
+                var inventory = _inventoryService.GetInventory(vm.ItemNormalizedName);
+                vm.OwnedFirQuantity = inventory.FirQuantity;
+                vm.OwnedNonFirQuantity = inventory.NonFirQuantity;
             }
         }
 
@@ -356,7 +510,9 @@ namespace TarkovHelper.Pages
         {
             var searchText = TxtSearch.Text?.Trim().ToLowerInvariant() ?? string.Empty;
             var sourceFilter = (CmbSource.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
+            var fulfillmentFilter = (CmbFulfillment.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
             var firOnly = ChkFirOnly.IsChecked == true;
+            var hideFulfilled = ChkHideFulfilled.IsChecked == true;
             var sortBy = (CmbSort.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Name";
 
             var filtered = _allItemViewModels.Where(vm =>
@@ -379,6 +535,22 @@ namespace TarkovHelper.Pages
                 if (firOnly && !vm.FoundInRaid)
                     return false;
 
+                // Fulfillment filter
+                if (fulfillmentFilter != "All")
+                {
+                    var status = vm.FulfillmentStatus;
+                    if (fulfillmentFilter == "NotStarted" && status != ItemFulfillmentStatus.NotStarted)
+                        return false;
+                    if (fulfillmentFilter == "InProgress" && status != ItemFulfillmentStatus.PartiallyFulfilled)
+                        return false;
+                    if (fulfillmentFilter == "Fulfilled" && status != ItemFulfillmentStatus.Fulfilled)
+                        return false;
+                }
+
+                // Hide fulfilled filter
+                if (hideFulfilled && vm.IsFulfilled)
+                    return false;
+
                 return true;
             });
 
@@ -388,6 +560,7 @@ namespace TarkovHelper.Pages
                 "Total" => filtered.OrderByDescending(vm => vm.TotalCount).ThenBy(vm => vm.DisplayName),
                 "Quest" => filtered.OrderByDescending(vm => vm.QuestCount).ThenBy(vm => vm.DisplayName),
                 "Hideout" => filtered.OrderByDescending(vm => vm.HideoutCount).ThenBy(vm => vm.DisplayName),
+                "Progress" => filtered.OrderByDescending(vm => vm.ProgressPercent).ThenBy(vm => vm.DisplayName),
                 _ => filtered.OrderBy(vm => vm.DisplayName)
             };
 
@@ -399,13 +572,19 @@ namespace TarkovHelper.Pages
             var totalQuestCount = filteredList.Sum(i => i.QuestCount);
             var totalHideoutCount = filteredList.Sum(i => i.HideoutCount);
             var totalCount = filteredList.Sum(i => i.TotalCount);
-            var firCount = filteredList.Count(i => i.FoundInRaid);
+            var fulfilledCount = filteredList.Count(i => i.IsFulfilled);
+            var inProgressCount = filteredList.Count(i => i.FulfillmentStatus == ItemFulfillmentStatus.PartiallyFulfilled);
 
             TxtStats.Text = $"Showing {totalItems} items | " +
                            $"Quest: {totalQuestCount} | " +
                            $"Hideout: {totalHideoutCount} | " +
-                           $"Total: {totalCount} | " +
-                           $"FIR: {firCount}";
+                           $"Fulfilled: {fulfilledCount} | " +
+                           $"In Progress: {inProgressCount}";
+        }
+
+        private void CmbFulfillment_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_isInitializing) ApplyFilters();
         }
 
         private void TxtSearch_TextChanged(object sender, TextChangedEventArgs e)
@@ -426,6 +605,147 @@ namespace TarkovHelper.Pages
         private void CmbSort_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!_isInitializing) ApplyFilters();
+        }
+
+        /// <summary>
+        /// Select an item by its normalized name (for cross-tab navigation)
+        /// </summary>
+        public void SelectItem(string itemNormalizedName)
+        {
+            // If data is not loaded yet, save for later
+            if (!_isDataLoaded)
+            {
+                _pendingItemSelection = itemNormalizedName;
+                return;
+            }
+
+            SelectItemInternal(itemNormalizedName);
+        }
+
+        /// <summary>
+        /// Internal method to select an item (called when data is ready)
+        /// </summary>
+        private void SelectItemInternal(string itemNormalizedName)
+        {
+            // Reset filters to ensure the item is visible
+            ResetFiltersForNavigation();
+
+            // Find the item view model
+            var itemVm = _allItemViewModels.FirstOrDefault(vm =>
+                string.Equals(vm.ItemNormalizedName, itemNormalizedName, StringComparison.OrdinalIgnoreCase));
+
+            if (itemVm == null) return;
+
+            // Apply filters to update the list
+            ApplyFilters();
+
+            // Use Dispatcher to ensure UI is updated before selection
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                // Select the item in the list
+                LstItems.SelectedItem = itemVm;
+
+                // Scroll to make it visible
+                LstItems.ScrollIntoView(itemVm);
+
+                // Force UI update
+                LstItems.UpdateLayout();
+
+                // Update detail panel directly
+                _selectedItem = itemVm;
+                _selectedItemNormalizedName = itemVm.ItemNormalizedName;
+                ShowItemDetail(itemVm);
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        /// <summary>
+        /// Show detail panel for a specific item (used by navigation)
+        /// </summary>
+        private void ShowItemDetail(AggregatedItemViewModel itemVm)
+        {
+            if (itemVm == null)
+            {
+                TxtSelectItem.Visibility = Visibility.Visible;
+                DetailPanel.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            TxtSelectItem.Visibility = Visibility.Collapsed;
+            DetailPanel.Visibility = Visibility.Visible;
+
+            // Populate header
+            TxtDetailName.Text = itemVm.DisplayName;
+            TxtDetailSubtitle.Text = itemVm.SubtitleName;
+            TxtDetailSubtitle.Visibility = itemVm.SubtitleVisibility;
+            ImgDetailIcon.Source = itemVm.IconSource;
+
+            // Populate summary counts
+            TxtDetailQuestCount.Text = itemVm.QuestDisplay;
+            TxtDetailHideoutCount.Text = itemVm.HideoutDisplay;
+            TxtDetailTotalCount.Text = itemVm.TotalDisplay;
+
+            // Enable/disable wiki button
+            BtnWiki.IsEnabled = !string.IsNullOrEmpty(itemVm.WikiLink);
+
+            // Update inventory display
+            TxtDetailOwnedFir.Text = itemVm.OwnedFirQuantity.ToString();
+            TxtDetailOwnedNonFir.Text = itemVm.OwnedNonFirQuantity.ToString();
+
+            // Update fulfillment status display
+            var status = itemVm.FulfillmentStatus;
+            var statusText = status switch
+            {
+                ItemFulfillmentStatus.Fulfilled => "Fulfilled",
+                ItemFulfillmentStatus.PartiallyFulfilled => "In Progress",
+                _ => "Not Started"
+            };
+
+            TxtDetailFulfillmentStatus.Text = statusText;
+            TxtDetailFulfillmentStatus.Foreground = status switch
+            {
+                ItemFulfillmentStatus.Fulfilled => (Brush)FindResource("SuccessBrush"),
+                ItemFulfillmentStatus.PartiallyFulfilled => (Brush)FindResource("WarningBrush"),
+                _ => (Brush)FindResource("TextSecondaryBrush")
+            };
+
+            // Update progress bar
+            DetailProgressBar.Value = itemVm.ProgressPercent;
+
+            // Populate quest sources
+            var questSources = GetQuestSources(itemVm.ItemNormalizedName);
+            QuestRequirementsList.ItemsSource = questSources;
+            QuestSection.Visibility = questSources.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Populate hideout sources
+            var hideoutSources = GetHideoutSources(itemVm.ItemNormalizedName);
+            HideoutRequirementsList.ItemsSource = hideoutSources;
+            HideoutSection.Visibility = hideoutSources.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Reset filters for navigation to ensure target item is visible
+        /// </summary>
+        private void ResetFiltersForNavigation()
+        {
+            _isInitializing = true;
+
+            // Clear search text
+            TxtSearch.Text = "";
+
+            // Reset source filter to "All"
+            CmbSource.SelectedIndex = 0; // "All"
+
+            // Reset fulfillment filter to "All"
+            CmbFulfillment.SelectedIndex = 0; // "All Status"
+
+            // Uncheck filter checkboxes
+            ChkFirOnly.IsChecked = false;
+            ChkHideFulfilled.IsChecked = false;
+
+            // Reset sort to "Name"
+            CmbSort.SelectedIndex = 0;
+
+            _isInitializing = false;
         }
 
         private AggregatedItemViewModel? _selectedItem;
@@ -471,6 +791,9 @@ namespace TarkovHelper.Pages
             // Enable/disable wiki button
             BtnWiki.IsEnabled = !string.IsNullOrEmpty(_selectedItem.WikiLink);
 
+            // Update inventory display
+            UpdateDetailInventoryDisplay();
+
             // Populate quest sources
             var questSources = GetQuestSources(_selectedItem.ItemNormalizedName);
             QuestRequirementsList.ItemsSource = questSources;
@@ -508,13 +831,28 @@ namespace TarkovHelper.Pages
                             TraderName = traderName,
                             Amount = questItem.Amount,
                             FoundInRaid = questItem.FoundInRaid,
-                            Task = task
+                            Task = task,
+                            QuestNormalizedName = task.NormalizedName ?? string.Empty // For navigation
                         });
                     }
                 }
             }
 
             return sources;
+        }
+
+        /// <summary>
+        /// Handle click on quest name to navigate to Quests tab
+        /// </summary>
+        private void QuestName_Click(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is QuestItemSourceViewModel vm)
+            {
+                if (string.IsNullOrEmpty(vm.QuestNormalizedName)) return;
+
+                var mainWindow = Window.GetWindow(this) as MainWindow;
+                mainWindow?.NavigateToQuest(vm.QuestNormalizedName);
+            }
         }
 
         private List<HideoutItemSourceViewModel> GetHideoutSources(string itemNormalizedName)
@@ -615,5 +953,152 @@ namespace TarkovHelper.Pages
                 }
             }
         }
+
+        #region Inventory Quantity Controls
+
+        private void BtnFirMinus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustFirQuantity(sender, -5);
+        }
+
+        private void BtnFirMinus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustFirQuantity(sender, -1);
+        }
+
+        private void BtnFirPlus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustFirQuantity(sender, 1);
+        }
+
+        private void BtnFirPlus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustFirQuantity(sender, 5);
+        }
+
+        private void BtnNonFirMinus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustNonFirQuantity(sender, -5);
+        }
+
+        private void BtnNonFirMinus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustNonFirQuantity(sender, -1);
+        }
+
+        private void BtnNonFirPlus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustNonFirQuantity(sender, 1);
+        }
+
+        private void BtnNonFirPlus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustNonFirQuantity(sender, 5);
+        }
+
+        private void AdjustFirQuantity(object sender, int delta)
+        {
+            if (sender is Button btn && btn.DataContext is AggregatedItemViewModel vm)
+            {
+                _inventoryService.AdjustFirQuantity(vm.ItemNormalizedName, delta);
+                vm.OwnedFirQuantity = _inventoryService.GetFirQuantity(vm.ItemNormalizedName);
+            }
+        }
+
+        private void AdjustNonFirQuantity(object sender, int delta)
+        {
+            if (sender is Button btn && btn.DataContext is AggregatedItemViewModel vm)
+            {
+                _inventoryService.AdjustNonFirQuantity(vm.ItemNormalizedName, delta);
+                vm.OwnedNonFirQuantity = _inventoryService.GetNonFirQuantity(vm.ItemNormalizedName);
+            }
+        }
+
+        // Detail panel inventory adjustments (uses selected item)
+        private void BtnDetailFirMinus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailFirQuantity(-5);
+        }
+
+        private void BtnDetailFirMinus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailFirQuantity(-1);
+        }
+
+        private void BtnDetailFirPlus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailFirQuantity(1);
+        }
+
+        private void BtnDetailFirPlus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailFirQuantity(5);
+        }
+
+        private void BtnDetailNonFirMinus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailNonFirQuantity(-5);
+        }
+
+        private void BtnDetailNonFirMinus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailNonFirQuantity(-1);
+        }
+
+        private void BtnDetailNonFirPlus1_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailNonFirQuantity(1);
+        }
+
+        private void BtnDetailNonFirPlus5_Click(object sender, RoutedEventArgs e)
+        {
+            AdjustDetailNonFirQuantity(5);
+        }
+
+        private void AdjustDetailFirQuantity(int delta)
+        {
+            if (_selectedItem == null) return;
+            _inventoryService.AdjustFirQuantity(_selectedItem.ItemNormalizedName, delta);
+            _selectedItem.OwnedFirQuantity = _inventoryService.GetFirQuantity(_selectedItem.ItemNormalizedName);
+            UpdateDetailInventoryDisplay();
+        }
+
+        private void AdjustDetailNonFirQuantity(int delta)
+        {
+            if (_selectedItem == null) return;
+            _inventoryService.AdjustNonFirQuantity(_selectedItem.ItemNormalizedName, delta);
+            _selectedItem.OwnedNonFirQuantity = _inventoryService.GetNonFirQuantity(_selectedItem.ItemNormalizedName);
+            UpdateDetailInventoryDisplay();
+        }
+
+        private void UpdateDetailInventoryDisplay()
+        {
+            if (_selectedItem == null) return;
+
+            TxtDetailOwnedFir.Text = _selectedItem.OwnedFirQuantity.ToString();
+            TxtDetailOwnedNonFir.Text = _selectedItem.OwnedNonFirQuantity.ToString();
+
+            // Update fulfillment status display
+            var status = _selectedItem.FulfillmentStatus;
+            var statusText = status switch
+            {
+                ItemFulfillmentStatus.Fulfilled => "Fulfilled",
+                ItemFulfillmentStatus.PartiallyFulfilled => "In Progress",
+                _ => "Not Started"
+            };
+
+            TxtDetailFulfillmentStatus.Text = statusText;
+            TxtDetailFulfillmentStatus.Foreground = status switch
+            {
+                ItemFulfillmentStatus.Fulfilled => (Brush)FindResource("SuccessBrush"),
+                ItemFulfillmentStatus.PartiallyFulfilled => (Brush)FindResource("WarningBrush"),
+                _ => (Brush)FindResource("TextSecondaryBrush")
+            };
+
+            // Update progress bar
+            DetailProgressBar.Value = _selectedItem.ProgressPercent;
+        }
+
+        #endregion
     }
 }

@@ -72,7 +72,36 @@ namespace TarkovHelper.Services
             if (!ArePrerequisitesMet(task))
                 return QuestStatus.Locked;
 
+            // Check level requirement
+            if (!IsLevelRequirementMet(task))
+                return QuestStatus.LevelLocked;
+
             return QuestStatus.Active;
+        }
+
+        /// <summary>
+        /// Check if player level meets quest requirement
+        /// </summary>
+        public bool IsLevelRequirementMet(TarkovTask task)
+        {
+            // If no level requirement, always met
+            if (!task.RequiredLevel.HasValue || task.RequiredLevel.Value <= 0)
+                return true;
+
+            var playerLevel = SettingsService.Instance.PlayerLevel;
+            return playerLevel >= task.RequiredLevel.Value;
+        }
+
+        /// <summary>
+        /// Check if a quest is completed by its normalized name
+        /// Used for Collector quest progress calculation
+        /// </summary>
+        public bool IsQuestCompleted(string normalizedName)
+        {
+            var task = GetTask(normalizedName);
+            if (task == null) return false;
+
+            return GetStatus(task) == QuestStatus.Done;
         }
 
         /// <summary>
@@ -211,9 +240,9 @@ namespace TarkovHelper.Services
         /// <summary>
         /// Get count statistics for quest statuses
         /// </summary>
-        public (int Total, int Locked, int Active, int Done, int Failed) GetStatistics()
+        public (int Total, int Locked, int Active, int Done, int Failed, int LevelLocked) GetStatistics()
         {
-            int locked = 0, active = 0, done = 0, failed = 0;
+            int locked = 0, active = 0, done = 0, failed = 0, levelLocked = 0;
 
             foreach (var task in _allTasks)
             {
@@ -224,10 +253,11 @@ namespace TarkovHelper.Services
                     case QuestStatus.Active: active++; break;
                     case QuestStatus.Done: done++; break;
                     case QuestStatus.Failed: failed++; break;
+                    case QuestStatus.LevelLocked: levelLocked++; break;
                 }
             }
 
-            return (_allTasks.Count, locked, active, done, failed);
+            return (_allTasks.Count, locked, active, done, failed, levelLocked);
         }
 
         #region Persistence

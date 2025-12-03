@@ -387,6 +387,17 @@ namespace TarkovHelper.Services
             var processedQuests = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var questsToComplete = new List<QuestChangeInfo>();
 
+            // BUG FIX: Track quests that have Started events to exclude from auto-completion
+            // This prevents quests that are still in progress from being auto-completed
+            // when they appear as prerequisites of other started quests
+            var startedQuests = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var evt in events.Where(e => e.EventType == QuestEventType.Started))
+            {
+                var task = FindTaskByQuestId(tasksByQuestId, evt.QuestId);
+                if (task?.NormalizedName != null)
+                    startedQuests.Add(task.NormalizedName);
+            }
+
             // Process events in chronological order
             foreach (var evt in events)
             {
@@ -414,6 +425,8 @@ namespace TarkovHelper.Services
                         {
                             if (prereq.NormalizedName == null) continue;
                             if (processedQuests.Contains(prereq.NormalizedName)) continue;
+                            // BUG FIX: Skip prerequisites that are also started (still in progress)
+                            if (startedQuests.Contains(prereq.NormalizedName)) continue;
 
                             var currentStatus = progressService.GetStatus(prereq);
                             if (currentStatus != QuestStatus.Done)
@@ -454,6 +467,8 @@ namespace TarkovHelper.Services
                             {
                                 if (prereq.NormalizedName == null) continue;
                                 if (processedQuests.Contains(prereq.NormalizedName)) continue;
+                                // BUG FIX: Skip prerequisites that are started but not completed (still in progress)
+                                if (startedQuests.Contains(prereq.NormalizedName)) continue;
 
                                 var prereqStatus = progressService.GetStatus(prereq);
                                 if (prereqStatus != QuestStatus.Done)
@@ -489,6 +504,45 @@ namespace TarkovHelper.Services
             }
 
             result.QuestsToComplete = questsToComplete;
+
+            // Build InProgressQuests list: quests that are started but not completed/failed
+            var completedNormalizedNames = questsToComplete
+                .Where(q => q.ChangeType == QuestEventType.Completed && !q.IsPrerequisite)
+                .Select(q => q.NormalizedName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var failedNormalizedNames = questsToComplete
+                .Where(q => q.ChangeType == QuestEventType.Failed)
+                .Select(q => q.NormalizedName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var normalizedName in startedQuests)
+            {
+                // Skip if already completed or failed in this sync
+                if (completedNormalizedNames.Contains(normalizedName)) continue;
+                if (failedNormalizedNames.Contains(normalizedName)) continue;
+
+                var task = progressService.GetTask(normalizedName);
+                if (task != null)
+                {
+                    // Check if already done in saved progress
+                    var currentStatus = progressService.GetStatus(task);
+                    if (currentStatus != QuestStatus.Done)
+                    {
+                        result.InProgressQuests.Add(task);
+                    }
+                }
+            }
+
+            // Build CompletedQuests list from QuestsToComplete
+            foreach (var change in questsToComplete.Where(q => q.ChangeType == QuestEventType.Completed && !q.IsPrerequisite))
+            {
+                var task = progressService.GetTask(change.NormalizedName);
+                if (task != null)
+                {
+                    result.CompletedQuests.Add(task);
+                }
+            }
 
             progress?.Report($"Found {questsToComplete.Count} quests to update");
 

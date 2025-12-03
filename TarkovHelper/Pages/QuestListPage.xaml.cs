@@ -23,6 +23,8 @@ namespace TarkovHelper.Pages
         public string StatusText { get; set; } = string.Empty;
         public Brush StatusBackground { get; set; } = Brushes.Gray;
         public Visibility CompleteButtonVisibility { get; set; } = Visibility.Visible;
+        public bool IsKappaRequired { get; set; }
+        public Visibility KappaBadgeVisibility => IsKappaRequired ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -37,6 +39,9 @@ namespace TarkovHelper.Pages
         public string RequirementType { get; set; } = string.Empty;
         public Visibility RequirementTypeVisibility =>
             string.IsNullOrEmpty(RequirementType) ? Visibility.Collapsed : Visibility.Visible;
+
+        // Navigation identifier
+        public string ItemNormalizedName { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -63,12 +68,15 @@ namespace TarkovHelper.Pages
         private List<TarkovItem>? _itemData;
         private Dictionary<string, TarkovItem>? _itemLookup;
         private bool _isInitializing = true;
+        private bool _isDataLoaded = false;
+        private string? _pendingQuestSelection = null;
 
         // Status brushes
         private static readonly Brush LockedBrush = new SolidColorBrush(Color.FromRgb(102, 102, 102));
         private static readonly Brush ActiveBrush = new SolidColorBrush(Color.FromRgb(76, 175, 80));
         private static readonly Brush DoneBrush = new SolidColorBrush(Color.FromRgb(33, 150, 243));
         private static readonly Brush FailedBrush = new SolidColorBrush(Color.FromRgb(244, 67, 54));
+        private static readonly Brush LevelLockedBrush = new SolidColorBrush(Color.FromRgb(255, 152, 0)); // Orange for Level Locked
 
         public QuestListPage()
         {
@@ -81,12 +89,24 @@ namespace TarkovHelper.Pages
 
         private async void QuestListPage_Loaded(object sender, RoutedEventArgs e)
         {
+            // Skip if already loaded (prevents re-initialization on tab switching)
+            if (_isDataLoaded) return;
+
             await LoadMapsAsync();
             LoadQuests();
             PopulateTraderFilter();
             PopulateMapFilter();
             _isInitializing = false;
+            _isDataLoaded = true;
             ApplyFilters();
+
+            // Process pending selection if any
+            if (!string.IsNullOrEmpty(_pendingQuestSelection))
+            {
+                var pendingName = _pendingQuestSelection;
+                _pendingQuestSelection = null;
+                SelectQuestInternal(pendingName);
+            }
         }
 
         private async Task LoadMapsAsync()
@@ -129,6 +149,89 @@ namespace TarkovHelper.Pages
             UpdateDetailPanel();
         }
 
+        /// <summary>
+        /// Select a quest by its normalized name (for cross-tab navigation)
+        /// </summary>
+        public void SelectQuest(string questNormalizedName)
+        {
+            // If data is not loaded yet, save for later
+            if (!_isDataLoaded)
+            {
+                _pendingQuestSelection = questNormalizedName;
+                return;
+            }
+
+            SelectQuestInternal(questNormalizedName);
+        }
+
+        /// <summary>
+        /// Internal method to select a quest (called when data is ready)
+        /// </summary>
+        private void SelectQuestInternal(string questNormalizedName)
+        {
+            // Reset filters to ensure the quest is visible
+            ResetFiltersForNavigation();
+
+            // Find the quest view model
+            var questVm = _allQuestViewModels.FirstOrDefault(vm =>
+                string.Equals(vm.Task.NormalizedName, questNormalizedName, StringComparison.OrdinalIgnoreCase));
+
+            if (questVm == null) return;
+
+            // Disable selection changed event BEFORE ApplyFilters to prevent
+            // the detail panel from being hidden when ItemsSource changes
+            LstQuests.SelectionChanged -= LstQuests_SelectionChanged;
+
+            // Apply filters to update the list
+            ApplyFilters();
+
+            // Use Dispatcher to ensure UI is updated before selection
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    // Select the quest in the list
+                    LstQuests.SelectedItem = questVm;
+
+                    // Scroll to make it visible
+                    LstQuests.ScrollIntoView(questVm);
+
+                    // Force UI update
+                    LstQuests.UpdateLayout();
+
+                    // Force update detail panel with the specific quest
+                    UpdateDetailPanel(questVm);
+                }
+                finally
+                {
+                    // Re-enable selection changed event
+                    LstQuests.SelectionChanged += LstQuests_SelectionChanged;
+                }
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        /// <summary>
+        /// Reset filters for navigation to ensure target item is visible
+        /// </summary>
+        private void ResetFiltersForNavigation()
+        {
+            _isInitializing = true;
+
+            // Reset status filter to "All"
+            CmbStatus.SelectedIndex = 1; // "All"
+
+            // Clear search text
+            TxtSearch.Text = "";
+
+            // Reset other filters
+            ChkKappaOnly.IsChecked = false;
+            ChkItemRequired.IsChecked = false;
+            CmbTrader.SelectedIndex = 0; // "All Traders"
+            CmbMap.SelectedIndex = 0; // "All Maps"
+
+            _isInitializing = false;
+        }
+
         private void LoadQuests()
         {
             var tasks = _progressService.AllTasks;
@@ -151,10 +254,11 @@ namespace TarkovHelper.Pages
                 SubtitleVisibility = showSubtitle ? Visibility.Visible : Visibility.Collapsed,
                 TraderInitial = GetTraderInitial(task.Trader),
                 Status = status,
-                StatusText = GetStatusText(status),
+                StatusText = GetStatusText(status, task),
                 StatusBackground = GetStatusBrush(status),
-                CompleteButtonVisibility = status == QuestStatus.Active || status == QuestStatus.Locked
-                    ? Visibility.Visible : Visibility.Collapsed
+                CompleteButtonVisibility = status == QuestStatus.Active || status == QuestStatus.Locked || status == QuestStatus.LevelLocked
+                    ? Visibility.Visible : Visibility.Collapsed,
+                IsKappaRequired = task.ReqKappa
             };
         }
 
@@ -190,14 +294,20 @@ namespace TarkovHelper.Pages
             return trader.Length >= 2 ? trader[..2].ToUpper() : trader.ToUpper();
         }
 
-        private static string GetStatusText(QuestStatus status)
+        private string GetStatusText(QuestStatus status, TarkovTask? task = null)
         {
+            if (status == QuestStatus.LevelLocked && task?.RequiredLevel.HasValue == true)
+            {
+                return $"Lv.{task.RequiredLevel}";
+            }
+
             return status switch
             {
                 QuestStatus.Locked => "Locked",
                 QuestStatus.Active => "Active",
                 QuestStatus.Done => "Done",
                 QuestStatus.Failed => "Failed",
+                QuestStatus.LevelLocked => "Level",
                 _ => "Unknown"
             };
         }
@@ -210,6 +320,7 @@ namespace TarkovHelper.Pages
                 QuestStatus.Active => ActiveBrush,
                 QuestStatus.Done => DoneBrush,
                 QuestStatus.Failed => FailedBrush,
+                QuestStatus.LevelLocked => LevelLockedBrush,
                 _ => Brushes.Gray
             };
         }
@@ -231,9 +342,9 @@ namespace TarkovHelper.Pages
             {
                 var status = _progressService.GetStatus(vm.Task);
                 vm.Status = status;
-                vm.StatusText = GetStatusText(status);
+                vm.StatusText = GetStatusText(status, vm.Task);
                 vm.StatusBackground = GetStatusBrush(status);
-                vm.CompleteButtonVisibility = status == QuestStatus.Active || status == QuestStatus.Locked
+                vm.CompleteButtonVisibility = status == QuestStatus.Active || status == QuestStatus.Locked || status == QuestStatus.LevelLocked
                     ? Visibility.Visible : Visibility.Collapsed;
             }
         }
@@ -343,8 +454,31 @@ namespace TarkovHelper.Pages
 
             // Update statistics
             var stats = _progressService.GetStatistics();
-            TxtStats.Text = $"Showing {filtered.Count} of {stats.Total} quests | " +
-                           $"Active: {stats.Active} | Done: {stats.Done} | Locked: {stats.Locked} | Failed: {stats.Failed}";
+            var playerLevel = SettingsService.Instance.PlayerLevel;
+            TxtStats.Text = $"Lv.{playerLevel} | Showing {filtered.Count} of {stats.Total} quests | " +
+                           $"Active: {stats.Active} | Level: {stats.LevelLocked} | Done: {stats.Done} | Locked: {stats.Locked} | Failed: {stats.Failed}";
+
+            // Update Kappa progress gauge
+            UpdateKappaGauge();
+        }
+
+        private void UpdateKappaGauge()
+        {
+            try
+            {
+                var graphService = QuestGraphService.Instance;
+                var (completed, total, percentage) = graphService.GetCollectorProgress(
+                    normalizedName => _progressService.IsQuestCompleted(normalizedName));
+
+                TxtKappaGauge.Text = $"{completed}/{total}";
+                KappaGaugeBar.Width = (percentage / 100.0) * 120; // 120 is the gauge width
+            }
+            catch
+            {
+                // QuestGraphService not initialized yet
+                TxtKappaGauge.Text = "0/0";
+                KappaGaugeBar.Width = 0;
+            }
         }
 
         private void TxtSearch_TextChanged(object sender, TextChangedEventArgs e)
@@ -377,9 +511,9 @@ namespace TarkovHelper.Pages
             UpdateDetailPanel();
         }
 
-        private void UpdateDetailPanel()
+        private void UpdateDetailPanel(QuestViewModel? overrideVm = null)
         {
-            var selectedVm = LstQuests.SelectedItem as QuestViewModel;
+            var selectedVm = overrideVm ?? LstQuests.SelectedItem as QuestViewModel;
 
             if (selectedVm == null)
             {
@@ -418,10 +552,24 @@ namespace TarkovHelper.Pages
                 MapInfoPanel.Visibility = Visibility.Visible;
             }
 
-            // Requirements
+            // Kappa Progress Section (for Collector quest)
+            UpdateKappaProgressSection(task);
+
+            // Requirements - Level with current level comparison
             if (task.RequiredLevel.HasValue && task.RequiredLevel.Value > 0)
             {
-                TxtRequiredLevel.Text = $"Level {task.RequiredLevel}";
+                var playerLevel = SettingsService.Instance.PlayerLevel;
+                var reqLevel = task.RequiredLevel.Value;
+                if (playerLevel >= reqLevel)
+                {
+                    TxtRequiredLevel.Text = $"Level {reqLevel} (Current: {playerLevel})";
+                    TxtRequiredLevel.Foreground = (Brush)FindResource("TextPrimaryBrush");
+                }
+                else
+                {
+                    TxtRequiredLevel.Text = $"Level {reqLevel} (Current: {playerLevel})";
+                    TxtRequiredLevel.Foreground = LevelLockedBrush;
+                }
                 TxtRequiredLevel.Visibility = Visibility.Visible;
             }
             else
@@ -523,6 +671,128 @@ namespace TarkovHelper.Pages
             }
         }
 
+        #region Kappa Progress Section
+
+        private void UpdateKappaProgressSection(TarkovTask task)
+        {
+            // Check if this is the Collector quest
+            var isCollector = task.NormalizedName?.Equals("collector", StringComparison.OrdinalIgnoreCase) == true;
+
+            if (!isCollector)
+            {
+                KappaProgressSection.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            KappaProgressSection.Visibility = Visibility.Visible;
+
+            // Get Kappa progress
+            var graphService = QuestGraphService.Instance;
+            var (completed, total, percentage) = graphService.GetCollectorProgress(
+                normalizedName => _progressService.IsQuestCompleted(normalizedName));
+
+            // Update progress text
+            TxtKappaProgress.Text = $"Prerequisites: ({completed}/{total} completed)";
+            TxtKappaProgressPercent.Text = $"{percentage}%";
+
+            // Update progress bar width
+            KappaProgressBar.Width = (percentage / 100.0) * (KappaProgressBar.Parent as Grid)?.ActualWidth ?? 0;
+
+            // If parent grid not yet rendered, set it after layout
+            if (KappaProgressBar.Width == 0 && percentage > 0)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    var parentGrid = KappaProgressBar.Parent as Grid;
+                    if (parentGrid != null)
+                    {
+                        KappaProgressBar.Width = (percentage / 100.0) * parentGrid.ActualWidth;
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+        }
+
+        private void BtnShowKappaQuests_Click(object sender, RoutedEventArgs e)
+        {
+            var graphService = QuestGraphService.Instance;
+            var kappaQuests = graphService.GetKappaRequiredQuestsWithStatus(
+                normalizedName => _progressService.IsQuestCompleted(normalizedName));
+
+            // Create a popup window to show all Kappa required quests
+            var popupWindow = new Window
+            {
+                Title = "Kappa Required Quests",
+                Width = 500,
+                Height = 600,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = Window.GetWindow(this),
+                Background = (Brush)FindResource("BackgroundDarkBrush")
+            };
+
+            var scrollViewer = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var stackPanel = new StackPanel { Margin = new Thickness(16) };
+
+            // Header
+            var (completed, total, percentage) = graphService.GetCollectorProgress(
+                normalizedName => _progressService.IsQuestCompleted(normalizedName));
+            var headerText = new TextBlock
+            {
+                Text = $"Kappa Required Quests ({completed}/{total})",
+                FontSize = 18,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (Brush)FindResource("AccentBrush"),
+                Margin = new Thickness(0, 0, 0, 16)
+            };
+            stackPanel.Children.Add(headerText);
+
+            // Quest list
+            foreach (var (quest, isCompleted) in kappaQuests)
+            {
+                var (displayName, _, _) = GetLocalizedNames(quest);
+                var questPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 4) };
+
+                // Status indicator
+                var statusIndicator = new TextBlock
+                {
+                    Text = isCompleted ? "✓" : "○",
+                    FontSize = 14,
+                    Foreground = isCompleted ? DoneBrush : (Brush)FindResource("TextSecondaryBrush"),
+                    Width = 24,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                // Quest name
+                var questName = new TextBlock
+                {
+                    Text = displayName,
+                    FontSize = 13,
+                    Foreground = isCompleted ? (Brush)FindResource("TextSecondaryBrush") : (Brush)FindResource("TextPrimaryBrush"),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextDecorations = isCompleted ? TextDecorations.Strikethrough : null
+                };
+
+                // Trader
+                var traderText = new TextBlock
+                {
+                    Text = $"  ({quest.Trader})",
+                    FontSize = 11,
+                    Foreground = (Brush)FindResource("TextSecondaryBrush"),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                questPanel.Children.Add(statusIndicator);
+                questPanel.Children.Add(questName);
+                questPanel.Children.Add(traderText);
+                stackPanel.Children.Add(questPanel);
+            }
+
+            scrollViewer.Content = stackPanel;
+            popupWindow.Content = scrollViewer;
+            popupWindow.ShowDialog();
+        }
+
+        #endregion
+
         #region Guide Section
 
         private void UpdateGuideSection(TarkovTask task)
@@ -622,7 +892,8 @@ namespace TarkovHelper.Pages
                 var vm = new RequiredItemViewModel
                 {
                     FoundInRaid = item.FoundInRaid,
-                    RequirementType = item.Requirement
+                    RequirementType = item.Requirement,
+                    ItemNormalizedName = item.ItemNormalizedName // For navigation
                 };
 
                 // Get localized item name
@@ -645,6 +916,20 @@ namespace TarkovHelper.Pages
             {
                 RequiredItemsList.ItemsSource = itemVms;
             });
+        }
+
+        /// <summary>
+        /// Handle click on item name to navigate to Items tab
+        /// </summary>
+        private void ItemName_Click(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is RequiredItemViewModel vm)
+            {
+                if (string.IsNullOrEmpty(vm.ItemNormalizedName)) return;
+
+                var mainWindow = Window.GetWindow(this) as MainWindow;
+                mainWindow?.NavigateToItem(vm.ItemNormalizedName);
+            }
         }
 
         private string GetLocalizedItemName(string normalizedName)

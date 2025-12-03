@@ -410,6 +410,10 @@ namespace TarkovHelper.Services
             BuildBidirectionalRelationships(result);
             progressCallback?.Invoke("Built bidirectional quest relationships");
 
+            // Setup Collector quest prerequisites (reqKappa quests)
+            SetupCollectorQuestPrerequisites(result);
+            progressCallback?.Invoke("Setup Collector quest prerequisites");
+
             return (result, missingTasks);
         }
 
@@ -448,6 +452,38 @@ namespace TarkovHelper.Services
             }
 
             return resolved.Count > 0 ? resolved : null;
+        }
+
+        /// <summary>
+        /// Setup Collector quest prerequisites dynamically
+        /// Collector quest requires all reqKappa == true quests to be completed
+        /// </summary>
+        private static void SetupCollectorQuestPrerequisites(List<TarkovTask> tasks)
+        {
+            // Find Collector quest
+            var collectorQuest = tasks.FirstOrDefault(t =>
+                t.NormalizedName?.Equals("collector", StringComparison.OrdinalIgnoreCase) == true);
+
+            if (collectorQuest == null)
+                return;
+
+            // Collect all reqKappa quests (excluding Collector itself)
+            var kappaRequiredQuests = tasks
+                .Where(t => t.ReqKappa &&
+                            !t.NormalizedName?.Equals("collector", StringComparison.OrdinalIgnoreCase) == true)
+                .Select(t => t.NormalizedName!)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .ToList();
+
+            // Set Previous field (merge with existing)
+            collectorQuest.Previous ??= new List<string>();
+            foreach (var questName in kappaRequiredQuests)
+            {
+                if (!collectorQuest.Previous.Contains(questName, StringComparer.OrdinalIgnoreCase))
+                {
+                    collectorQuest.Previous.Add(questName);
+                }
+            }
         }
 
         /// <summary>

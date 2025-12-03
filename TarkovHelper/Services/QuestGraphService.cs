@@ -355,6 +355,53 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
+        /// Get Collector quest progress statistics
+        /// Returns the count and percentage of completed reqKappa quests
+        /// </summary>
+        /// <param name="isQuestCompleted">Function to check if a quest is completed by its normalizedName</param>
+        /// <returns>Tuple of (completed count, total count, percentage)</returns>
+        public (int Completed, int Total, int Percentage) GetCollectorProgress(Func<string, bool> isQuestCompleted)
+        {
+            EnsureInitialized();
+
+            var kappaQuests = _tasks!
+                .Where(t => t.ReqKappa && !string.IsNullOrEmpty(t.NormalizedName))
+                .ToList();
+
+            var completedCount = kappaQuests.Count(t => isQuestCompleted(t.NormalizedName!));
+            var total = kappaQuests.Count;
+            var percentage = total > 0 ? (completedCount * 100 / total) : 0;
+
+            return (completedCount, total, percentage);
+        }
+
+        /// <summary>
+        /// Get all reqKappa quests with their completion status
+        /// </summary>
+        /// <param name="isQuestCompleted">Function to check if a quest is completed</param>
+        /// <returns>List of tuples (quest, isCompleted)</returns>
+        public List<(TarkovTask Quest, bool IsCompleted)> GetKappaRequiredQuestsWithStatus(Func<string, bool> isQuestCompleted)
+        {
+            EnsureInitialized();
+
+            return _tasks!
+                .Where(t => t.ReqKappa && !string.IsNullOrEmpty(t.NormalizedName))
+                .Select(t => (t, isQuestCompleted(t.NormalizedName!)))
+                .OrderBy(x => x.Item2) // Incomplete first
+                .ThenBy(x => x.t.Trader)
+                .ThenBy(x => x.t.Name)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Check if a quest is the Collector quest
+        /// </summary>
+        public bool IsCollectorQuest(TarkovTask task)
+        {
+            return task.NormalizedName?.Equals("collector", StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        /// <summary>
         /// Get all Kappa-required quests in optimal completion order
         /// </summary>
         public List<TarkovTask> GetKappaPath()

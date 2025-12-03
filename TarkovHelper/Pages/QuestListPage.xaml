@@ -33,6 +33,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
                     <!-- Trader Icon Placeholder -->
@@ -55,8 +56,18 @@
                                    TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
 
+                    <!-- Kappa Badge -->
+                    <Border Grid.Column="2" Padding="4,2" CornerRadius="3"
+                            Background="#9C27B0"
+                            VerticalAlignment="Center" Margin="0,0,6,0"
+                            Visibility="{Binding KappaBadgeVisibility}"
+                            ToolTip="Required for Kappa Container">
+                        <TextBlock Text="κ" FontSize="10"
+                                   Foreground="White" FontWeight="Bold"/>
+                    </Border>
+
                     <!-- Status Badge -->
-                    <Border Grid.Column="2" Padding="8,3" CornerRadius="3"
+                    <Border Grid.Column="3" Padding="8,3" CornerRadius="3"
                             Background="{Binding StatusBackground}"
                             VerticalAlignment="Center" Margin="0,0,8,0">
                         <TextBlock Text="{Binding StatusText}" FontSize="10"
@@ -64,7 +75,7 @@
                     </Border>
 
                     <!-- Complete Button -->
-                    <Button Grid.Column="3" Content="Done" Padding="8,4"
+                    <Button Grid.Column="4" Content="Done" Padding="8,4"
                             FontSize="11" MinWidth="50"
                             Click="CompleteButton_Click"
                             Tag="{Binding}"
@@ -90,7 +101,20 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <ContentPresenter/>
+                        <Border x:Name="Border" Background="{TemplateBinding Background}"
+                                BorderThickness="0,0,0,0">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLightBrush}"/>
+                                <Setter TargetName="Border" Property="BorderThickness" Value="3,0,0,0"/>
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundMediumBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -147,11 +171,12 @@
                     </ComboBox>
 
                     <!-- Status Filter -->
-                    <ComboBox x:Name="CmbStatus" Width="100"
+                    <ComboBox x:Name="CmbStatus" Width="110"
                               SelectionChanged="CmbStatus_SelectionChanged">
                         <ComboBoxItem Content="Active" Tag="Active" IsSelected="True"/>
                         <ComboBoxItem Content="All" Tag="All"/>
                         <ComboBoxItem Content="Locked" Tag="Locked"/>
+                        <ComboBoxItem Content="Level Locked" Tag="LevelLocked"/>
                         <ComboBoxItem Content="Done" Tag="Done"/>
                         <ComboBoxItem Content="Failed" Tag="Failed"/>
                     </ComboBox>
@@ -161,10 +186,31 @@
 
         <!-- Statistics Bar -->
         <Border Grid.Row="1" Padding="12,6" Margin="0,0,0,12">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock x:Name="TxtStats" FontSize="12"
-                           Foreground="{StaticResource TextSecondaryBrush}"/>
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="TxtStats" Grid.Column="0" FontSize="12"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           VerticalAlignment="Center"/>
+
+                <!-- Kappa Progress Gauge -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="κ" FontSize="13" FontWeight="Bold"
+                               Foreground="#9C27B0" VerticalAlignment="Center"
+                               Margin="0,0,6,0"/>
+                    <Grid Width="120" Height="16" VerticalAlignment="Center">
+                        <Border Background="#333333" CornerRadius="3"/>
+                        <Border x:Name="KappaGaugeBar" Background="#9C27B0"
+                                CornerRadius="3" HorizontalAlignment="Left" Width="0"/>
+                        <TextBlock x:Name="TxtKappaGauge"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontSize="10" FontWeight="SemiBold" Foreground="White"/>
+                    </Grid>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- Main Content -->
@@ -243,6 +289,34 @@
                                        Foreground="{StaticResource TextSecondaryBrush}"/>
                             <TextBlock x:Name="TxtDetailMap" FontSize="12"
                                        Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </StackPanel>
+
+                        <!-- Kappa Progress Section (for Collector quest) -->
+                        <StackPanel x:Name="KappaProgressSection" Visibility="Collapsed" Margin="0,0,0,16">
+                            <TextBlock Text="Kappa Progress" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       Margin="0,0,0,8"/>
+                            <Border Background="{StaticResource BackgroundDarkBrush}"
+                                    CornerRadius="4" Padding="12">
+                                <StackPanel>
+                                    <!-- Progress Text -->
+                                    <TextBlock x:Name="TxtKappaProgress" FontSize="13"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               Margin="0,0,0,8"/>
+                                    <!-- Progress Bar -->
+                                    <Grid Height="20" Margin="0,0,0,8">
+                                        <Border Background="#333333" CornerRadius="4"/>
+                                        <Border x:Name="KappaProgressBar" Background="#9C27B0"
+                                                CornerRadius="4" HorizontalAlignment="Left"/>
+                                        <TextBlock x:Name="TxtKappaProgressPercent"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                    </Grid>
+                                    <!-- Show All Button -->
+                                    <Button x:Name="BtnShowKappaQuests" Content="Show All Required Quests"
+                                            Padding="8,4" Click="BtnShowKappaQuests_Click"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
 
                         <!-- Requirements Section -->
@@ -346,7 +420,19 @@
                             <ItemsControl x:Name="RequiredItemsList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Orientation="Horizontal" Margin="0,4">
+                                        <StackPanel Orientation="Horizontal" Margin="0,4"
+                                                    Cursor="Hand"
+                                                    MouseLeftButtonDown="ItemName_Click">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Background" Value="Transparent"/>
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="{StaticResource BackgroundMediumBrush}"/>
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
                                             <!-- Item Icon -->
                                             <Border Width="32" Height="32" CornerRadius="4"
                                                     Background="{StaticResource BackgroundMediumBrush}"
@@ -359,8 +445,19 @@
                                             <!-- Item Info -->
                                             <StackPanel VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding DisplayText}"
-                                                               Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"/>
+                                                    <TextBlock Text="{Binding DisplayText}" FontSize="12">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=StackPanel}}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                                                        <Setter Property="TextDecorations" Value="Underline"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                     <Border Padding="4,1" CornerRadius="2" Margin="8,0,0,0"
                                                             Background="{StaticResource WarningBrush}"
                                                             Visibility="{Binding FirVisibility}">

@@ -31,10 +31,63 @@ public class SettingsService
     private string? _detectionMethod;
 
     public event EventHandler<string?>? LogFolderChanged;
+    public event EventHandler<int>? PlayerLevelChanged;
 
     private SettingsService()
     {
         LoadSettings();
+    }
+
+    /// <summary>
+    /// Player level constants
+    /// </summary>
+    public const int MinPlayerLevel = 1;
+    public const int MaxPlayerLevel = 79;
+    public const int DefaultPlayerLevel = 15;
+
+    /// <summary>
+    /// Player level for quest filtering
+    /// </summary>
+    public int PlayerLevel
+    {
+        get
+        {
+            if (!_settingsLoaded)
+            {
+                LoadSettings();
+            }
+            return _settings.PlayerLevel ?? DefaultPlayerLevel;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, MinPlayerLevel, MaxPlayerLevel);
+            if (_settings.PlayerLevel != clampedValue)
+            {
+                _settings.PlayerLevel = clampedValue;
+                SaveSettings();
+                PlayerLevelChanged?.Invoke(this, clampedValue);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether to show level-locked quests in the quest list
+    /// </summary>
+    public bool ShowLevelLockedQuests
+    {
+        get
+        {
+            if (!_settingsLoaded)
+            {
+                LoadSettings();
+            }
+            return _settings.ShowLevelLockedQuests ?? true;
+        }
+        set
+        {
+            _settings.ShowLevelLockedQuests = value;
+            SaveSettings();
+        }
     }
 
     /// <summary>
@@ -80,6 +133,26 @@ public class SettingsService
         {
             var folder = LogFolderPath;
             return !string.IsNullOrEmpty(folder) && Directory.Exists(folder);
+        }
+    }
+
+    /// <summary>
+    /// Whether to hide the wipe warning dialog before quest sync
+    /// </summary>
+    public bool HideWipeWarning
+    {
+        get
+        {
+            if (!_settingsLoaded)
+            {
+                LoadSettings();
+            }
+            return _settings.HideWipeWarning ?? false;
+        }
+        set
+        {
+            _settings.HideWipeWarning = value;
+            SaveSettings();
         }
     }
 
@@ -401,5 +474,8 @@ public class SettingsService
     private class AppSettingsData
     {
         public string? LogFolderPath { get; set; }
+        public int? PlayerLevel { get; set; }
+        public bool? ShowLevelLockedQuests { get; set; }
+        public bool? HideWipeWarning { get; set; }
     }
 }
