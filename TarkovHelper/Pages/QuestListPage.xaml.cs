@@ -80,6 +80,7 @@ namespace TarkovHelper.Pages
         private string? _pendingQuestSelection = null;
         private List<GuideImage>? _pendingGuideImages = null;
         private bool _guideImagesLoaded = false;
+        private TarkovTask? _currentDetailTask = null;
 
         // Status brushes
         private static readonly Brush LockedBrush = new SolidColorBrush(Color.FromRgb(102, 102, 102));
@@ -555,6 +556,7 @@ namespace TarkovHelper.Pages
             TxtSelectQuest.Visibility = Visibility.Collapsed;
 
             var task = selectedVm.Task;
+            _currentDetailTask = task;
             var status = _progressService.GetStatus(task);
 
             // Title
@@ -833,9 +835,12 @@ namespace TarkovHelper.Pages
 
             if (task.Objectives != null && task.Objectives.Count > 0)
             {
-                foreach (var objective in task.Objectives)
+                for (int i = 0; i < task.Objectives.Count; i++)
                 {
-                    var objectiveElement = CreateObjectiveElement(objective);
+                    var objective = task.Objectives[i];
+                    var isCompleted = task.NormalizedName != null &&
+                        _progressService.IsObjectiveCompleted(task.NormalizedName, i);
+                    var objectiveElement = CreateObjectiveElement(objective, i, isCompleted);
                     ObjectivesList.Children.Add(objectiveElement);
                 }
                 ObjectivesSection.Visibility = Visibility.Visible;
@@ -847,9 +852,9 @@ namespace TarkovHelper.Pages
         }
 
         /// <summary>
-        /// Create an objective element with Optional badge if needed
+        /// Create an objective element with checkbox and Optional badge if needed
         /// </summary>
-        private FrameworkElement CreateObjectiveElement(string objective)
+        private FrameworkElement CreateObjectiveElement(string objective, int objectiveIndex, bool isCompleted)
         {
             // Check for (''Optional'') pattern in wiki markup
             var optionalPattern = @"\(''Optional''\)\s*";
@@ -858,13 +863,31 @@ namespace TarkovHelper.Pages
             // Remove the optional marker from text
             var cleanedObjective = System.Text.RegularExpressions.Regex.Replace(objective, optionalPattern, "").Trim();
 
+            // Main container with checkbox
+            var mainContainer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 2, 0, 2)
+            };
+
+            // Checkbox
+            var checkBox = new CheckBox
+            {
+                IsChecked = isCompleted,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 2, 8, 0),
+                Tag = objectiveIndex
+            };
+            checkBox.Checked += ObjectiveCheckBox_Changed;
+            checkBox.Unchecked += ObjectiveCheckBox_Changed;
+            mainContainer.Children.Add(checkBox);
+
             if (isOptional)
             {
                 // Create horizontal layout with Optional badge + text
-                var container = new StackPanel
+                var contentContainer = new StackPanel
                 {
-                    Orientation = Orientation.Horizontal,
-                    Margin = new Thickness(0, 2, 0, 2)
+                    Orientation = Orientation.Horizontal
                 };
 
                 // Optional badge
@@ -888,31 +911,72 @@ namespace TarkovHelper.Pages
                 };
 
                 badge.Child = badgeText;
-                container.Children.Add(badge);
+                contentContainer.Children.Add(badge);
 
                 // Create text block without bullet (badge replaces the bullet indicator)
-                var textBlock = CreateRichTextBlockWithoutBullet(cleanedObjective);
-                container.Children.Add(textBlock);
+                var textBlock = CreateRichTextBlockWithoutBullet(cleanedObjective, isCompleted);
+                contentContainer.Children.Add(textBlock);
 
-                return container;
+                mainContainer.Children.Add(contentContainer);
             }
             else
             {
-                return CreateRichTextBlock(cleanedObjective);
+                // Create text block without bullet (checkbox replaces the bullet)
+                var textBlock = CreateRichTextBlockWithoutBullet(cleanedObjective, isCompleted);
+                mainContainer.Children.Add(textBlock);
+            }
+
+            return mainContainer;
+        }
+
+        private void ObjectiveCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_currentDetailTask?.NormalizedName == null) return;
+
+            var checkBox = sender as CheckBox;
+            if (checkBox?.Tag is int objectiveIndex)
+            {
+                var isCompleted = checkBox.IsChecked ?? false;
+                _progressService.SetObjectiveCompleted(_currentDetailTask.NormalizedName, objectiveIndex, isCompleted);
+
+                // Update the text style (strikethrough)
+                var parent = checkBox.Parent as StackPanel;
+                if (parent != null)
+                {
+                    UpdateObjectiveTextStyle(parent, isCompleted);
+                }
+            }
+        }
+
+        private void UpdateObjectiveTextStyle(StackPanel container, bool isCompleted)
+        {
+            foreach (var child in container.Children)
+            {
+                if (child is TextBlock textBlock)
+                {
+                    textBlock.TextDecorations = isCompleted ? TextDecorations.Strikethrough : null;
+                    textBlock.Opacity = isCompleted ? 0.6 : 1.0;
+                }
+                else if (child is StackPanel innerPanel)
+                {
+                    UpdateObjectiveTextStyle(innerPanel, isCompleted);
+                }
             }
         }
 
         /// <summary>
-        /// Create a TextBlock with rich text but without bullet point (for Optional items)
+        /// Create a TextBlock with rich text but without bullet point (for checkbox items)
         /// </summary>
-        private TextBlock CreateRichTextBlockWithoutBullet(string wikiText)
+        private TextBlock CreateRichTextBlockWithoutBullet(string wikiText, bool isCompleted = false)
         {
             var textBlock = new TextBlock
             {
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
-                MaxWidth = 280, // Slightly smaller to account for badge
-                VerticalAlignment = VerticalAlignment.Top
+                MaxWidth = 260, // Slightly smaller to account for checkbox and badge
+                VerticalAlignment = VerticalAlignment.Top,
+                TextDecorations = isCompleted ? TextDecorations.Strikethrough : null,
+                Opacity = isCompleted ? 0.6 : 1.0
             };
 
             // Parse and add content (no bullet)
