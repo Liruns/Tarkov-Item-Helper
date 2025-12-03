@@ -231,6 +231,7 @@ namespace TarkovHelper.Pages
         private Dictionary<string, TarkovItem>? _itemLookup;
         private bool _isInitializing = true;
         private bool _isDataLoaded = false;
+        private bool _isUnloaded = false;
         private string? _pendingItemSelection = null;
 
         // Currency items should count by reference count, not total amount
@@ -250,6 +251,17 @@ namespace TarkovHelper.Pages
             _inventoryService.InventoryChanged += OnInventoryChanged;
 
             Loaded += ItemsPage_Loaded;
+            Unloaded += ItemsPage_Unloaded;
+        }
+
+        private void ItemsPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            _isUnloaded = true;
+            // Unsubscribe from events to prevent memory leaks
+            _loc.LanguageChanged -= OnLanguageChanged;
+            _questProgressService.ProgressChanged -= OnProgressChanged;
+            _hideoutProgressService.ProgressChanged -= OnProgressChanged;
+            _inventoryService.InventoryChanged -= OnInventoryChanged;
         }
 
         private void OnInventoryChanged(object? sender, EventArgs e)
@@ -269,6 +281,16 @@ namespace TarkovHelper.Pages
 
         private async void ItemsPage_Loaded(object sender, RoutedEventArgs e)
         {
+            // Re-subscribe events if page was previously unloaded
+            if (_isUnloaded)
+            {
+                _isUnloaded = false;
+                _loc.LanguageChanged += OnLanguageChanged;
+                _questProgressService.ProgressChanged += OnProgressChanged;
+                _hideoutProgressService.ProgressChanged += OnProgressChanged;
+                _inventoryService.InventoryChanged += OnInventoryChanged;
+            }
+
             // Skip if already loaded (avoid re-initialization on tab switch)
             if (_isDataLoaded)
             {
@@ -284,12 +306,16 @@ namespace TarkovHelper.Pages
                 // Load items lookup for quest item names
                 var apiService = TarkovDevApiService.Instance;
                 var items = await apiService.LoadItemsFromJsonAsync();
+                if (_isUnloaded) return; // Check if page was unloaded during async operation
+
                 if (items != null)
                 {
                     _itemLookup = TarkovDevApiService.BuildItemLookup(items);
                 }
 
                 await LoadItemsAsync();
+                if (_isUnloaded) return; // Check if page was unloaded during async operation
+
                 _isInitializing = false;
                 _isDataLoaded = true;
                 ApplyFilters();

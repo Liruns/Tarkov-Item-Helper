@@ -461,6 +461,56 @@ namespace TarkovHelper.Services
 
         #endregion
 
+        #region Objectives
+
+        /// <summary>
+        /// Parse objectives from wiki content (preserves wiki links and HTML for rich text rendering)
+        /// </summary>
+        /// <param name="wikiContent">Raw wiki file content</param>
+        /// <returns>List of objective strings with wiki markup preserved, or null if none</returns>
+        public static List<string>? ParseObjectives(string wikiContent)
+        {
+            // Find the Objectives section
+            var objectivesMatch = Regex.Match(wikiContent,
+                @"==\s*Objectives\s*==\s*(.*?)(?=\n==|\z)",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            if (!objectivesMatch.Success)
+                return null;
+
+            var objectivesContent = objectivesMatch.Groups[1].Value;
+            var results = new List<string>();
+
+            // Parse each line starting with * (bullet point)
+            var lines = objectivesContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var trimmedLine = line.Trim();
+                if (!trimmedLine.StartsWith("*"))
+                    continue;
+
+                // Remove the leading * and clean up
+                var objective = trimmedLine.TrimStart('*').Trim();
+                if (string.IsNullOrEmpty(objective))
+                    continue;
+
+                // Remove {{...}} templates but keep wiki links and HTML tags
+                objective = Regex.Replace(objective, @"\{\{[^\}]+\}\}", "");
+
+                // Clean up extra whitespace
+                objective = Regex.Replace(objective, @"\s+", " ").Trim();
+
+                if (!string.IsNullOrEmpty(objective))
+                {
+                    results.Add(objective);
+                }
+            }
+
+            return results.Count > 0 ? results : null;
+        }
+
+        #endregion
+
         #region Full Parse
 
         /// <summary>
@@ -480,6 +530,7 @@ namespace TarkovHelper.Services
                 RequiredLevel = ParseRequiredLevel(wikiContent),
                 RequiredSkills = ParseSkillRequirements(wikiContent),
                 RequiredItems = ParseRequiredItems(wikiContent),
+                Objectives = ParseObjectives(wikiContent),
                 GuideText = guideText,
                 GuideImages = guideImages
             };
@@ -642,6 +693,7 @@ namespace TarkovHelper.Services
         public int? RequiredLevel { get; set; }
         public List<SkillRequirement>? RequiredSkills { get; set; }
         public List<QuestItem>? RequiredItems { get; set; }
+        public List<string>? Objectives { get; set; }
         public string? GuideText { get; set; }
         public List<GuideImage>? GuideImages { get; set; }
     }

@@ -291,124 +291,6 @@
                                        Foreground="{StaticResource TextPrimaryBrush}"/>
                         </StackPanel>
 
-                        <!-- Kappa Progress Section (for Collector quest) -->
-                        <StackPanel x:Name="KappaProgressSection" Visibility="Collapsed" Margin="0,0,0,16">
-                            <TextBlock Text="Kappa Progress" FontSize="14" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextPrimaryBrush}"
-                                       Margin="0,0,0,8"/>
-                            <Border Background="{StaticResource BackgroundDarkBrush}"
-                                    CornerRadius="4" Padding="12">
-                                <StackPanel>
-                                    <!-- Progress Text -->
-                                    <TextBlock x:Name="TxtKappaProgress" FontSize="13"
-                                               Foreground="{StaticResource TextPrimaryBrush}"
-                                               Margin="0,0,0,8"/>
-                                    <!-- Progress Bar -->
-                                    <Grid Height="20" Margin="0,0,0,8">
-                                        <Border Background="#333333" CornerRadius="4"/>
-                                        <Border x:Name="KappaProgressBar" Background="#9C27B0"
-                                                CornerRadius="4" HorizontalAlignment="Left"/>
-                                        <TextBlock x:Name="TxtKappaProgressPercent"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                   FontSize="11" FontWeight="SemiBold" Foreground="White"/>
-                                    </Grid>
-                                    <!-- Show All Button -->
-                                    <Button x:Name="BtnShowKappaQuests" Content="Show All Required Quests"
-                                            Padding="8,4" Click="BtnShowKappaQuests_Click"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-
-                        <!-- Requirements Section -->
-                        <TextBlock Text="Requirements" FontSize="14" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                   Margin="0,0,0,8"/>
-                        <Border Background="{StaticResource BackgroundDarkBrush}"
-                                CornerRadius="4" Padding="12" Margin="0,0,0,16">
-                            <StackPanel x:Name="RequirementsPanel">
-                                <TextBlock x:Name="TxtRequiredLevel" FontSize="12"
-                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                           Margin="0,0,0,4"/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Guide Section -->
-                        <StackPanel x:Name="GuideSection" Visibility="Collapsed">
-                            <TextBlock Text="Guide" FontSize="14" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextPrimaryBrush}"
-                                       Margin="0,0,0,8"/>
-                            <Border Background="{StaticResource BackgroundDarkBrush}"
-                                    CornerRadius="4" Padding="12" Margin="0,0,0,16">
-                                <StackPanel>
-                                    <!-- Guide Text with Expander -->
-                                    <Expander x:Name="GuideTextExpander" IsExpanded="False"
-                                              Margin="0,0,0,8">
-                                        <Expander.Header>
-                                            <TextBlock Text="View Guide Text" FontSize="11"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"/>
-                                        </Expander.Header>
-                                        <TextBlock x:Name="TxtGuideText" FontSize="12"
-                                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                                   TextWrapping="Wrap" Margin="0,8,0,0"/>
-                                    </Expander>
-
-                                    <!-- Guide Images Gallery -->
-                                    <ItemsControl x:Name="GuideImagesList" Margin="0,8,0,0">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <WrapPanel Orientation="Horizontal"/>
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border Margin="0,0,8,8" BorderThickness="1"
-                                                        BorderBrush="{StaticResource BorderBrush}"
-                                                        CornerRadius="4" Background="{StaticResource BackgroundMediumBrush}"
-                                                        Cursor="Hand" MouseLeftButtonDown="GuideImage_Click">
-                                                    <StackPanel>
-                                                        <Image Source="{Binding ImageSource}"
-                                                               Width="140" Height="80"
-                                                               Stretch="UniformToFill"
-                                                               RenderOptions.BitmapScalingMode="HighQuality"/>
-                                                        <TextBlock Text="{Binding Caption}" FontSize="9"
-                                                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   TextAlignment="Center"
-                                                                   MaxWidth="140" Margin="4,2"
-                                                                   Visibility="{Binding CaptionVisibility}"/>
-                                                    </StackPanel>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-
-                        <!-- Prerequisites Section -->
-                        <TextBlock Text="Prerequisites" FontSize="14" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                   Margin="0,0,0,8"/>
-                        <Border Background="{StaticResource BackgroundDarkBrush}"
-                                CornerRadius="4" Padding="12" Margin="0,0,0,16">
-                            <ItemsControl x:Name="PrerequisitesList">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Orientation="Horizontal" Margin="0,2">
-                                            <TextBlock Text="- " Foreground="{StaticResource TextSecondaryBrush}"/>
-                                            <TextBlock Text="{Binding DisplayName}"
-                                                       Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"/>
-                                            <Border Padding="4,1" CornerRadius="2" Margin="8,0,0,0"
-                                                    Background="{Binding StatusBackground}">
-                                                <TextBlock Text="{Binding StatusText}" FontSize="9"
-                                                           Foreground="White"/>
-                                            </Border>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </Border>
-
                         <!-- Required Items Section -->
                         <TextBlock Text="Required Items" FontSize="14" FontWeight="SemiBold"
                                    Foreground="{StaticResource TextPrimaryBrush}"
@@ -468,6 +350,148 @@
                                                            Foreground="{StaticResource TextSecondaryBrush}"
                                                            Visibility="{Binding RequirementTypeVisibility}"/>
                                             </StackPanel>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+
+                        <!-- Kappa Progress Section (for Collector quest) -->
+                        <StackPanel x:Name="KappaProgressSection" Visibility="Collapsed" Margin="0,0,0,16">
+                            <TextBlock Text="Kappa Progress" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       Margin="0,0,0,8"/>
+                            <Border Background="{StaticResource BackgroundDarkBrush}"
+                                    CornerRadius="4" Padding="12">
+                                <StackPanel>
+                                    <!-- Progress Text -->
+                                    <TextBlock x:Name="TxtKappaProgress" FontSize="13"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               Margin="0,0,0,8"/>
+                                    <!-- Progress Bar -->
+                                    <Grid Height="20" Margin="0,0,0,8">
+                                        <Border Background="#333333" CornerRadius="4"/>
+                                        <Border x:Name="KappaProgressBar" Background="#9C27B0"
+                                                CornerRadius="4" HorizontalAlignment="Left"/>
+                                        <TextBlock x:Name="TxtKappaProgressPercent"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                    </Grid>
+                                    <!-- Show All Button -->
+                                    <Button x:Name="BtnShowKappaQuests" Content="Show All Required Quests"
+                                            Padding="8,4" Click="BtnShowKappaQuests_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Requirements Section -->
+                        <TextBlock Text="Requirements" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   Margin="0,0,0,8"/>
+                        <Border Background="{StaticResource BackgroundDarkBrush}"
+                                CornerRadius="4" Padding="12" Margin="0,0,0,16">
+                            <StackPanel x:Name="RequirementsPanel">
+                                <TextBlock x:Name="TxtRequiredLevel" FontSize="12"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           Margin="0,0,0,4"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Objectives Section -->
+                        <StackPanel x:Name="ObjectivesSection" Visibility="Collapsed">
+                            <TextBlock Text="Objectives" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       Margin="0,0,0,8"/>
+                            <Border Background="{StaticResource BackgroundDarkBrush}"
+                                    CornerRadius="4" Margin="0,0,0,16">
+                                <ScrollViewer MaxHeight="200"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="ObjectivesList" Margin="12"/>
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Guide Section -->
+                        <StackPanel x:Name="GuideSection" Visibility="Collapsed">
+                            <TextBlock Text="Guide" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       Margin="0,0,0,8"/>
+                            <Border Background="{StaticResource BackgroundDarkBrush}"
+                                    CornerRadius="4" Padding="12" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <!-- Guide Text - Scrollable TextBox -->
+                                    <Border x:Name="GuideTextSection" Visibility="Collapsed"
+                                            Background="{StaticResource BackgroundMediumBrush}"
+                                            CornerRadius="4" Margin="0,0,0,8">
+                                        <ScrollViewer MaxHeight="250"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <TextBlock x:Name="TxtGuideText" FontSize="12"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       TextWrapping="Wrap" Padding="10"/>
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <!-- Guide Images with Expander -->
+                                    <Expander x:Name="GuideImagesExpander" IsExpanded="False"
+                                              Visibility="Collapsed"
+                                              Expanded="GuideImagesExpander_Expanded">
+                                        <Expander.Header>
+                                            <TextBlock x:Name="TxtGuideImagesHeader" Text="View Images" FontSize="11"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                                        </Expander.Header>
+                                        <ItemsControl x:Name="GuideImagesList" Margin="0,8,0,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Margin="0,0,8,8" BorderThickness="1"
+                                                            BorderBrush="{StaticResource BorderBrush}"
+                                                            CornerRadius="4" Background="{StaticResource BackgroundMediumBrush}"
+                                                            Cursor="Hand" MouseLeftButtonDown="GuideImage_Click">
+                                                        <StackPanel>
+                                                            <Image Source="{Binding ImageSource}"
+                                                                   Width="140" Height="80"
+                                                                   Stretch="UniformToFill"
+                                                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                            <TextBlock Text="{Binding Caption}" FontSize="9"
+                                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       TextAlignment="Center"
+                                                                       MaxWidth="140" Margin="4,2"
+                                                                       Visibility="{Binding CaptionVisibility}"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Expander>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Prerequisites Section -->
+                        <TextBlock Text="Prerequisites" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   Margin="0,0,0,8"/>
+                        <Border Background="{StaticResource BackgroundDarkBrush}"
+                                CornerRadius="4" Padding="12" Margin="0,0,0,16">
+                            <ItemsControl x:Name="PrerequisitesList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="0,2">
+                                            <TextBlock Text="- " Foreground="{StaticResource TextSecondaryBrush}"/>
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"/>
+                                            <Border Padding="4,1" CornerRadius="2" Margin="8,0,0,0"
+                                                    Background="{Binding StatusBackground}">
+                                                <TextBlock Text="{Binding StatusText}" FontSize="9"
+                                                           Foreground="White"/>
+                                            </Border>
                                         </StackPanel>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

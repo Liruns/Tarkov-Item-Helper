@@ -324,6 +324,7 @@ namespace TarkovHelper.Services
                         RequiredLevel = wikiData.RequiredLevel,
                         RequiredSkills = wikiData.RequiredSkills,
                         RequiredItems = ResolveItemIds(wikiData.RequiredItems, itemIdToNormalizedName),
+                        Objectives = wikiData.Objectives,
                         GuideText = wikiData.GuideText,
                         GuideImages = wikiData.GuideImages?.Select(g => new GuideImage
                         {
@@ -388,6 +389,7 @@ namespace TarkovHelper.Services
                             RequiredLevel = wikiData?.RequiredLevel,
                             RequiredSkills = wikiData?.RequiredSkills,
                             RequiredItems = ResolveItemIds(wikiData?.RequiredItems, itemIdToNormalizedName),
+                            Objectives = wikiData?.Objectives,
                             GuideText = wikiData?.GuideText,
                             GuideImages = wikiData?.GuideImages?.Select(g => new GuideImage
                             {

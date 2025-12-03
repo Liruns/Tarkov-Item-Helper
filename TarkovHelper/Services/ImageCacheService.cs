@@ -18,7 +18,11 @@ namespace TarkovHelper.Services
         private readonly HttpClient _httpClient;
         private readonly string _imageCachePath;
         private readonly Dictionary<string, BitmapImage> _memoryCache = new();
+        private readonly LinkedList<string> _lruOrder = new(); // Track access order for LRU eviction
         private readonly object _cacheLock = new();
+
+        // Memory cache limit (max number of images to keep in memory)
+        private const int MaxMemoryCacheSize = 200;
 
         // Wiki image base URL
         private const string WikiImageBaseUrl = "https://escapefromtarkov.fandom.com/wiki/Special:FilePath/";
@@ -70,6 +74,9 @@ namespace TarkovHelper.Services
             {
                 if (_memoryCache.TryGetValue(url, out var cachedImage))
                 {
+                    // Move to end of LRU list (most recently used)
+                    _lruOrder.Remove(url);
+                    _lruOrder.AddLast(url);
                     return cachedImage;
                 }
             }
@@ -89,7 +96,7 @@ namespace TarkovHelper.Services
                     {
                         lock (_cacheLock)
                         {
-                            _memoryCache[url] = image;
+                            AddToMemoryCache(url, image);
                         }
                         return image;
                     }
@@ -115,7 +122,7 @@ namespace TarkovHelper.Services
                 {
                     lock (_cacheLock)
                     {
-                        _memoryCache[url] = image;
+                        AddToMemoryCache(url, image);
                     }
                 }
 
@@ -125,6 +132,33 @@ namespace TarkovHelper.Services
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Add image to memory cache with LRU eviction
+        /// Must be called within _cacheLock
+        /// </summary>
+        private void AddToMemoryCache(string url, BitmapImage image)
+        {
+            // If already in cache, just update LRU order
+            if (_memoryCache.ContainsKey(url))
+            {
+                _lruOrder.Remove(url);
+                _lruOrder.AddLast(url);
+                return;
+            }
+
+            // Evict oldest entries if cache is full
+            while (_memoryCache.Count >= MaxMemoryCacheSize && _lruOrder.First != null)
+            {
+                var oldestUrl = _lruOrder.First.Value;
+                _lruOrder.RemoveFirst();
+                _memoryCache.Remove(oldestUrl);
+            }
+
+            // Add new entry
+            _memoryCache[url] = image;
+            _lruOrder.AddLast(url);
         }
 
         /// <summary>
@@ -144,6 +178,7 @@ namespace TarkovHelper.Services
             lock (_cacheLock)
             {
                 _memoryCache.Clear();
+                _lruOrder.Clear();
             }
         }
 

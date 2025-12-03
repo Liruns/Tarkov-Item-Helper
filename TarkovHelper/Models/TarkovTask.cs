@@ -89,6 +89,12 @@ namespace TarkovHelper.Models
         public List<QuestItem>? RequiredItems { get; set; }
 
         /// <summary>
+        /// Quest objectives from wiki (list of objectives to complete)
+        /// </summary>
+        [JsonPropertyName("objectives")]
+        public List<string>? Objectives { get; set; }
+
+        /// <summary>
         /// Guide text from wiki (description of how to complete the quest)
         /// </summary>
         [JsonPropertyName("guideText")]

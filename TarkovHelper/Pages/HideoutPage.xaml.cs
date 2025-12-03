@@ -58,6 +58,7 @@ namespace TarkovHelper.Pages
         private readonly ImageCacheService _imageCache = ImageCacheService.Instance;
         private List<HideoutModuleViewModel> _allModuleViewModels = new();
         private bool _isInitializing = true;
+        private bool _isUnloaded = false;
 
         public HideoutPage()
         {
@@ -66,10 +67,27 @@ namespace TarkovHelper.Pages
             _progressService.ProgressChanged += OnProgressChanged;
 
             Loaded += HideoutPage_Loaded;
+            Unloaded += HideoutPage_Unloaded;
+        }
+
+        private void HideoutPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            _isUnloaded = true;
+            // Unsubscribe from events to prevent memory leaks
+            _loc.LanguageChanged -= OnLanguageChanged;
+            _progressService.ProgressChanged -= OnProgressChanged;
         }
 
         private async void HideoutPage_Loaded(object sender, RoutedEventArgs e)
         {
+            // Re-subscribe events if page was previously unloaded
+            if (_isUnloaded)
+            {
+                _isUnloaded = false;
+                _loc.LanguageChanged += OnLanguageChanged;
+                _progressService.ProgressChanged += OnProgressChanged;
+            }
+
             // Show loading overlay
             LoadingOverlay.Visibility = Visibility.Visible;
             MainContent.Visibility = Visibility.Collapsed;
@@ -77,6 +95,8 @@ namespace TarkovHelper.Pages
             try
             {
                 await LoadModulesAsync();
+                if (_isUnloaded) return; // Check if page was unloaded during async operation
+
                 _isInitializing = false;
                 ApplyFilters();
                 UpdateStatistics();
@@ -84,8 +104,11 @@ namespace TarkovHelper.Pages
             finally
             {
                 // Hide loading overlay
-                LoadingOverlay.Visibility = Visibility.Collapsed;
-                MainContent.Visibility = Visibility.Visible;
+                if (!_isUnloaded)
+                {
+                    LoadingOverlay.Visibility = Visibility.Collapsed;
+                    MainContent.Visibility = Visibility.Visible;
+                }
             }
         }
 
@@ -254,6 +277,8 @@ namespace TarkovHelper.Pages
 
         private async void UpdateDetailPanel()
         {
+            if (_isUnloaded) return;
+
             var selectedVm = LstModules.SelectedItem as HideoutModuleViewModel;
 
             if (selectedVm == null)
@@ -279,6 +304,7 @@ namespace TarkovHelper.Pages
             if (!string.IsNullOrEmpty(module.ImageLink))
             {
                 var icon = await _imageCache.GetImageAsync(module.ImageLink, "hideout");
+                if (_isUnloaded) return;
                 ImgDetailIcon.Source = icon;
             }
             else

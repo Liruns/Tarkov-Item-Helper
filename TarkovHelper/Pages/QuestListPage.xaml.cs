@@ -69,7 +69,10 @@ namespace TarkovHelper.Pages
         private Dictionary<string, TarkovItem>? _itemLookup;
         private bool _isInitializing = true;
         private bool _isDataLoaded = false;
+        private bool _isUnloaded = false;
         private string? _pendingQuestSelection = null;
+        private List<GuideImage>? _pendingGuideImages = null;
+        private bool _guideImagesLoaded = false;
 
         // Status brushes
         private static readonly Brush LockedBrush = new SolidColorBrush(Color.FromRgb(102, 102, 102));
@@ -85,14 +88,33 @@ namespace TarkovHelper.Pages
             _progressService.ProgressChanged += OnProgressChanged;
 
             Loaded += QuestListPage_Loaded;
+            Unloaded += QuestListPage_Unloaded;
+        }
+
+        private void QuestListPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            _isUnloaded = true;
+            // Unsubscribe from events to prevent memory leaks
+            _loc.LanguageChanged -= OnLanguageChanged;
+            _progressService.ProgressChanged -= OnProgressChanged;
         }
 
         private async void QuestListPage_Loaded(object sender, RoutedEventArgs e)
         {
+            // Re-subscribe events if page was previously unloaded
+            if (_isUnloaded)
+            {
+                _isUnloaded = false;
+                _loc.LanguageChanged += OnLanguageChanged;
+                _progressService.ProgressChanged += OnProgressChanged;
+            }
+
             // Skip if already loaded (prevents re-initialization on tab switching)
             if (_isDataLoaded) return;
 
             await LoadMapsAsync();
+            if (_isUnloaded) return; // Check if page was unloaded during async operation
+
             LoadQuests();
             PopulateTraderFilter();
             PopulateMapFilter();
@@ -600,6 +622,9 @@ namespace TarkovHelper.Pages
                 PrerequisitesList.ItemsSource = new[] { new QuestViewModel { DisplayName = "None" } };
             }
 
+            // Objectives Section
+            UpdateObjectivesSection(task);
+
             // Guide Section
             UpdateGuideSection(task);
 
@@ -793,6 +818,279 @@ namespace TarkovHelper.Pages
 
         #endregion
 
+        #region Objectives Section
+
+        private void UpdateObjectivesSection(TarkovTask task)
+        {
+            ObjectivesList.Children.Clear();
+
+            if (task.Objectives != null && task.Objectives.Count > 0)
+            {
+                foreach (var objective in task.Objectives)
+                {
+                    var objectiveElement = CreateObjectiveElement(objective);
+                    ObjectivesList.Children.Add(objectiveElement);
+                }
+                ObjectivesSection.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ObjectivesSection.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// Create an objective element with Optional badge if needed
+        /// </summary>
+        private FrameworkElement CreateObjectiveElement(string objective)
+        {
+            // Check for (''Optional'') pattern in wiki markup
+            var optionalPattern = @"\(''Optional''\)\s*";
+            var isOptional = System.Text.RegularExpressions.Regex.IsMatch(objective, optionalPattern);
+
+            // Remove the optional marker from text
+            var cleanedObjective = System.Text.RegularExpressions.Regex.Replace(objective, optionalPattern, "").Trim();
+
+            if (isOptional)
+            {
+                // Create horizontal layout with Optional badge + text
+                var container = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Margin = new Thickness(0, 2, 0, 2)
+                };
+
+                // Optional badge
+                var badge = new Border
+                {
+                    Background = new System.Windows.Media.SolidColorBrush(
+                        System.Windows.Media.Color.FromArgb(60, 255, 193, 7)), // Amber/yellow with transparency
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    Margin = new Thickness(0, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Top
+                };
+
+                var badgeText = new TextBlock
+                {
+                    Text = "Optional",
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new System.Windows.Media.SolidColorBrush(
+                        System.Windows.Media.Color.FromRgb(255, 193, 7)) // Amber color
+                };
+
+                badge.Child = badgeText;
+                container.Children.Add(badge);
+
+                // Create text block without bullet (badge replaces the bullet indicator)
+                var textBlock = CreateRichTextBlockWithoutBullet(cleanedObjective);
+                container.Children.Add(textBlock);
+
+                return container;
+            }
+            else
+            {
+                return CreateRichTextBlock(cleanedObjective);
+            }
+        }
+
+        /// <summary>
+        /// Create a TextBlock with rich text but without bullet point (for Optional items)
+        /// </summary>
+        private TextBlock CreateRichTextBlockWithoutBullet(string wikiText)
+        {
+            var textBlock = new TextBlock
+            {
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 280, // Slightly smaller to account for badge
+                VerticalAlignment = VerticalAlignment.Top
+            };
+
+            // Parse and add content (no bullet)
+            ParseWikiMarkup(wikiText, textBlock);
+
+            return textBlock;
+        }
+
+        /// <summary>
+        /// Create a TextBlock with rich text from wiki markup (links and HTML colors)
+        /// </summary>
+        private TextBlock CreateRichTextBlock(string wikiText)
+        {
+            var textBlock = new TextBlock
+            {
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 2),
+                MaxWidth = 300
+            };
+
+            // Add bullet point
+            textBlock.Inlines.Add(new System.Windows.Documents.Run("• ")
+            {
+                Foreground = (System.Windows.Media.Brush)FindResource("AccentBrush"),
+                FontWeight = FontWeights.Bold
+            });
+
+            // Parse and add content
+            ParseWikiMarkup(wikiText, textBlock);
+
+            return textBlock;
+        }
+
+        /// <summary>
+        /// Parse wiki markup and add to TextBlock inlines
+        /// Supports: [[Link|Text]], [[Link]], <font color="...">text</font>
+        /// </summary>
+        private void ParseWikiMarkup(string text, TextBlock textBlock)
+        {
+            var defaultBrush = (System.Windows.Media.Brush)FindResource("TextPrimaryBrush");
+            var linkBrush = (System.Windows.Media.Brush)FindResource("AccentBrush");
+
+            // Pattern to match wiki links and font color tags
+            var pattern = @"(\[\[([^\]|]+)(?:\|([^\]]+))?\]\])|(<font\s+color=""([^""]+)"">([^<]+)</font>)";
+            var regex = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            int lastIndex = 0;
+            var matches = regex.Matches(text);
+
+            foreach (System.Text.RegularExpressions.Match match in matches)
+            {
+                // Add text before match
+                if (match.Index > lastIndex)
+                {
+                    var beforeText = text.Substring(lastIndex, match.Index - lastIndex);
+                    textBlock.Inlines.Add(new System.Windows.Documents.Run(beforeText) { Foreground = defaultBrush });
+                }
+
+                if (match.Groups[1].Success)
+                {
+                    // Wiki link: [[Link|Text]] or [[Link]]
+                    var linkTarget = match.Groups[2].Value;
+                    var displayText = match.Groups[3].Success ? match.Groups[3].Value : linkTarget;
+
+                    var hyperlink = new System.Windows.Documents.Hyperlink
+                    {
+                        Foreground = linkBrush,
+                        TextDecorations = null
+                    };
+                    hyperlink.Tag = linkTarget;
+                    hyperlink.Click += WikiLink_Click;
+                    hyperlink.MouseEnter += (s, e) => ((System.Windows.Documents.Hyperlink)s).TextDecorations = TextDecorations.Underline;
+                    hyperlink.MouseLeave += (s, e) => ((System.Windows.Documents.Hyperlink)s).TextDecorations = null;
+
+                    // Parse display text for nested font tags
+                    ParseHyperlinkContent(displayText, hyperlink, linkBrush);
+
+                    textBlock.Inlines.Add(hyperlink);
+                }
+                else if (match.Groups[4].Success)
+                {
+                    // Font color: <font color="...">text</font>
+                    var colorStr = match.Groups[5].Value;
+                    var coloredText = match.Groups[6].Value;
+
+                    System.Windows.Media.Brush colorBrush;
+                    try
+                    {
+                        colorBrush = new System.Windows.Media.SolidColorBrush(
+                            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(colorStr));
+                    }
+                    catch
+                    {
+                        colorBrush = defaultBrush;
+                    }
+
+                    textBlock.Inlines.Add(new System.Windows.Documents.Run(coloredText) { Foreground = colorBrush });
+                }
+
+                lastIndex = match.Index + match.Length;
+            }
+
+            // Add remaining text
+            if (lastIndex < text.Length)
+            {
+                var remainingText = text.Substring(lastIndex);
+                textBlock.Inlines.Add(new System.Windows.Documents.Run(remainingText) { Foreground = defaultBrush });
+            }
+        }
+
+        /// <summary>
+        /// Parse content for a hyperlink, handling nested font color tags
+        /// </summary>
+        private void ParseHyperlinkContent(string displayText, System.Windows.Documents.Hyperlink hyperlink, System.Windows.Media.Brush defaultBrush)
+        {
+            // Pattern to match font color tags
+            var fontPattern = @"<font\s+color=""([^""]+)"">([^<]+)</font>";
+            var fontRegex = new System.Text.RegularExpressions.Regex(fontPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            int lastIndex = 0;
+            var matches = fontRegex.Matches(displayText);
+
+            foreach (System.Text.RegularExpressions.Match match in matches)
+            {
+                // Add text before match
+                if (match.Index > lastIndex)
+                {
+                    var beforeText = displayText.Substring(lastIndex, match.Index - lastIndex);
+                    hyperlink.Inlines.Add(new System.Windows.Documents.Run(beforeText) { Foreground = defaultBrush });
+                }
+
+                // Add colored text
+                var colorStr = match.Groups[1].Value;
+                var coloredText = match.Groups[2].Value;
+
+                System.Windows.Media.Brush colorBrush;
+                try
+                {
+                    colorBrush = new System.Windows.Media.SolidColorBrush(
+                        (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(colorStr));
+                }
+                catch
+                {
+                    colorBrush = defaultBrush;
+                }
+
+                hyperlink.Inlines.Add(new System.Windows.Documents.Run(coloredText) { Foreground = colorBrush });
+                lastIndex = match.Index + match.Length;
+            }
+
+            // Add remaining text
+            if (lastIndex < displayText.Length)
+            {
+                var remainingText = displayText.Substring(lastIndex);
+                hyperlink.Inlines.Add(new System.Windows.Documents.Run(remainingText) { Foreground = defaultBrush });
+            }
+
+            // If no content was added (no font tags and no plain text), add displayText as-is
+            if (hyperlink.Inlines.Count == 0)
+            {
+                hyperlink.Inlines.Add(new System.Windows.Documents.Run(displayText) { Foreground = defaultBrush });
+            }
+        }
+
+        private void WikiLink_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Documents.Hyperlink hyperlink && hyperlink.Tag is string linkTarget)
+            {
+                // Open wiki page in browser
+                var wikiUrl = $"https://escapefromtarkov.fandom.com/wiki/{Uri.EscapeDataString(linkTarget.Replace(" ", "_"))}";
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = wikiUrl,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
+        }
+
+        #endregion
+
         #region Guide Section
 
         private void UpdateGuideSection(TarkovTask task)
@@ -808,26 +1106,42 @@ namespace TarkovHelper.Pages
 
             GuideSection.Visibility = Visibility.Visible;
 
-            // Guide text
+            // Guide text - show directly in scrollable text block
             if (hasGuideText)
             {
                 TxtGuideText.Text = task.GuideText;
-                GuideTextExpander.Visibility = Visibility.Visible;
-                GuideTextExpander.IsExpanded = false; // Reset to collapsed when switching quests
+                GuideTextSection.Visibility = Visibility.Visible;
             }
             else
             {
-                GuideTextExpander.Visibility = Visibility.Collapsed;
+                GuideTextSection.Visibility = Visibility.Collapsed;
             }
 
-            // Guide images
+            // Guide images - lazy load when expander is opened
             if (hasGuideImages)
             {
-                _ = LoadGuideImagesAsync(task.GuideImages!);
+                _pendingGuideImages = task.GuideImages;
+                _guideImagesLoaded = false;
+                GuideImagesList.ItemsSource = null; // Clear previous images
+                GuideImagesExpander.IsExpanded = false; // Reset to collapsed
+                GuideImagesExpander.Visibility = Visibility.Visible;
+                TxtGuideImagesHeader.Text = $"View Images ({task.GuideImages!.Count})";
             }
             else
             {
+                _pendingGuideImages = null;
+                GuideImagesExpander.Visibility = Visibility.Collapsed;
                 GuideImagesList.ItemsSource = null;
+            }
+        }
+
+        private void GuideImagesExpander_Expanded(object sender, RoutedEventArgs e)
+        {
+            // Load images only when expander is opened for the first time
+            if (!_guideImagesLoaded && _pendingGuideImages != null)
+            {
+                _guideImagesLoaded = true;
+                _ = LoadGuideImagesAsync(_pendingGuideImages);
             }
         }
 
@@ -837,6 +1151,8 @@ namespace TarkovHelper.Pages
 
             foreach (var guideImage in guideImages)
             {
+                if (_isUnloaded) return; // Check if page was unloaded
+
                 var vm = new GuideImageViewModel
                 {
                     FileName = guideImage.FileName,
@@ -849,11 +1165,15 @@ namespace TarkovHelper.Pages
                 imageVms.Add(vm);
             }
 
-            // Update on UI thread
-            Dispatcher.Invoke(() =>
+            // Update on UI thread only if page is still loaded
+            if (!_isUnloaded)
             {
-                GuideImagesList.ItemsSource = imageVms;
-            });
+                Dispatcher.Invoke(() =>
+                {
+                    if (!_isUnloaded)
+                        GuideImagesList.ItemsSource = imageVms;
+                });
+            }
         }
 
         private void GuideImage_Click(object sender, MouseButtonEventArgs e)
@@ -889,6 +1209,8 @@ namespace TarkovHelper.Pages
 
             foreach (var item in requiredItems)
             {
+                if (_isUnloaded) return; // Check if page was unloaded
+
                 var vm = new RequiredItemViewModel
                 {
                     FoundInRaid = item.FoundInRaid,
@@ -911,11 +1233,15 @@ namespace TarkovHelper.Pages
                 itemVms.Add(vm);
             }
 
-            // Update on UI thread
-            Dispatcher.Invoke(() =>
+            // Update on UI thread only if page is still loaded
+            if (!_isUnloaded)
             {
-                RequiredItemsList.ItemsSource = itemVms;
-            });
+                Dispatcher.Invoke(() =>
+                {
+                    if (!_isUnloaded)
+                        RequiredItemsList.ItemsSource = itemVms;
+                });
+            }
         }
 
         /// <summary>

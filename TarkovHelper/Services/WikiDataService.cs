@@ -23,7 +23,9 @@ namespace TarkovHelper.Services
         private const string MediaWikiApiUrl = "https://escapefromtarkov.fandom.com/api.php";
         private const string QuestPagesCacheDir = "QuestPages";
         private const string CacheIndexFileName = "cache_index.json";
-        private const int MaxTitlesPerRequest = 50; // MediaWiki API limit
+        private const int MaxTitlesPerRequest = 50; // MediaWiki API limit for revision info
+        private const int MaxTitlesPerContentRequest = 10; // Smaller batch for content downloads (to avoid large responses)
+        private const int MaxConcurrentBatches = 5; // Max parallel batch requests
 
         // Trader order matching the tab order in the Wiki page (tpt-1 to tpt-11)
         private static readonly string[] Traders =
@@ -282,47 +284,67 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
-        /// Query MediaWiki API for revision info of multiple pages
+        /// Query MediaWiki API for revision info of multiple pages (parallel batch processing)
         /// </summary>
         public async Task<Dictionary<string, (int PageId, int RevisionId, DateTime Timestamp)>> GetPagesRevisionInfoAsync(IEnumerable<string> titles)
         {
             var result = new Dictionary<string, (int, int, DateTime)>();
             var titleList = titles.ToList();
+            var lockObj = new object();
 
-            // Process in batches due to API limit
+            // Create batches
+            var batches = new List<List<string>>();
             for (int i = 0; i < titleList.Count; i += MaxTitlesPerRequest)
             {
-                var batch = titleList.Skip(i).Take(MaxTitlesPerRequest);
-                var titlesParam = string.Join("|", batch);
-                var url = $"{MediaWikiApiUrl}?action=query&titles={Uri.EscapeDataString(titlesParam)}&prop=revisions&rvprop=ids|timestamp&format=json";
+                batches.Add(titleList.Skip(i).Take(MaxTitlesPerRequest).ToList());
+            }
 
-                var responseBytes = await _httpClient.GetByteArrayAsync(url);
-                var response = Encoding.UTF8.GetString(responseBytes);
-                var doc = JsonDocument.Parse(response);
-
-                if (doc.RootElement.TryGetProperty("query", out var query) &&
-                    query.TryGetProperty("pages", out var pages))
+            // Process batches in parallel with throttling
+            var semaphore = new SemaphoreSlim(MaxConcurrentBatches);
+            var tasks = batches.Select(async batch =>
+            {
+                await semaphore.WaitAsync();
+                try
                 {
-                    foreach (var page in pages.EnumerateObject())
+                    var titlesParam = string.Join("|", batch);
+                    var url = $"{MediaWikiApiUrl}?action=query&titles={Uri.EscapeDataString(titlesParam)}&prop=revisions&rvprop=ids|timestamp&format=json";
+
+                    var responseBytes = await _httpClient.GetByteArrayAsync(url);
+                    var response = Encoding.UTF8.GetString(responseBytes);
+                    var doc = JsonDocument.Parse(response);
+
+                    if (doc.RootElement.TryGetProperty("query", out var query) &&
+                        query.TryGetProperty("pages", out var pages))
                     {
-                        if (page.Value.TryGetProperty("missing", out _))
-                            continue;
-
-                        var title = page.Value.GetProperty("title").GetString() ?? "";
-                        var pageId = page.Value.GetProperty("pageid").GetInt32();
-
-                        if (page.Value.TryGetProperty("revisions", out var revisions) &&
-                            revisions.GetArrayLength() > 0)
+                        foreach (var page in pages.EnumerateObject())
                         {
-                            var rev = revisions[0];
-                            var revId = rev.GetProperty("revid").GetInt32();
-                            var timestamp = DateTime.Parse(rev.GetProperty("timestamp").GetString() ?? "");
-                            result[title] = (pageId, revId, timestamp);
+                            if (page.Value.TryGetProperty("missing", out _))
+                                continue;
+
+                            var title = page.Value.GetProperty("title").GetString() ?? "";
+                            var pageId = page.Value.GetProperty("pageid").GetInt32();
+
+                            if (page.Value.TryGetProperty("revisions", out var revisions) &&
+                                revisions.GetArrayLength() > 0)
+                            {
+                                var rev = revisions[0];
+                                var revId = rev.GetProperty("revid").GetInt32();
+                                var timestamp = DateTime.Parse(rev.GetProperty("timestamp").GetString() ?? "");
+                                lock (lockObj)
+                                {
+                                    result[title] = (pageId, revId, timestamp);
+                                }
+                            }
                         }
                     }
                 }
-            }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
 
+            await Task.WhenAll(tasks);
             return result;
         }
 
@@ -368,6 +390,57 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
+        /// Download multiple pages content in a single API call (batch download)
+        /// </summary>
+        public async Task<Dictionary<string, (string Content, int PageId, int RevisionId, DateTime Timestamp)>> DownloadPagesBatchAsync(IEnumerable<string> titles)
+        {
+            var result = new Dictionary<string, (string, int, int, DateTime)>();
+            var titlesParam = string.Join("|", titles);
+            var url = $"{MediaWikiApiUrl}?action=query&titles={Uri.EscapeDataString(titlesParam)}&prop=revisions&rvprop=ids|timestamp|content&rvslots=main&format=json";
+
+            try
+            {
+                var responseBytes = await _httpClient.GetByteArrayAsync(url);
+                var response = Encoding.UTF8.GetString(responseBytes);
+                var doc = JsonDocument.Parse(response);
+
+                if (doc.RootElement.TryGetProperty("query", out var query) &&
+                    query.TryGetProperty("pages", out var pages))
+                {
+                    foreach (var page in pages.EnumerateObject())
+                    {
+                        if (page.Value.TryGetProperty("missing", out _))
+                            continue;
+
+                        var title = page.Value.GetProperty("title").GetString() ?? "";
+                        var pageId = page.Value.GetProperty("pageid").GetInt32();
+
+                        if (page.Value.TryGetProperty("revisions", out var revisions) &&
+                            revisions.GetArrayLength() > 0)
+                        {
+                            var rev = revisions[0];
+                            var revId = rev.GetProperty("revid").GetInt32();
+                            var timestamp = DateTime.Parse(rev.GetProperty("timestamp").GetString() ?? "");
+
+                            if (rev.TryGetProperty("slots", out var slots) &&
+                                slots.TryGetProperty("main", out var main) &&
+                                main.TryGetProperty("*", out var content))
+                            {
+                                result[title] = (content.GetString() ?? "", pageId, revId, timestamp);
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Return empty result on error, caller will handle individual failures
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Get file path for cached quest page
         /// </summary>
         private string GetQuestPageFilePath(string questName)
@@ -377,7 +450,7 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
-        /// Download all quest pages in parallel with revision checking
+        /// Download all quest pages using batch downloads with parallel processing
         /// </summary>
         /// <param name="forceDownload">If true, download all pages regardless of cache</param>
         /// <param name="progress">Progress callback (current, total, questName)</param>
@@ -407,10 +480,7 @@ namespace TarkovHelper.Services
             var cacheIndex = await LoadCacheIndexAsync();
             Directory.CreateDirectory(GetQuestPagesCachePath());
 
-            // Get current revision info for all quests from API
-            var currentRevisions = await GetPagesRevisionInfoAsync(allQuests);
-
-            // Determine which pages need downloading
+            // Determine which pages need downloading (simple file existence check, no revision API)
             var toDownload = new List<string>();
             foreach (var questName in allQuests)
             {
@@ -420,15 +490,12 @@ namespace TarkovHelper.Services
                     continue;
                 }
 
-                // Check if we have cached version with same revision
-                if (cacheIndex.TryGetValue(questName, out var cached) &&
-                    currentRevisions.TryGetValue(questName, out var current) &&
-                    cached.RevisionId == current.RevisionId &&
-                    File.Exists(GetQuestPageFilePath(questName)))
+                // Simply check if cache file exists
+                if (File.Exists(GetQuestPageFilePath(questName)))
                 {
                     skipped++;
                     processed++;
-                    progress?.Invoke(processed, total, $"[Skipped] {questName}");
+                    progress?.Invoke(processed, total, $"[Cached] {questName}");
                 }
                 else
                 {
@@ -436,53 +503,87 @@ namespace TarkovHelper.Services
                 }
             }
 
-            // Download pages in parallel with throttling
-            var semaphore = new SemaphoreSlim(10); // Max 10 concurrent requests
-            var tasks = toDownload.Select(async questName =>
+            // If nothing to download, return early
+            if (toDownload.Count == 0)
+            {
+                await SaveCacheIndexAsync(cacheIndex);
+                return (downloaded, skipped, failed, failedQuests);
+            }
+
+            // Create batches for download
+            var batches = new List<List<string>>();
+            for (int i = 0; i < toDownload.Count; i += MaxTitlesPerContentRequest)
+            {
+                batches.Add(toDownload.Skip(i).Take(MaxTitlesPerContentRequest).ToList());
+            }
+
+            progress?.Invoke(processed, total, $"Downloading {toDownload.Count} pages in {batches.Count} batches...");
+
+            // Download batches in parallel with throttling
+            var semaphore = new SemaphoreSlim(MaxConcurrentBatches);
+            var lockObj = new object();
+
+            var tasks = batches.Select(async batch =>
             {
                 await semaphore.WaitAsync(cancellationToken);
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var result = await DownloadPageAsync(questName);
-                    if (result.HasValue)
+                    // Download batch
+                    var batchResult = await DownloadPagesBatchAsync(batch);
+
+                    // Process results
+                    foreach (var questName in batch)
                     {
-                        var (content, pageId, revId, timestamp) = result.Value;
+                        cancellationToken.ThrowIfCancellationRequested();
 
-                        // Save content to file
-                        await File.WriteAllTextAsync(GetQuestPageFilePath(questName), content, Encoding.UTF8, cancellationToken);
-
-                        // Update cache index
-                        lock (cacheIndex)
+                        if (batchResult.TryGetValue(questName, out var pageData))
                         {
-                            cacheIndex[questName] = new WikiPageCacheEntry
-                            {
-                                PageId = pageId,
-                                RevisionId = revId,
-                                Timestamp = timestamp,
-                                CachedAt = DateTime.UtcNow
-                            };
-                        }
+                            var (content, pageId, revId, timestamp) = pageData;
 
-                        Interlocked.Increment(ref downloaded);
-                        var proc = Interlocked.Increment(ref processed);
-                        progress?.Invoke(proc, total, $"[Downloaded] {questName}");
+                            // Save content to file
+                            await File.WriteAllTextAsync(GetQuestPageFilePath(questName), content, Encoding.UTF8, cancellationToken);
+
+                            // Update cache index
+                            lock (cacheIndex)
+                            {
+                                cacheIndex[questName] = new WikiPageCacheEntry
+                                {
+                                    PageId = pageId,
+                                    RevisionId = revId,
+                                    Timestamp = timestamp,
+                                    CachedAt = DateTime.UtcNow
+                                };
+                            }
+
+                            Interlocked.Increment(ref downloaded);
+                            var proc = Interlocked.Increment(ref processed);
+                            progress?.Invoke(proc, total, $"[Downloaded] {questName}");
+                        }
+                        else
+                        {
+                            Interlocked.Increment(ref failed);
+                            lock (lockObj) { failedQuests.Add(questName); }
+                            var proc = Interlocked.Increment(ref processed);
+                            progress?.Invoke(proc, total, $"[Not Found] {questName}");
+                        }
                     }
-                    else
-                    {
-                        Interlocked.Increment(ref failed);
-                        lock (failedQuests) { failedQuests.Add(questName); }
-                        var proc = Interlocked.Increment(ref processed);
-                        progress?.Invoke(proc, total, $"[Not Found] {questName}");
-                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception)
                 {
-                    Interlocked.Increment(ref failed);
-                    lock (failedQuests) { failedQuests.Add(questName); }
-                    var proc = Interlocked.Increment(ref processed);
-                    progress?.Invoke(proc, total, $"[Failed] {questName}");
+                    // Mark all remaining items in batch as failed
+                    foreach (var questName in batch)
+                    {
+                        Interlocked.Increment(ref failed);
+                        lock (lockObj) { failedQuests.Add(questName); }
+                        var proc = Interlocked.Increment(ref processed);
+                        progress?.Invoke(proc, total, $"[Failed] {questName}");
+                    }
                 }
                 finally
                 {
