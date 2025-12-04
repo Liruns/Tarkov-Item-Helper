@@ -58,6 +58,9 @@ public partial class MapTrackerPage : UserControl
     private double _extractNameTextSize = 10.0;
     private bool _hideCompletedObjectives = false;
 
+    // 로그 맵 감시 서비스 (자동 맵 전환용)
+    private readonly LogMapWatcherService _logMapWatcher = LogMapWatcherService.Instance;
+
     public MapTrackerPage()
     {
         try
@@ -120,6 +123,12 @@ public partial class MapTrackerPage : UserControl
             // 퀘스트 진행 상태 변경 이벤트 구독
             _progressService.ProgressChanged += OnQuestProgressChanged;
             _progressService.ObjectiveProgressChanged += OnObjectiveProgressChanged;
+
+            // 자동 Tracking 시작 (Map 탭 활성화 시)
+            StartAutoTracking();
+
+            // 로그 맵 감시 시작 (자동 맵 전환용)
+            StartLogMapWatching();
         }
         catch (Exception ex)
         {
@@ -135,6 +144,12 @@ public partial class MapTrackerPage : UserControl
         // 이벤트 구독 해제
         _progressService.ProgressChanged -= OnQuestProgressChanged;
         _progressService.ObjectiveProgressChanged -= OnObjectiveProgressChanged;
+
+        // 자동 Tracking 중지 (다른 탭으로 이동 시)
+        StopAutoTracking();
+
+        // 로그 맵 감시 중지
+        StopLogMapWatching();
     }
 
     private void SaveMapState()
@@ -297,6 +312,100 @@ public partial class MapTrackerPage : UserControl
     private void OnWatchingStateChanged(object? sender, bool isWatching)
     {
         Dispatcher.Invoke(UpdateUI);
+    }
+
+    #endregion
+
+    #region 자동 Tracking 및 맵 감시
+
+    /// <summary>
+    /// Map 탭 활성화 시 자동으로 Tracking을 시작합니다.
+    /// </summary>
+    private void StartAutoTracking()
+    {
+        if (_trackerService == null) return;
+
+        // 이미 감시 중이면 스킵
+        if (_trackerService.IsWatching) return;
+
+        // 스크린샷 폴더가 설정되어 있으면 자동 시작
+        if (!string.IsNullOrEmpty(_trackerService.Settings.ScreenshotFolderPath))
+        {
+            _trackerService.StartTracking();
+        }
+    }
+
+    /// <summary>
+    /// Map 탭 비활성화 시 Tracking을 중지합니다.
+    /// </summary>
+    private void StopAutoTracking()
+    {
+        if (_trackerService == null) return;
+
+        if (_trackerService.IsWatching)
+        {
+            _trackerService.StopTracking();
+        }
+    }
+
+    /// <summary>
+    /// 로그 맵 감시를 시작합니다 (자동 맵 전환용).
+    /// </summary>
+    private void StartLogMapWatching()
+    {
+        // 이벤트 구독
+        _logMapWatcher.MapChanged += OnLogMapChanged;
+
+        // 로그 감시 시작
+        _logMapWatcher.StartWatching();
+    }
+
+    /// <summary>
+    /// 로그 맵 감시를 중지합니다.
+    /// </summary>
+    private void StopLogMapWatching()
+    {
+        // 이벤트 구독 해제
+        _logMapWatcher.MapChanged -= OnLogMapChanged;
+
+        // 로그 감시 중지
+        _logMapWatcher.StopWatching();
+    }
+
+    /// <summary>
+    /// 로그에서 맵 변경이 감지되었을 때 호출됩니다.
+    /// 자동으로 맵을 전환하고 Trail을 초기화합니다.
+    /// </summary>
+    private void OnLogMapChanged(object? sender, MapChangedEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            // 현재 맵과 같으면 스킵
+            if (string.Equals(_currentMapKey, e.NewMapKey, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            // 맵 콤보박스에서 해당 맵 찾기
+            for (int i = 0; i < CmbMapSelect.Items.Count; i++)
+            {
+                if (CmbMapSelect.Items[i] is ComboBoxItem item &&
+                    string.Equals(item.Tag as string, e.NewMapKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    // 새 맵 시작이므로 Trail 먼저 초기화 (맵 전환 전에)
+                    _trackerService?.ClearTrail();
+                    TrailPath.Points.Clear();
+                    PlayerMarker.Visibility = Visibility.Collapsed;
+                    PlayerDot.Visibility = Visibility.Collapsed;
+                    TxtCoordinates.Text = "--";
+                    TxtLastUpdate.Text = "마지막 업데이트: --";
+
+                    // 맵 선택 변경 (이로 인해 CmbMapSelect_SelectionChanged가 호출됨)
+                    CmbMapSelect.SelectedIndex = i;
+
+                    TxtStatus.Text = $"맵 감지: {e.NewMapKey}";
+                    break;
+                }
+            }
+        });
     }
 
     #endregion
@@ -809,9 +918,14 @@ public partial class MapTrackerPage : UserControl
             var angle = position.Angle ?? 0;
 
             // The Lab 맵은 방향을 왼쪽으로 90도 회전
-            if (string.Equals(_currentMapKey, "the-lab", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_currentMapKey, "Labs", StringComparison.OrdinalIgnoreCase))
             {
                 angle -= 90;
+            }
+            // Factory 맵은 방향을 오른쪽으로 90도 회전
+            else if (string.Equals(_currentMapKey, "Factory", StringComparison.OrdinalIgnoreCase))
+            {
+                angle += 90;
             }
 
             MarkerRotation.Angle = angle;
