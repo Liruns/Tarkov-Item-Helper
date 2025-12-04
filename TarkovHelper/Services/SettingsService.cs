@@ -33,6 +33,7 @@ public class SettingsService
     public event EventHandler<double>? ScavRepChanged;
     public event EventHandler<double>? BaseFontSizeChanged;
     public event EventHandler<int>? DspDecodeCountChanged;
+    public event EventHandler<string?>? PlayerFactionChanged;
 
     private SettingsService()
     {
@@ -278,6 +279,52 @@ public class SettingsService
                 DspDecodeCountChanged?.Invoke(this, clampedValue);
             }
         }
+    }
+
+    /// <summary>
+    /// Player faction (bear, usec, or null for any/both)
+    /// </summary>
+    public string? PlayerFaction
+    {
+        get
+        {
+            if (!_settingsLoaded)
+            {
+                LoadSettings();
+            }
+            return _settings.PlayerFaction;
+        }
+        set
+        {
+            // Normalize: lowercase or null
+            var normalizedValue = string.IsNullOrEmpty(value) ? null : value.ToLowerInvariant();
+            if (_settings.PlayerFaction != normalizedValue)
+            {
+                _settings.PlayerFaction = normalizedValue;
+                SaveSettings();
+                PlayerFactionChanged?.Invoke(this, normalizedValue);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a task should be included based on player's selected faction
+    /// </summary>
+    /// <param name="taskFaction">Task's faction requirement (bear, usec, or null for any)</param>
+    /// <returns>True if task should be included</returns>
+    public bool ShouldIncludeTask(string? taskFaction)
+    {
+        // If task is for any faction, always include
+        if (string.IsNullOrEmpty(taskFaction))
+            return true;
+
+        // If player hasn't selected a faction, include all tasks
+        var playerFaction = PlayerFaction;
+        if (string.IsNullOrEmpty(playerFaction))
+            return true;
+
+        // Check if task faction matches player faction
+        return string.Equals(taskFaction, playerFaction, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -605,5 +652,6 @@ public class SettingsService
         public int? SyncDaysRange { get; set; }
         public double? BaseFontSize { get; set; }
         public int? DspDecodeCount { get; set; }
+        public string? PlayerFaction { get; set; }
     }
 }

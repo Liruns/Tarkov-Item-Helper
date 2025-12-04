@@ -73,6 +73,9 @@ namespace TarkovHelper.Services
 
             [JsonPropertyName("trader")]
             public ApiTrader? Trader { get; set; }
+
+            [JsonPropertyName("factionName")]
+            public string? FactionName { get; set; }
         }
 
         private class ApiTrader
@@ -241,6 +244,7 @@ namespace TarkovHelper.Services
                     name
                     normalizedName
                     kappaRequired
+                    factionName
                     trader {{ name }}
                 }}
             }}";
@@ -289,17 +293,53 @@ namespace TarkovHelper.Services
             // Track which wiki quests were matched to API tasks
             var matchedWikiQuests = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var taskEn in tasksEn)
+            // Group API tasks by wikiMatchName to handle BEAR/USEC variants with same quest
+            // Some quests (e.g., Textile, Battery Change) have different IDs for same content
+            var tasksByWikiName = tasksEn
+                .Select(t => new { Task = t, WikiMatchName = RemovePvpZoneSuffix(t.Name) })
+                .GroupBy(t => t.WikiMatchName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var taskGroup in tasksByWikiName)
             {
-                var nameKo = koById.TryGetValue(taskEn.Id, out var ko) ? ko : null;
-                var nameJa = jaById.TryGetValue(taskEn.Id, out var ja) ? ja : null;
+                var wikiMatchName = taskGroup.Key;
+                var groupTasks = taskGroup.Select(g => g.Task).ToList();
+
+                // Determine faction from API: prefer BEAR/USEC over Any
+                // If all variants are "Any", the quest is for both factions
+                // If mixed (e.g., one BEAR, one USEC), they're faction-specific duplicates - use API faction
+                string? apiFaction = null;
+                var factionNames = groupTasks
+                    .Select(t => t.FactionName)
+                    .Where(f => !string.IsNullOrEmpty(f) && !f.Equals("Any", StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (factionNames.Count == 1)
+                {
+                    // All variants have same faction (e.g., all BEAR) - this is a faction-specific quest
+                    apiFaction = factionNames[0].ToLowerInvariant();
+                }
+                else if (factionNames.Count > 1)
+                {
+                    // Mixed factions (BEAR and USEC variants) - this shouldn't happen for same wiki content
+                    // Treat as faction-neutral (both factions can do it)
+                    apiFaction = null;
+                }
+                // If factionNames.Count == 0, all are "Any" - faction is null (for both factions)
+
+                // Use the first task for base data, but collect all IDs
+                var firstTask = groupTasks[0];
+                var allIds = groupTasks.Select(t => t.Id).Distinct().ToList();
+
+                // Get translations from first task (they should be the same for all variants)
+                var nameKo = koById.TryGetValue(firstTask.Id, out var ko) ? ko : null;
+                var nameJa = jaById.TryGetValue(firstTask.Id, out var ja) ? ja : null;
 
                 // Check if translation is same as English (means no translation available)
-                if (nameKo == taskEn.Name) nameKo = null;
-                if (nameJa == taskEn.Name) nameJa = null;
+                if (nameKo == firstTask.Name) nameKo = null;
+                if (nameJa == firstTask.Name) nameJa = null;
 
-                // Remove [PVP ZONE] suffix for wiki matching
-                var wikiMatchName = RemovePvpZoneSuffix(taskEn.Name);
                 var wikiFilePath = GetWikiFilePath(wikiMatchName);
 
                 bool reqKappa = false;
@@ -313,16 +353,19 @@ namespace TarkovHelper.Services
                     // Parse additional data from wiki
                     var wikiData = WikiQuestParser.ParseAll(wikiContent);
 
+                    // Use API faction if available, otherwise fall back to wiki faction
+                    var finalFaction = apiFaction ?? wikiData.Faction;
+
                     result.Add(new TarkovTask
                     {
-                        Ids = new List<string> { taskEn.Id },
-                        Name = WebUtility.HtmlDecode(wikiMatchName),  // Use wiki-based name (without [PVP ZONE]), decode HTML entities
+                        Ids = allIds,  // Merged IDs from all variants
+                        Name = WebUtility.HtmlDecode(wikiMatchName),
                         NameKo = nameKo,
                         NameJa = nameJa,
                         ReqKappa = reqKappa,
-                        Trader = taskEn.Trader?.Name ?? string.Empty,
+                        Trader = firstTask.Trader?.Name ?? string.Empty,
                         NormalizedName = NormalizedNameGenerator.ApplyQuestOverride(
-                            GenerateNormalizedName(wikiMatchName)),  // Generate from wiki name with quest overrides
+                            GenerateNormalizedName(wikiMatchName)),
                         Maps = wikiData.Maps,
                         Previous = wikiData.Previous,
                         LeadsTo = wikiData.LeadsTo,
@@ -336,19 +379,25 @@ namespace TarkovHelper.Services
                         {
                             FileName = g.FileName,
                             Caption = g.Caption
-                        }).ToList()
+                        }).ToList(),
+                        Faction = finalFaction,
+                        AlternativeQuests = wikiData.AlternativeQuests
                     });
                 }
                 else
                 {
-                    missingTasks.Add(new MissingTask
+                    // Add missing task for each ID in the group
+                    foreach (var task in groupTasks)
                     {
-                        Id = taskEn.Id,
-                        Name = taskEn.Name,
-                        NameWithoutPvp = wikiMatchName,
-                        Trader = taskEn.Trader?.Name ?? string.Empty,
-                        Reason = $"Wiki file not found: {wikiMatchName}.wiki"
-                    });
+                        missingTasks.Add(new MissingTask
+                        {
+                            Id = task.Id,
+                            Name = task.Name,
+                            NameWithoutPvp = wikiMatchName,
+                            Trader = task.Trader?.Name ?? string.Empty,
+                            Reason = $"Wiki file not found: {wikiMatchName}.wiki"
+                        });
+                    }
                 }
             }
 
@@ -402,7 +451,9 @@ namespace TarkovHelper.Services
                             {
                                 FileName = g.FileName,
                                 Caption = g.Caption
-                            }).ToList()
+                            }).ToList(),
+                            Faction = wikiData?.Faction,
+                            AlternativeQuests = wikiData?.AlternativeQuests
                         });
 
                         wikiOnlyCount++;

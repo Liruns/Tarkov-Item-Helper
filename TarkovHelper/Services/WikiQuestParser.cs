@@ -583,7 +583,9 @@ namespace TarkovHelper.Services
                 RequiredItems = ParseRequiredItems(wikiContent),
                 Objectives = ParseObjectives(wikiContent),
                 GuideText = guideText,
-                GuideImages = guideImages
+                GuideImages = guideImages,
+                Faction = ParseFaction(wikiContent),
+                AlternativeQuests = ParseAlternativeQuests(wikiContent)
             };
         }
 
@@ -698,6 +700,67 @@ namespace TarkovHelper.Services
 
         #endregion
 
+        #region Alternative Quests
+
+        /// <summary>
+        /// Parse alternative quests (mutually exclusive "Other choices") from wiki content
+        /// These are quests listed in the |related field, separated by &lt;br/&gt; or "or"
+        /// Example: |related = [[Chemical - Part 4]]&lt;br/&gt;or&lt;br/&gt;[[Big Customer]]
+        /// </summary>
+        /// <param name="wikiContent">Raw wiki file content</param>
+        /// <returns>List of alternative quest normalized names, or null if none</returns>
+        public static List<string>? ParseAlternativeQuests(string wikiContent)
+        {
+            // Pattern: |related = [[Quest1]]<br/>or<br/>[[Quest2]] or |related = [[Quest1]]<br/>[[Quest2]]
+            // Note: |related2 is for "Requirement for" relationships, not alternatives
+            var match = Regex.Match(wikiContent, @"\|related\s*=\s*([^\|\}]*?)(?=\|related2|\|reqkappa|\|leads|\|previous|\}\})",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            if (!match.Success || string.IsNullOrWhiteSpace(match.Groups[1].Value))
+                return null;
+
+            var value = match.Groups[1].Value.Trim();
+
+            // Skip empty values or values that are just whitespace/line separators
+            if (string.IsNullOrWhiteSpace(value.Replace("<br/>", "").Replace("<br>", "").Replace("or", "").Trim()))
+                return null;
+
+            var questNames = ExtractWikiLinks(value);
+
+            if (questNames.Count == 0)
+                return null;
+
+            // Convert to normalized names
+            return questNames.Select(NormalizedNameGenerator.Generate).Distinct().ToList();
+        }
+
+        #endregion
+
+        #region Faction
+
+        /// <summary>
+        /// Parse required faction from wiki content
+        /// </summary>
+        /// <param name="wikiContent">Raw wiki file content</param>
+        /// <returns>Faction name (bear, usec) or null for any</returns>
+        public static string? ParseFaction(string wikiContent)
+        {
+            // Pattern: "This quest is only obtainable by [[BEAR]] PMCs."
+            // Pattern: "This quest is only obtainable by [[USEC]] PMCs."
+            var match = Regex.Match(wikiContent,
+                @"only\s+obtainable\s+by\s+\[\[(BEAR|USEC)\]\]",
+                RegexOptions.IgnoreCase);
+
+            if (match.Success)
+            {
+                return match.Groups[1].Value.ToLowerInvariant();
+            }
+
+            return null;
+        }
+
+        #endregion
+
         #region Maps
 
         /// <summary>
@@ -748,5 +811,13 @@ namespace TarkovHelper.Services
         public List<string>? Objectives { get; set; }
         public string? GuideText { get; set; }
         public List<GuideImage>? GuideImages { get; set; }
+        /// <summary>
+        /// Required faction (bear, usec, or null for any)
+        /// </summary>
+        public string? Faction { get; set; }
+        /// <summary>
+        /// Alternative quests (mutually exclusive - completing one fails the others)
+        /// </summary>
+        public List<string>? AlternativeQuests { get; set; }
     }
 }

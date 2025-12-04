@@ -318,41 +318,49 @@
                                FontSize="{DynamicResource FontSizeSmall}" Foreground="{StaticResource TextSecondaryBrush}"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel x:Name="DetailPanel" Visibility="Collapsed">
-                            <!-- Item Header -->
-                            <Grid Margin="0,0,0,16">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="64"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
+                    <Grid x:Name="DetailPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
 
-                                <!-- Item Icon -->
-                                <Border Grid.Column="0" Width="56" Height="56"
-                                        CornerRadius="6" Background="{StaticResource BackgroundDarkBrush}">
-                                    <Image x:Name="ImgDetailIcon"
-                                           Width="48" Height="48"
-                                           Stretch="Uniform"
-                                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                                </Border>
+                        <!-- Item Header (Fixed) -->
+                        <Grid Grid.Row="0" Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="64"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
 
-                                <!-- Item Name -->
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-                                    <TextBlock x:Name="TxtDetailName" FontSize="{DynamicResource FontSizeMedium}" FontWeight="SemiBold"
-                                               Foreground="{StaticResource AccentBrush}"
-                                               TextWrapping="Wrap"/>
-                                    <TextBlock x:Name="TxtDetailSubtitle" FontSize="{DynamicResource FontSizeXSmall}"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </Grid>
+                            <!-- Item Icon -->
+                            <Border Grid.Column="0" Width="56" Height="56"
+                                    CornerRadius="6" Background="{StaticResource BackgroundDarkBrush}">
+                                <Image x:Name="ImgDetailIcon"
+                                       Width="48" Height="48"
+                                       Stretch="Uniform"
+                                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                            </Border>
 
-                            <!-- Wiki Button -->
-                            <Button x:Name="BtnWiki" Content="Open Wiki" Padding="12,6"
-                                    Margin="0,0,0,16" HorizontalAlignment="Left"
-                                    Click="BtnWiki_Click"/>
+                            <!-- Item Name -->
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                <TextBlock x:Name="TxtDetailName" FontSize="{DynamicResource FontSizeMedium}" FontWeight="SemiBold"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock x:Name="TxtDetailSubtitle" FontSize="{DynamicResource FontSizeXSmall}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
 
-                            <!-- Summary -->
+                        <!-- Wiki Button (Fixed) -->
+                        <Button x:Name="BtnWiki" Grid.Row="1" Content="Open Wiki" Padding="12,6"
+                                Margin="0,0,0,16" HorizontalAlignment="Left"
+                                Click="BtnWiki_Click"/>
+
+                        <!-- Scrollable Content -->
+                        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <!-- Summary -->
                             <Border Background="{StaticResource BackgroundDarkBrush}"
                                     CornerRadius="4" Padding="12" Margin="0,0,0,16">
                                 <Grid>
@@ -578,8 +586,9 @@
                                     </ItemsControl>
                                 </Border>
                             </StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

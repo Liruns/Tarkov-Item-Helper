@@ -183,6 +183,73 @@
                         <ComboBoxItem Content="Done" Tag="Done"/>
                         <ComboBoxItem Content="Failed" Tag="Failed"/>
                     </ComboBox>
+
+                    <!-- Faction Toggle -->
+                    <Border Margin="16,0,0,0" Background="{StaticResource BackgroundDarkBrush}"
+                            CornerRadius="4" Padding="2">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="RbBear" Content="BEAR" GroupName="Faction"
+                                         Margin="0" Padding="8,4" Cursor="Hand"
+                                         Checked="Faction_Changed">
+                                <RadioButton.Template>
+                                    <ControlTemplate TargetType="RadioButton">
+                                        <Border x:Name="Border" Background="Transparent"
+                                                CornerRadius="3" Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Border" Property="Background" Value="#D84315"/>
+                                            </Trigger>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLightBrush}"/>
+                                            </Trigger>
+                                            <MultiTrigger>
+                                                <MultiTrigger.Conditions>
+                                                    <Condition Property="IsChecked" Value="True"/>
+                                                    <Condition Property="IsMouseOver" Value="True"/>
+                                                </MultiTrigger.Conditions>
+                                                <Setter TargetName="Border" Property="Background" Value="#BF360C"/>
+                                            </MultiTrigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </RadioButton.Template>
+                                <RadioButton.Foreground>
+                                    <SolidColorBrush Color="White"/>
+                                </RadioButton.Foreground>
+                            </RadioButton>
+                            <RadioButton x:Name="RbUsec" Content="USEC" GroupName="Faction"
+                                         Margin="0" Padding="8,4" Cursor="Hand"
+                                         Checked="Faction_Changed">
+                                <RadioButton.Template>
+                                    <ControlTemplate TargetType="RadioButton">
+                                        <Border x:Name="Border" Background="Transparent"
+                                                CornerRadius="3" Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Border" Property="Background" Value="#1565C0"/>
+                                            </Trigger>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLightBrush}"/>
+                                            </Trigger>
+                                            <MultiTrigger>
+                                                <MultiTrigger.Conditions>
+                                                    <Condition Property="IsChecked" Value="True"/>
+                                                    <Condition Property="IsMouseOver" Value="True"/>
+                                                </MultiTrigger.Conditions>
+                                                <Setter TargetName="Border" Property="Background" Value="#0D47A1"/>
+                                            </MultiTrigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </RadioButton.Template>
+                                <RadioButton.Foreground>
+                                    <SolidColorBrush Color="White"/>
+                                </RadioButton.Foreground>
+                            </RadioButton>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Grid>
         </Border>
@@ -549,6 +616,50 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+                                    </Border>
+                                </StackPanel>
+
+                                <!-- Alternative Quests Section (Mutually Exclusive) -->
+                                <StackPanel x:Name="AlternativeQuestsSectionWrapper" Visibility="Collapsed">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Text="Other Choices" FontSize="{DynamicResource FontSizeSmall}" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                                        <Border Padding="6,2" CornerRadius="3" Margin="8,0,0,0"
+                                                Background="#FF5722">
+                                            <TextBlock Text="Mutually Exclusive" FontSize="{DynamicResource FontSizeTiny}"
+                                                       Foreground="White" FontWeight="SemiBold"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <Border Background="{StaticResource BackgroundDarkBrush}"
+                                            CornerRadius="4" Padding="12" Margin="0,0,0,16">
+                                        <StackPanel>
+                                            <TextBlock Text="Completing this quest will FAIL the following quests:"
+                                                       FontSize="{DynamicResource FontSizeTiny}"
+                                                       Foreground="#FF5722" FontStyle="Italic"
+                                                       Margin="0,0,0,8"/>
+                                            <ItemsControl x:Name="AlternativeQuestsList">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                            <TextBlock Text="- " Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                            <TextBlock Text="{Binding DisplayName}"
+                                                                       Foreground="{StaticResource TextPrimaryBrush}" FontSize="{DynamicResource FontSizeXSmall}"/>
+                                                            <TextBlock Text=" (" FontSize="{DynamicResource FontSizeTiny}"
+                                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="4,0,0,0"/>
+                                                            <TextBlock Text="{Binding TraderName}" FontSize="{DynamicResource FontSizeTiny}"
+                                                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                            <TextBlock Text=")" FontSize="{DynamicResource FontSizeTiny}"
+                                                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                            <Border Padding="4,1" CornerRadius="2" Margin="8,0,0,0"
+                                                                    Background="{Binding StatusBackground}">
+                                                                <TextBlock Text="{Binding StatusText}" FontSize="{DynamicResource FontSizeTiny}"
+                                                                           Foreground="White"/>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
                                     </Border>
                                 </StackPanel>
                             </StackPanel>
