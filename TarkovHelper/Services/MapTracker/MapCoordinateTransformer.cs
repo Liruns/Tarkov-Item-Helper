@@ -1,0 +1,219 @@
+using TarkovHelper.Models.MapTracker;
+
+namespace TarkovHelper.Services.MapTracker;
+
+/// <summary>
+/// 게임 좌표를 SVG viewBox 좌표로 변환하는 서비스.
+/// tarkov.dev의 Leaflet 좌표 변환 방식을 사용합니다.
+///
+/// [좌표 변환 과정]
+/// 1. 게임 좌표 (position.x, position.z) → Leaflet (lng, lat)
+/// 2. CoordinateRotation 각도로 회전 적용
+/// 3. CRS Transform: pixel = scale * coord + margin
+/// 4. SVG bounds 픽셀 영역을 viewBox(0,0)~(width,height)로 정규화
+/// </summary>
+public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
+{
+    private Dictionary<string, MapConfig> _mapConfigs = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> _aliasToKey = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 빈 맵 설정으로 변환기를 생성합니다.
+    /// </summary>
+    public MapCoordinateTransformer()
+    {
+    }
+
+    /// <summary>
+    /// 지정된 맵 설정으로 변환기를 생성합니다.
+    /// </summary>
+    public MapCoordinateTransformer(IEnumerable<MapConfig> maps)
+    {
+        UpdateMaps(maps);
+    }
+
+    /// <inheritdoc />
+    public bool TryTransform(EftPosition worldPosition, out ScreenPosition? screenPosition)
+    {
+        // 스크린샷 파일명: X=position.x, Y=position.y(높이), Z=position.z
+        return TryTransformGameCoordinate(
+            worldPosition.MapName,
+            worldPosition.X,
+            worldPosition.Z,
+            worldPosition.Angle,
+            out screenPosition);
+    }
+
+    /// <inheritdoc />
+    public bool TryTransform(string mapKey, double worldX, double worldY, double? angle, out ScreenPosition? screenPosition)
+    {
+        // worldX = position.x, worldY = position.z
+        return TryTransformGameCoordinate(mapKey, worldX, worldY, angle, out screenPosition);
+    }
+
+    /// <inheritdoc />
+    public bool TryTransformApiCoordinate(string mapKey, double apiX, double apiY, double? apiZ, out ScreenPosition? screenPosition)
+    {
+        // API 좌표: apiX=position.x, apiZ=position.z
+        return TryTransformGameCoordinate(mapKey, apiX, apiZ, null, out screenPosition);
+    }
+
+    /// <summary>
+    /// 게임 좌표를 SVG viewBox 좌표로 변환합니다.
+    /// </summary>
+    /// <param name="mapKey">맵 키</param>
+    /// <param name="gameX">게임 position.x 좌표</param>
+    /// <param name="gameZ">게임 position.z 좌표</param>
+    /// <param name="angle">플레이어 방향 각도 (선택)</param>
+    /// <param name="screenPosition">변환된 화면 좌표</param>
+    /// <returns>변환 성공 여부</returns>
+    private bool TryTransformGameCoordinate(string mapKey, double gameX, double? gameZ, double? angle, out ScreenPosition? screenPosition)
+    {
+        screenPosition = null;
+
+        var config = GetMapConfig(mapKey);
+        if (config == null)
+            return false;
+
+        if (config.Transform == null || config.Transform.Length < 4)
+            return false;
+
+        if (config.SvgBounds == null || config.SvgBounds.Length < 2)
+            return false;
+
+        try
+        {
+            // 1. 게임 좌표 → Leaflet 좌표 (lat=z, lng=x)
+            var lat = gameZ ?? 0;
+            var lng = gameX;
+
+            // 2. 회전 적용
+            var (rotatedLng, rotatedLat) = ApplyRotation(lng, lat, config.CoordinateRotation);
+
+            // 3. CRS Transform (Y축 반전 포함)
+            var scaleX = config.Transform[0];
+            var marginX = config.Transform[1];
+            var scaleY = config.Transform[2] * -1;
+            var marginY = config.Transform[3];
+
+            var markerPixelX = scaleX * rotatedLng + marginX;
+            var markerPixelY = scaleY * rotatedLat + marginY;
+
+            // 4. SVG bounds → pixel bounds
+            var (svgPixelXMin, svgPixelXMax, svgPixelYMin, svgPixelYMax) =
+                CalculateSvgPixelBounds(config, scaleX, marginX, scaleY, marginY);
+
+            // 5. ViewBox 좌표로 정규화
+            var normalizedX = (markerPixelX - svgPixelXMin) / (svgPixelXMax - svgPixelXMin);
+            var normalizedY = (markerPixelY - svgPixelYMin) / (svgPixelYMax - svgPixelYMin);
+
+            screenPosition = new ScreenPosition
+            {
+                MapKey = config.Key,
+                X = normalizedX * config.ImageWidth,
+                Y = normalizedY * config.ImageHeight,
+                Angle = angle,
+                OriginalPosition = new EftPosition
+                {
+                    MapName = mapKey,
+                    X = gameX,
+                    Y = 0,
+                    Z = gameZ,
+                    Angle = angle,
+                    Timestamp = DateTime.Now
+                }
+            };
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 좌표에 회전을 적용합니다.
+    /// </summary>
+    private static (double rotatedLng, double rotatedLat) ApplyRotation(double lng, double lat, int rotationDegrees)
+    {
+        var angleInRadians = rotationDegrees * Math.PI / 180.0;
+        var cosAngle = Math.Cos(angleInRadians);
+        var sinAngle = Math.Sin(angleInRadians);
+
+        var rotatedLng = lng * cosAngle - lat * sinAngle;
+        var rotatedLat = lng * sinAngle + lat * cosAngle;
+
+        return (rotatedLng, rotatedLat);
+    }
+
+    /// <summary>
+    /// SVG bounds를 픽셀 좌표로 변환합니다.
+    /// </summary>
+    private static (double xMin, double xMax, double yMin, double yMax) CalculateSvgPixelBounds(
+        MapConfig config, double scaleX, double marginX, double scaleY, double marginY)
+    {
+        var svgLat1 = config.SvgBounds![0][1];
+        var svgLng1 = config.SvgBounds[0][0];
+        var svgLat2 = config.SvgBounds[1][1];
+        var svgLng2 = config.SvgBounds[1][0];
+
+        var (svgRotatedLng1, svgRotatedLat1) = ApplyRotation(svgLng1, svgLat1, config.CoordinateRotation);
+        var (svgRotatedLng2, svgRotatedLat2) = ApplyRotation(svgLng2, svgLat2, config.CoordinateRotation);
+
+        var svgPixelX1 = scaleX * svgRotatedLng1 + marginX;
+        var svgPixelY1 = scaleY * svgRotatedLat1 + marginY;
+        var svgPixelX2 = scaleX * svgRotatedLng2 + marginX;
+        var svgPixelY2 = scaleY * svgRotatedLat2 + marginY;
+
+        return (
+            Math.Min(svgPixelX1, svgPixelX2),
+            Math.Max(svgPixelX1, svgPixelX2),
+            Math.Min(svgPixelY1, svgPixelY2),
+            Math.Max(svgPixelY1, svgPixelY2)
+        );
+    }
+
+    /// <inheritdoc />
+    public void UpdateMaps(IEnumerable<MapConfig> maps)
+    {
+        _mapConfigs.Clear();
+        _aliasToKey.Clear();
+
+        foreach (var map in maps)
+        {
+            if (string.IsNullOrWhiteSpace(map.Key))
+                continue;
+
+            _mapConfigs[map.Key] = map;
+            _aliasToKey[map.Key] = map.Key;
+
+            if (map.Aliases != null)
+            {
+                foreach (var alias in map.Aliases)
+                {
+                    if (!string.IsNullOrWhiteSpace(alias))
+                        _aliasToKey[alias] = map.Key;
+                }
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public MapConfig? GetMapConfig(string mapKey)
+    {
+        if (string.IsNullOrWhiteSpace(mapKey))
+            return null;
+
+        if (_aliasToKey.TryGetValue(mapKey, out var actualKey))
+            return _mapConfigs.GetValueOrDefault(actualKey);
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> GetAllMapKeys()
+    {
+        return _mapConfigs.Keys.ToList().AsReadOnly();
+    }
+}
