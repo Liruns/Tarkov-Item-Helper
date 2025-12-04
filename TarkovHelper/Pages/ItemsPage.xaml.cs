@@ -263,6 +263,7 @@ namespace TarkovHelper.Pages
             _questProgressService.ProgressChanged += OnProgressChanged;
             _hideoutProgressService.ProgressChanged += OnProgressChanged;
             _inventoryService.InventoryChanged += OnInventoryChanged;
+            SettingsService.Instance.PlayerFactionChanged += OnFactionChanged;
 
             Loaded += ItemsPage_Loaded;
             Unloaded += ItemsPage_Unloaded;
@@ -276,6 +277,7 @@ namespace TarkovHelper.Pages
             _questProgressService.ProgressChanged -= OnProgressChanged;
             _hideoutProgressService.ProgressChanged -= OnProgressChanged;
             _inventoryService.InventoryChanged -= OnInventoryChanged;
+            SettingsService.Instance.PlayerFactionChanged -= OnFactionChanged;
         }
 
         private void OnInventoryChanged(object? sender, EventArgs e)
@@ -303,6 +305,7 @@ namespace TarkovHelper.Pages
                 _questProgressService.ProgressChanged += OnProgressChanged;
                 _hideoutProgressService.ProgressChanged += OnProgressChanged;
                 _inventoryService.InventoryChanged += OnInventoryChanged;
+                SettingsService.Instance.PlayerFactionChanged += OnFactionChanged;
             }
 
             // Skip if already loaded (avoid re-initialization on tab switch)
@@ -378,6 +381,19 @@ namespace TarkovHelper.Pages
             {
                 await LoadItemsAsync();
                 ApplyFilters();
+                // Load images in background
+                _ = LoadImagesInBackgroundAsync();
+            });
+        }
+
+        private void OnFactionChanged(object? sender, string? e)
+        {
+            // Reload items when faction changes to update item counts
+            Dispatcher.Invoke(async () =>
+            {
+                await LoadItemsAsync();
+                ApplyFilters();
+                UpdateDetailPanel();
                 // Load images in background
                 _ = LoadImagesInBackgroundAsync();
             });
@@ -654,12 +670,17 @@ namespace TarkovHelper.Pages
         private Dictionary<string, QuestItemAggregate> GetQuestItemRequirements()
         {
             var result = new Dictionary<string, QuestItemAggregate>(StringComparer.OrdinalIgnoreCase);
+            var settings = SettingsService.Instance;
 
             foreach (var task in _questProgressService.AllTasks)
             {
                 // Skip completed quests
                 var status = _questProgressService.GetStatus(task);
                 if (status == QuestStatus.Done)
+                    continue;
+
+                // Skip quests from other factions
+                if (!settings.ShouldIncludeTask(task.Faction))
                     continue;
 
                 if (task.RequiredItems == null)
@@ -1076,12 +1097,17 @@ namespace TarkovHelper.Pages
         private List<QuestItemSourceViewModel> GetQuestSources(string itemNormalizedName)
         {
             var sources = new List<QuestItemSourceViewModel>();
+            var settings = SettingsService.Instance;
 
             foreach (var task in _questProgressService.AllTasks)
             {
                 // Skip completed quests
                 var status = _questProgressService.GetStatus(task);
                 if (status == QuestStatus.Done)
+                    continue;
+
+                // Skip quests from other factions
+                if (!settings.ShouldIncludeTask(task.Faction))
                     continue;
 
                 if (task.RequiredItems == null)

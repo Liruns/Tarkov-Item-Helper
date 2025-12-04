@@ -112,6 +112,19 @@ namespace TarkovHelper.Models
         /// </summary>
         [JsonPropertyName("guideImages")]
         public List<GuideImage>? GuideImages { get; set; }
+
+        /// <summary>
+        /// Required faction for this quest (bear, usec, or null for any)
+        /// </summary>
+        [JsonPropertyName("faction")]
+        public string? Faction { get; set; }
+
+        /// <summary>
+        /// Alternative quests (mutually exclusive - completing one fails the others)
+        /// These are "Other choices" quests from wiki's |related field
+        /// </summary>
+        [JsonPropertyName("alternativeQuests")]
+        public List<string>? AlternativeQuests { get; set; }
     }
 
     /// <summary>

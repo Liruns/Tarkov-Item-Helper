@@ -21,8 +21,8 @@ namespace TarkovHelper.Services.MapTracker;
 /// 패턴: @"\d{4}-\d{2}-\d{2}\[\d{2}-\d{2}-\d{2}\]\s*(?&lt;map>\w+)\s*\((?&lt;x>-?\d+\.?\d*),\s*(?&lt;y>-?\d+\.?\d*)(?:,\s*(?&lt;z>-?\d+\.?\d*))?\)(?:\s*\[(?&lt;angle>-?\d+\.?\d*)\])?"
 ///
 /// 예시 2 (쿼터니언 형식):
-/// 파일명: "2023-09-22[13-00]_-49.9, 12.1, -51.8_0.0, -0.8, 0.1, -0.5_14.08.png"
-/// 패턴: @"\d{4}-\d{2}-\d{2}\[\d{2}-\d{2}\]_(?&lt;x>-?\d+\.?\d*),\s*(?&lt;y>-?\d+\.?\d*),\s*(?&lt;z>-?\d+\.?\d*)_(?&lt;qx>-?\d+\.?\d*),\s*(?&lt;qy>-?\d+\.?\d*),\s*(?&lt;qz>-?\d+\.?\d*),\s*(?&lt;qw>-?\d+\.?\d*)_"
+/// 파일명: "2025-12-0413-52_-277.49_-0.11_329.64_-0.00019_0.98508_-0.00107_-0.17208_13.11_0.png"
+/// 패턴: @"\d{4}-\d{2}-\d{2}\d{2}-\d{2}_(?&lt;x>-?\d+\.?\d*)_(?&lt;y>-?\d+\.?\d*)_(?&lt;z>-?\d+\.?\d*)_(?&lt;qx>-?\d+\.?\d*)_(?&lt;qy>-?\d+\.?\d*)_(?&lt;qz>-?\d+\.?\d*)_(?&lt;qw>-?\d+\.?\d*)_"
 /// </summary>
 public sealed class ScreenshotCoordinateParser : IScreenshotCoordinateParser
 {
@@ -51,10 +51,10 @@ public sealed class ScreenshotCoordinateParser : IScreenshotCoordinateParser
 
     /// <summary>
     /// 기본 파일명 패턴.
-    /// EFT 스크린샷 형식 (쿼터니언): "2023-09-22[13-00]_-49.9, 12.1, -51.8_0.0, -0.8, 0.1, -0.5_14.08.png"
+    /// EFT 스크린샷 형식 (쿼터니언): "2025-12-0413-52_-277.49_-0.11_329.64_-0.00019_0.98508_-0.00107_-0.17208_13.11_0.png"
     /// </summary>
     private const string DefaultPattern =
-        @"\d{4}-\d{2}-\d{2}\[\d{2}-\d{2}\]_(?<x>-?\d+\.?\d*),\s*(?<y>-?\d+\.?\d*),\s*(?<z>-?\d+\.?\d*)_(?<qx>-?\d+\.?\d*),\s*(?<qy>-?\d+\.?\d*),\s*(?<qz>-?\d+\.?\d*),\s*(?<qw>-?\d+\.?\d*)_";
+        @"\d{4}-\d{2}-\d{2}\d{2}-\d{2}_(?<x>-?\d+\.?\d*)_(?<y>-?\d+\.?\d*)_(?<z>-?\d+\.?\d*)_(?<qx>-?\d+\.?\d*)_(?<qy>-?\d+\.?\d*)_(?<qz>-?\d+\.?\d*)_(?<qw>-?\d+\.?\d*)_";
 
     /// <inheritdoc />
     public bool TryParse(string fileName, out EftPosition? position)

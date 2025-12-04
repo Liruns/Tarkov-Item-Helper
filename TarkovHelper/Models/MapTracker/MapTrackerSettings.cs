@@ -219,7 +219,9 @@ public sealed class MapTrackerSettings
 
     /// <summary>
     /// 기본 파일명 패턴.
-    /// EFT 스크린샷 파일명 형식 (쿼터니언): "2023-09-22[13-00]_-49.9, 12.1, -51.8_0.0, -0.8, 0.1, -0.5_14.08.png"
+    /// EFT 스크린샷 파일명 형식 (쿼터니언):
+    /// - 형식 1: "2025-12-0413-52_-277.49_-0.11_329.64_-0.00019_0.98508_-0.00107_-0.17208_13.11_0.png"
+    /// - 형식 2 (레거시): "2023-09-22[13-00]_-49.9, 12.1, -51.8_0.0, -0.8, 0.1, -0.5_14.08.png"
     ///
     /// [지원되는 그룹]
     /// - x, y: 좌표 (필수)
@@ -229,7 +231,7 @@ public sealed class MapTrackerSettings
     /// - qx, qy, qz, qw: 쿼터니언 회전값 (선택 - angle 대신 사용 가능)
     /// </summary>
     private const string DefaultFileNamePattern =
-        @"\d{4}-\d{2}-\d{2}\[\d{2}-\d{2}\]_(?<x>-?\d+\.?\d*),\s*(?<y>-?\d+\.?\d*),\s*(?<z>-?\d+\.?\d*)_(?<qx>-?\d+\.?\d*),\s*(?<qy>-?\d+\.?\d*),\s*(?<qz>-?\d+\.?\d*),\s*(?<qw>-?\d+\.?\d*)_";
+        @"\d{4}-\d{2}-\d{2}\d{2}-\d{2}_(?<x>-?\d+\.?\d*)_(?<y>-?\d+\.?\d*)_(?<z>-?\d+\.?\d*)_(?<qx>-?\d+\.?\d*)_(?<qy>-?\d+\.?\d*)_(?<qz>-?\d+\.?\d*)_(?<qw>-?\d+\.?\d*)_";
 
     /// <summary>
     /// 기본 맵 설정 목록 생성.
@@ -238,176 +240,129 @@ public sealed class MapTrackerSettings
     /// </summary>
     private static List<MapConfig> GetDefaultMaps()
     {
+        // tarkov.dev maps.json 데이터 기반
+        // Transform: [scaleX, marginX, scaleY, marginY]
+        // SvgBounds: [[maxLat, minLng], [minLat, maxLng]]
         return new List<MapConfig>
         {
             new()
             {
                 Key = "Woods",
                 DisplayName = "Woods",
-                ImagePath = "Assets/Maps/Woods.svg",
-                // bounds: [[650,-945],[-762,470]] -> X: -762~650, Y: -945~470
-                WorldMinX = -762.0,
-                WorldMaxX = 650.0,
-                WorldMinY = -945.0,
-                WorldMaxY = 470.0,
-                // SVG viewBox: 0 0 1401.8693 1420.5972
+                ImagePath = "Assets/Maps/Woods_tarkovdev.svg",
                 ImageWidth = 1402,
                 ImageHeight = 1421,
                 Transform = [0.1855, 113.1, 0.1855, 167.8],
                 CoordinateRotation = 180,
+                SvgBounds = [[650, -945], [-695, 470]],
                 Aliases = new List<string> { "woods", "WOODS" }
             },
             new()
             {
                 Key = "Customs",
                 DisplayName = "Customs",
-                ImagePath = "Assets/Maps/Customs.svg",
-                // bounds: [[698,-307],[-372,237]] -> X: -372~698, Y: -307~237
-                WorldMinX = -372.0,
-                WorldMaxX = 698.0,
-                WorldMinY = -307.0,
-                WorldMaxY = 237.0,
-                // SVG viewBox: 0 0 1062.4827 535.17401
+                ImagePath = "Assets/Maps/Customs_tarkovdev.svg",
                 ImageWidth = 1062,
                 ImageHeight = 535,
                 Transform = [0.239, 168.65, 0.239, 136.35],
                 CoordinateRotation = 180,
+                SvgBounds = [[698, -307], [-372, 237]],
                 Aliases = new List<string> { "customs", "CUSTOMS", "bigmap" }
             },
             new()
             {
                 Key = "Shoreline",
                 DisplayName = "Shoreline",
-                ImagePath = "Assets/Maps/Shoreline.svg",
-                // bounds: [[508,-415],[-1060,618]] -> X: -1060~508, Y: -415~618
-                WorldMinX = -1060.0,
-                WorldMaxX = 508.0,
-                WorldMinY = -415.0,
-                WorldMaxY = 618.0,
-                // SVG viewBox: 0 0 1559.5717 1032.4935
+                ImagePath = "Assets/Maps/Shoreline_tarkovdev.svg",
                 ImageWidth = 1560,
                 ImageHeight = 1032,
                 Transform = [0.16, 83.2, 0.16, 111.1],
                 CoordinateRotation = 180,
+                SvgBounds = [[508, -415], [-1060, 618]],
                 Aliases = new List<string> { "shoreline", "SHORELINE" }
             },
             new()
             {
                 Key = "Interchange",
                 DisplayName = "Interchange",
-                ImagePath = "Assets/Maps/Interchange.svg",
-                // bounds: [[532.75,-442.75],[-364,453.5]] -> X: -364~532.75, Y: -442.75~453.5
-                WorldMinX = -364.0,
-                WorldMaxX = 532.75,
-                WorldMinY = -442.75,
-                WorldMaxY = 453.5,
-                // SVG viewBox: 0 0 977.09998 977.09998
+                ImagePath = "Assets/Maps/Interchange_tarkovdev.svg",
                 ImageWidth = 977,
                 ImageHeight = 977,
                 Transform = [0.265, 150.6, 0.265, 134.6],
                 CoordinateRotation = 180,
+                SvgBounds = [[532.75, -442.75], [-364, 453.5]],
                 Aliases = new List<string> { "interchange", "INTERCHANGE" }
             },
             new()
             {
                 Key = "Reserve",
                 DisplayName = "Reserve",
-                ImagePath = "Assets/Maps/Reserve.svg",
-                // bounds: [[289,-293],[-303,244]] -> X: -303~289, Y: -293~244
-                WorldMinX = -303.0,
-                WorldMaxX = 289.0,
-                WorldMinY = -293.0,
-                WorldMaxY = 244.0,
-                // SVG viewBox: 0 0 827.28742 761.16437
+                ImagePath = "Assets/Maps/Reserve_tarkovdev.svg",
                 ImageWidth = 827,
                 ImageHeight = 761,
                 Transform = [0.395, 122.0, 0.395, 137.65],
                 CoordinateRotation = 180,
+                SvgBounds = [[289, -338], [-303, 336]],
                 Aliases = new List<string> { "reserve", "RESERVE", "RezervBase" }
             },
             new()
             {
                 Key = "Lighthouse",
                 DisplayName = "Lighthouse",
-                ImagePath = "Assets/Maps/Lighthouse.svg",
-                // bounds: [[515,-998],[-545,725]] -> X: -545~515, Y: -998~725
-                WorldMinX = -545.0,
-                WorldMaxX = 515.0,
-                WorldMinY = -998.0,
-                WorldMaxY = 725.0,
-                // SVG viewBox: 0 0 1059.3752 1722.9499
+                ImagePath = "Assets/Maps/Lighthouse_tarkovdev.svg",
                 ImageWidth = 1059,
                 ImageHeight = 1723,
                 Transform = [0.2, 0, 0.2, 0],
                 CoordinateRotation = 180,
+                SvgBounds = [[515, -998], [-545, 725]],
                 Aliases = new List<string> { "lighthouse", "LIGHTHOUSE" }
             },
             new()
             {
                 Key = "StreetsOfTarkov",
                 DisplayName = "Streets of Tarkov",
-                ImagePath = "Assets/Maps/StreetsOfTarkov.svg",
-                // bounds: [[323,-317],[-280,554]] -> X: -280~323, Y: -317~554
-                WorldMinX = -280.0,
-                WorldMaxX = 323.0,
-                WorldMinY = -317.0,
-                WorldMaxY = 554.0,
-                // SVG viewBox: 0 0 605.32395 831.57753
+                ImagePath = "Assets/Maps/StreetsOfTarkov_tarkovdev.svg",
                 ImageWidth = 605,
                 ImageHeight = 832,
                 Transform = [0.38, 0, 0.38, 0],
                 CoordinateRotation = 180,
+                SvgBounds = [[323, -317], [-280, 554]],
                 Aliases = new List<string> { "streets", "STREETS", "TarkovStreets" }
             },
             new()
             {
                 Key = "Factory",
                 DisplayName = "Factory",
-                ImagePath = "Assets/Maps/Factory.svg",
-                // bounds: [[79,-64.5],[-66.5,67.4]] -> X: -66.5~79, Y: -64.5~67.4
-                WorldMinX = -66.5,
-                WorldMaxX = 79.0,
-                WorldMinY = -64.5,
-                WorldMaxY = 67.4,
-                // SVG viewBox: 0 0 130.81831 141.23242
+                ImagePath = "Assets/Maps/Factory_tarkovdev.svg",
                 ImageWidth = 131,
                 ImageHeight = 141,
                 Transform = [1.629, 119.9, 1.629, 139.3],
                 CoordinateRotation = 90,
+                SvgBounds = [[79, -64.5], [-66.5, 67.4]],
                 Aliases = new List<string> { "factory", "FACTORY", "factory4_day", "factory4_night" }
             },
             new()
             {
                 Key = "GroundZero",
                 DisplayName = "Ground Zero",
-                ImagePath = "Assets/Maps/GroundZero.svg",
-                // bounds: [[249,-124],[-99,364]] -> X: -99~249, Y: -124~364
-                WorldMinX = -99.0,
-                WorldMaxX = 249.0,
-                WorldMinY = -124.0,
-                WorldMaxY = 364.0,
-                // SVG viewBox: 0 0 348.92543 488.44792
+                ImagePath = "Assets/Maps/GroundZero_tarkovdev.svg",
                 ImageWidth = 349,
                 ImageHeight = 488,
                 Transform = [0.524, 167.3, 0.524, 65.1],
                 CoordinateRotation = 180,
+                SvgBounds = [[249, -124], [-99, 364]],
                 Aliases = new List<string> { "groundzero", "GROUNDZERO", "Sandbox", "sandbox" }
             },
             new()
             {
                 Key = "Labs",
                 DisplayName = "The Lab",
-                ImagePath = "Assets/Maps/Labs.svg",
-                // bounds: [[-80,-477],[-287,-193]] -> X: -287~-80, Y: -477~-193
-                WorldMinX = -287.0,
-                WorldMaxX = -80.0,
-                WorldMinY = -477.0,
-                WorldMaxY = -193.0,
-                // Labs는 SVG가 없어 placeholder
-                ImageWidth = 400,
-                ImageHeight = 400,
+                ImagePath = "Assets/Maps/Labs_tarkovdev.svg",
+                ImageWidth = 720,
+                ImageHeight = 586,
                 Transform = [0.575, 281.2, 0.575, 193.7],
                 CoordinateRotation = 270,
+                SvgBounds = [[-80, -477], [-287, -193]],
                 Aliases = new List<string> { "labs", "LABS", "laboratory" }
             }
         };

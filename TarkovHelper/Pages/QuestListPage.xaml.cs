@@ -165,6 +165,7 @@ namespace TarkovHelper.Pages
             LoadQuests();
             PopulateTraderFilter();
             PopulateMapFilter();
+            LoadFactionSelection();
             _isInitializing = false;
             _isDataLoaded = true;
             ApplyFilters();
@@ -506,6 +507,9 @@ namespace TarkovHelper.Pages
             var selectedMap = (CmbMap.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? string.Empty;
             var selectedStatus = (CmbStatus.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Active";
 
+            // Get selected faction
+            var selectedFaction = RbBear.IsChecked == true ? "bear" : (RbUsec.IsChecked == true ? "usec" : null);
+
             var filtered = _allQuestViewModels.Where(vm =>
             {
                 // Search filter (multi-language)
@@ -544,6 +548,13 @@ namespace TarkovHelper.Pages
                 {
                     var statusFilter = Enum.Parse<QuestStatus>(selectedStatus);
                     if (vm.Status != statusFilter)
+                        return false;
+                }
+
+                // Faction filter - hide quests for the other faction
+                if (!string.IsNullOrEmpty(selectedFaction) && !string.IsNullOrEmpty(vm.Task.Faction))
+                {
+                    if (vm.Task.Faction != selectedFaction)
                         return false;
                 }
 
@@ -604,6 +615,31 @@ namespace TarkovHelper.Pages
         private void CmbStatus_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!_isInitializing) ApplyFilters();
+        }
+
+        private void Faction_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+
+            // Save faction selection (setter automatically saves and notifies listeners)
+            var faction = RbBear.IsChecked == true ? "bear" : (RbUsec.IsChecked == true ? "usec" : null);
+            SettingsService.Instance.PlayerFaction = faction;
+
+            ApplyFilters();
+        }
+
+        private void LoadFactionSelection()
+        {
+            var savedFaction = SettingsService.Instance.PlayerFaction;
+            if (savedFaction == "bear")
+            {
+                RbBear.IsChecked = true;
+            }
+            else if (savedFaction == "usec")
+            {
+                RbUsec.IsChecked = true;
+            }
+            // If null, neither is selected (default state)
         }
 
         private void LstQuests_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -725,6 +761,32 @@ namespace TarkovHelper.Pages
             {
                 PrerequisitesList.ItemsSource = null;
                 PrerequisitesSectionWrapper.Visibility = Visibility.Collapsed;
+            }
+
+            // Alternative Quests Section (Mutually Exclusive)
+            var alternativeQuests = _progressService.GetAlternativeQuests(task);
+            if (alternativeQuests.Count > 0)
+            {
+                var altVms = alternativeQuests.Select(alt =>
+                {
+                    var altStatus = _progressService.GetStatus(alt);
+                    var (displayName, _, _) = GetLocalizedNames(alt);
+                    return new
+                    {
+                        DisplayName = displayName,
+                        TraderName = alt.Trader,
+                        StatusText = GetStatusText(altStatus, alt),
+                        StatusBackground = GetStatusBrush(altStatus)
+                    };
+                }).ToList();
+
+                AlternativeQuestsList.ItemsSource = altVms;
+                AlternativeQuestsSectionWrapper.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                AlternativeQuestsList.ItemsSource = null;
+                AlternativeQuestsSectionWrapper.Visibility = Visibility.Collapsed;
             }
 
             // Objectives Section

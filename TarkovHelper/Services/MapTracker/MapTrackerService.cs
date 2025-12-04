@@ -21,6 +21,7 @@ public sealed class MapTrackerService : IDisposable
     private MapTrackerSettings _settings;
     private readonly List<ScreenPosition> _trailPositions = new();
     private ScreenPosition? _currentPosition;
+    private string? _currentMapKey;
     private bool _isDisposed;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -45,6 +46,11 @@ public sealed class MapTrackerService : IDisposable
     /// 현재 설정
     /// </summary>
     public MapTrackerSettings Settings => _settings;
+
+    /// <summary>
+    /// 현재 선택된 맵 키
+    /// </summary>
+    public string? CurrentMapKey => _currentMapKey;
 
     /// <summary>
     /// 감시 중 여부
@@ -126,6 +132,15 @@ public sealed class MapTrackerService : IDisposable
         _trailPositions.Clear();
         _currentPosition = null;
         OnStatusMessage("이동 경로 초기화");
+    }
+
+    /// <summary>
+    /// 현재 맵을 설정합니다.
+    /// 스크린샷 감시 시 이 맵의 좌표로 변환됩니다.
+    /// </summary>
+    public void SetCurrentMap(string mapKey)
+    {
+        _currentMapKey = mapKey;
     }
 
     /// <summary>
@@ -233,7 +248,7 @@ public sealed class MapTrackerService : IDisposable
     }
 
     /// <summary>
-    /// 수동으로 좌표를 테스트합니다.
+    /// 수동으로 좌표를 테스트합니다. (스크린샷 좌표용)
     /// </summary>
     public ScreenPosition? TestCoordinate(string mapKey, double x, double y, double? angle = null)
     {
@@ -244,9 +259,36 @@ public sealed class MapTrackerService : IDisposable
         return null;
     }
 
-    private void OnPositionDetected(object? sender, PositionDetectedEventArgs e)
+    /// <summary>
+    /// 스크린샷 파일명에서 좌표를 파싱하여 테스트합니다.
+    /// 지정된 맵에 대해 좌표 변환을 수행합니다.
+    /// </summary>
+    /// <param name="filePath">스크린샷 파일 경로</param>
+    /// <param name="mapKey">대상 맵 키</param>
+    /// <returns>변환된 화면 좌표, 실패 시 null</returns>
+    public ScreenPosition? ProcessScreenshotFile(string filePath, string mapKey)
     {
-        if (_transformer.TryTransform(e.Position, out var screenPos) && screenPos != null)
+        var fileName = Path.GetFileName(filePath);
+
+        if (!_parser.TryParse(fileName, out var parsedPosition) || parsedPosition == null)
+        {
+            OnError($"파일명 파싱 실패: {fileName}");
+            return null;
+        }
+
+        // 맵 키를 포함한 새 위치 객체 생성
+        var position = new EftPosition
+        {
+            MapName = mapKey,
+            X = parsedPosition.X,
+            Y = parsedPosition.Y,
+            Z = parsedPosition.Z,
+            Angle = parsedPosition.Angle,
+            Timestamp = parsedPosition.Timestamp,
+            OriginalFileName = parsedPosition.OriginalFileName
+        };
+
+        if (_transformer.TryTransform(position, out var screenPos) && screenPos != null)
         {
             _currentPosition = screenPos;
 
@@ -260,12 +302,77 @@ public sealed class MapTrackerService : IDisposable
                 }
             }
 
-            OnStatusMessage($"위치 감지: {e.Position}");
+            OnStatusMessage($"테스트 위치: X={screenPos.X:F1}, Y={screenPos.Y:F1}, Angle={screenPos.Angle:F1}°");
+            PositionUpdated?.Invoke(this, screenPos);
+            return screenPos;
+        }
+
+        OnError($"맵 '{mapKey}'의 좌표 변환 실패");
+        return null;
+    }
+
+    /// <summary>
+    /// tarkov.dev API 좌표를 화면 좌표로 변환합니다.
+    /// Transform 배열과 CoordinateRotation을 사용합니다.
+    /// </summary>
+    /// <param name="mapKey">맵 키</param>
+    /// <param name="apiX">API position.x 좌표</param>
+    /// <param name="apiY">API position.y 좌표 (높이)</param>
+    /// <param name="apiZ">API position.z 좌표</param>
+    public ScreenPosition? TransformApiCoordinate(string mapKey, double apiX, double apiY, double? apiZ)
+    {
+        if (_transformer.TryTransformApiCoordinate(mapKey, apiX, apiY, apiZ, out var screenPos))
+        {
+            return screenPos;
+        }
+        return null;
+    }
+
+    private void OnPositionDetected(object? sender, PositionDetectedEventArgs e)
+    {
+        // 현재 선택된 맵 사용 (파싱된 맵 이름이 Unknown이거나 비어있는 경우)
+        var mapKey = string.IsNullOrEmpty(e.Position.MapName) || e.Position.MapName == "Unknown"
+            ? _currentMapKey
+            : e.Position.MapName;
+
+        if (string.IsNullOrEmpty(mapKey))
+        {
+            OnError("맵이 선택되지 않았습니다. 맵을 먼저 선택하세요.");
+            return;
+        }
+
+        // 맵 키를 포함한 새 위치 객체 생성
+        var position = new EftPosition
+        {
+            MapName = mapKey,
+            X = e.Position.X,
+            Y = e.Position.Y,
+            Z = e.Position.Z,
+            Angle = e.Position.Angle,
+            Timestamp = e.Position.Timestamp,
+            OriginalFileName = e.Position.OriginalFileName
+        };
+
+        if (_transformer.TryTransform(position, out var screenPos) && screenPos != null)
+        {
+            _currentPosition = screenPos;
+
+            // 이동 경로에 추가
+            if (_settings.ShowTrail)
+            {
+                _trailPositions.Add(screenPos);
+                if (_trailPositions.Count > _settings.MaxTrailPoints)
+                {
+                    _trailPositions.RemoveAt(0);
+                }
+            }
+
+            OnStatusMessage($"위치 감지: X={position.X:F1}, Z={position.Z:F1}");
             PositionUpdated?.Invoke(this, screenPos);
         }
         else
         {
-            OnError($"맵 '{e.Position.MapName}'의 좌표 변환 실패");
+            OnError($"맵 '{mapKey}'의 좌표 변환 실패");
         }
     }
 

@@ -100,4 +100,12 @@ public sealed class MapConfig
     /// tarkov.dev의 coordinateRotation 값.
     /// </summary>
     public int CoordinateRotation { get; set; } = 180;
+
+    /// <summary>
+    /// SVG 좌표 범위 [[maxLat, minLng], [minLat, maxLng]].
+    /// tarkov.dev의 svgBounds 배열과 동일한 형식.
+    /// SVG가 화면에서 어느 위치/크기로 표시될지 결정합니다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double[][]? SvgBounds { get; set; }
 }

@@ -227,11 +227,31 @@ namespace TarkovHelper.Services
 
         /// <summary>
         /// Mark quest as completed, optionally completing prerequisites
+        /// Also automatically fails alternative quests (mutually exclusive quests)
         /// </summary>
         public void CompleteQuest(TarkovTask task, bool completePrerequisites = true)
         {
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool anyChanged = CompleteQuestInternal(task, completePrerequisites, visited);
+
+            // Fail alternative quests (mutually exclusive)
+            if (task.AlternativeQuests != null && task.AlternativeQuests.Count > 0)
+            {
+                foreach (var altQuestName in task.AlternativeQuests)
+                {
+                    var altTask = GetTask(altQuestName);
+                    if (altTask != null)
+                    {
+                        var altStatus = GetStatus(altTask);
+                        // Only fail if not already done or failed
+                        if (altStatus != QuestStatus.Done && altStatus != QuestStatus.Failed)
+                        {
+                            _questProgress[altQuestName] = QuestStatus.Failed;
+                            anyChanged = true;
+                        }
+                    }
+                }
+            }
 
             // Save and notify only once after all recursive completions
             if (anyChanged)
@@ -358,6 +378,28 @@ namespace TarkovHelper.Services
             }
 
             return followUps;
+        }
+
+        /// <summary>
+        /// Get alternative quests (mutually exclusive) for a task
+        /// </summary>
+        public List<TarkovTask> GetAlternativeQuests(TarkovTask task)
+        {
+            var alternatives = new List<TarkovTask>();
+
+            if (task.AlternativeQuests != null)
+            {
+                foreach (var altName in task.AlternativeQuests)
+                {
+                    var altTask = GetTask(altName);
+                    if (altTask != null)
+                    {
+                        alternatives.Add(altTask);
+                    }
+                }
+            }
+
+            return alternatives;
         }
 
         /// <summary>

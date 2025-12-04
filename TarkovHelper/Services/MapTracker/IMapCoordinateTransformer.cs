@@ -43,4 +43,17 @@ public interface IMapCoordinateTransformer
     /// 모든 맵 키 목록을 반환합니다.
     /// </summary>
     IReadOnlyList<string> GetAllMapKeys();
+
+    /// <summary>
+    /// tarkov.dev API 좌표를 화면 좌표로 변환합니다.
+    /// Transform 배열과 CoordinateRotation을 사용합니다.
+    /// tarkov.dev 방식: pos(position) = [position.z, position.x]
+    /// </summary>
+    /// <param name="mapKey">맵 키</param>
+    /// <param name="apiX">API position.x 좌표</param>
+    /// <param name="apiY">API position.y 좌표 (높이)</param>
+    /// <param name="apiZ">API position.z 좌표</param>
+    /// <param name="screenPosition">변환된 화면 좌표</param>
+    /// <returns>변환 성공 여부</returns>
+    bool TryTransformApiCoordinate(string mapKey, double apiX, double apiY, double? apiZ, out ScreenPosition? screenPosition);
 }

@@ -140,7 +140,7 @@ public static class MigrationService
     private static bool RequiresMigration(Version lastVersion, Version currentVersion)
     {
         // Upgrading from 1.x.x to 2.x.x requires data cleanup
-        return lastVersion.Major == 1 || (currentVersion.Major == 2 && currentVersion.Minor < 3);
+        return lastVersion.Major < 3;
     }
 
     /// <summary>
