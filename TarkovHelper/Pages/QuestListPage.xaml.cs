@@ -52,6 +52,21 @@ namespace TarkovHelper.Pages
     }
 
     /// <summary>
+    /// Recommendation view model for display
+    /// </summary>
+    public class RecommendationViewModel
+    {
+        public QuestRecommendation Recommendation { get; set; } = null!;
+        public string QuestName { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public string TypeText { get; set; } = string.Empty;
+        public Brush TypeBackground { get; set; } = Brushes.Gray;
+        public string TraderInitial { get; set; } = string.Empty;
+        public bool IsKappaRequired { get; set; }
+        public Visibility KappaBadgeVisibility => IsKappaRequired ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
     /// Guide image view model with loading state
     /// </summary>
     public class GuideImageViewModel : System.ComponentModel.INotifyPropertyChanged
@@ -130,6 +145,13 @@ namespace TarkovHelper.Pages
         private static readonly Brush FailedBrush = new SolidColorBrush(Color.FromRgb(244, 67, 54));
         private static readonly Brush LevelLockedBrush = new SolidColorBrush(Color.FromRgb(255, 152, 0)); // Orange for Level Locked
 
+        // Recommendation type brushes
+        private static readonly Brush ReadyToCompleteBrush = new SolidColorBrush(Color.FromRgb(76, 175, 80)); // Green
+        private static readonly Brush ItemHandInBrush = new SolidColorBrush(Color.FromRgb(33, 150, 243)); // Blue
+        private static readonly Brush KappaPriorityBrush = new SolidColorBrush(Color.FromRgb(156, 39, 176)); // Purple
+        private static readonly Brush UnlocksManyBrush = new SolidColorBrush(Color.FromRgb(255, 152, 0)); // Orange
+        private static readonly Brush EasyQuestBrush = new SolidColorBrush(Color.FromRgb(0, 188, 212)); // Cyan
+
         public QuestListPage()
         {
             InitializeComponent();
@@ -171,6 +193,7 @@ namespace TarkovHelper.Pages
             _isInitializing = false;
             _isDataLoaded = true;
             ApplyFilters();
+            UpdateRecommendations();
 
             // Process pending selection if any
             if (!string.IsNullOrEmpty(_pendingQuestSelection))
@@ -208,6 +231,7 @@ namespace TarkovHelper.Pages
                 RefreshQuestStatuses();
                 ApplyFilters();
                 UpdateDetailPanel();
+                UpdateRecommendations();
             });
         }
 
@@ -1616,6 +1640,97 @@ namespace TarkovHelper.Pages
                     };
                     parentScrollViewer.RaiseEvent(newEventArgs);
                     e.Handled = true;
+                }
+            }
+        }
+
+        #endregion
+
+        #region Quest Recommendations
+
+        private void UpdateRecommendations()
+        {
+            try
+            {
+                var recommendationService = QuestRecommendationService.Instance;
+                var recommendations = recommendationService.GetRecommendations(5);
+
+                if (recommendations.Count == 0)
+                {
+                    RecommendationsExpander.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                // Update header text with localization
+                TxtRecommendationsHeader.Text = _loc.RecommendedQuests;
+                TxtRecommendationCount.Text = recommendations.Count.ToString();
+                TxtNoRecommendations.Text = _loc.NoRecommendations;
+
+                // Create view models
+                var recommendationVms = recommendations.Select(r => CreateRecommendationViewModel(r)).ToList();
+
+                RecommendationsList.ItemsSource = recommendationVms;
+                TxtNoRecommendations.Visibility = Visibility.Collapsed;
+                RecommendationsExpander.Visibility = Visibility.Visible;
+            }
+            catch
+            {
+                // Hide recommendations section if service is not initialized
+                RecommendationsExpander.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private RecommendationViewModel CreateRecommendationViewModel(QuestRecommendation rec)
+        {
+            var (displayName, _, _) = GetLocalizedNames(rec.Quest);
+
+            return new RecommendationViewModel
+            {
+                Recommendation = rec,
+                QuestName = displayName,
+                Reason = rec.Reason,
+                TypeText = GetRecommendationTypeText(rec.Type),
+                TypeBackground = GetRecommendationTypeBrush(rec.Type),
+                TraderInitial = GetTraderInitial(rec.Quest.Trader),
+                IsKappaRequired = rec.Quest.ReqKappa
+            };
+        }
+
+        private string GetRecommendationTypeText(RecommendationType type)
+        {
+            return type switch
+            {
+                RecommendationType.ReadyToComplete => _loc.ReadyToComplete,
+                RecommendationType.ItemHandInOnly => _loc.ItemHandInOnly,
+                RecommendationType.KappaPriority => _loc.KappaPriority,
+                RecommendationType.UnlocksMany => _loc.UnlocksMany,
+                RecommendationType.EasyQuest => _loc.EasyQuest,
+                _ => "Unknown"
+            };
+        }
+
+        private static Brush GetRecommendationTypeBrush(RecommendationType type)
+        {
+            return type switch
+            {
+                RecommendationType.ReadyToComplete => ReadyToCompleteBrush,
+                RecommendationType.ItemHandInOnly => ItemHandInBrush,
+                RecommendationType.KappaPriority => KappaPriorityBrush,
+                RecommendationType.UnlocksMany => UnlocksManyBrush,
+                RecommendationType.EasyQuest => EasyQuestBrush,
+                _ => Brushes.Gray
+            };
+        }
+
+        private void Recommendation_Click(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is RecommendationViewModel vm)
+            {
+                // Navigate to the quest in the list
+                var questNormalizedName = vm.Recommendation.Quest.NormalizedName;
+                if (!string.IsNullOrEmpty(questNormalizedName))
+                {
+                    SelectQuestInternal(questNormalizedName);
                 }
             }
         }
