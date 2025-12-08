@@ -594,4 +594,92 @@ public class LocalizationService : INotifyPropertyChanged
     };
 
     #endregion
+
+    #region Quest Recommendations
+
+    public string RecommendedQuests => CurrentLanguage switch
+    {
+        AppLanguage.KO => "추천 퀘스트",
+        AppLanguage.JA => "おすすめクエスト",
+        _ => "Recommended Quests"
+    };
+
+    public string ReadyToComplete => CurrentLanguage switch
+    {
+        AppLanguage.KO => "지금 완료 가능",
+        AppLanguage.JA => "今すぐ完了可能",
+        _ => "Ready to Complete"
+    };
+
+    public string ItemHandInOnly => CurrentLanguage switch
+    {
+        AppLanguage.KO => "아이템 제출만",
+        AppLanguage.JA => "アイテム提出のみ",
+        _ => "Item Hand-in Only"
+    };
+
+    public string KappaPriority => CurrentLanguage switch
+    {
+        AppLanguage.KO => "카파 필수",
+        AppLanguage.JA => "Kappa必須",
+        _ => "Kappa Priority"
+    };
+
+    public string UnlocksMany => CurrentLanguage switch
+    {
+        AppLanguage.KO => "다수 해금",
+        AppLanguage.JA => "複数解放",
+        _ => "Unlocks Many"
+    };
+
+    public string EasyQuest => CurrentLanguage switch
+    {
+        AppLanguage.KO => "쉬운 퀘스트",
+        AppLanguage.JA => "簡単なクエスト",
+        _ => "Easy Quest"
+    };
+
+    public string NoRecommendations => CurrentLanguage switch
+    {
+        AppLanguage.KO => "현재 추천 퀘스트가 없습니다",
+        AppLanguage.JA => "現在おすすめクエストはありません",
+        _ => "No recommendations at this time"
+    };
+
+    public string ShowMore => CurrentLanguage switch
+    {
+        AppLanguage.KO => "더 보기",
+        AppLanguage.JA => "もっと見る",
+        _ => "Show More"
+    };
+
+    public string ShowLess => CurrentLanguage switch
+    {
+        AppLanguage.KO => "접기",
+        AppLanguage.JA => "閉じる",
+        _ => "Show Less"
+    };
+
+    public string ItemsOwned => CurrentLanguage switch
+    {
+        AppLanguage.KO => "보유",
+        AppLanguage.JA => "所持",
+        _ => "owned"
+    };
+
+    public string ItemsNeeded => CurrentLanguage switch
+    {
+        AppLanguage.KO => "필요",
+        AppLanguage.JA => "必要",
+        _ => "needed"
+    };
+
+    public string UnlocksQuests => CurrentLanguage switch
+    {
+        AppLanguage.KO => "개 퀘스트 해금",
+        AppLanguage.JA => "クエスト解放",
+        _ => "quest(s) unlock"
+    };
+
+    #endregion
 }

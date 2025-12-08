@@ -1709,10 +1709,8 @@ public partial class MapTrackerPage : UserControl
             _selectedObjective = _currentMapObjectives.FirstOrDefault(o => o.ObjectiveId == vm.Objective.ObjectiveId) ?? vm.Objective;
             UpdateMarkerHighlight();
 
-            // 사이드바 리스트 업데이트 (선택 상태 반영)
-            var viewModels = _currentMapObjectives.Select(obj =>
-                new QuestObjectiveViewModel(obj, _loc, _progressService, obj.ObjectiveId == _selectedObjective?.ObjectiveId)).ToList();
-            QuestObjectivesList.ItemsSource = viewModels;
+            // 사이드바 리스트 업데이트 (선택 상태 반영) - RefreshQuestDrawer()를 호출하여 그룹화 상태 유지
+            RefreshQuestDrawer();
 
             // 해당 마커 위치로 맵 이동
             CenterOnObjective(_selectedObjective);
