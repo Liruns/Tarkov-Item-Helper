@@ -79,12 +79,15 @@ public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
         {
             double finalX, finalY;
 
-            // 보정된 변환이 있으면 우선 사용
+            // 보정된 변환이 있으면 IDW 보정을 적용한 변환 사용
             if (config.CalibratedTransform != null && config.CalibratedTransform.Length >= 6)
             {
                 var calibrationService = MapCalibrationService.Instance;
-                (finalX, finalY) = calibrationService.ApplyCalibratedTransform(
-                    config.CalibratedTransform, gameX, gameZ ?? 0);
+                (finalX, finalY) = calibrationService.ApplyCalibratedTransformWithIDW(
+                    config.CalibratedTransform,
+                    config.CalibrationPoints,
+                    gameX,
+                    gameZ ?? 0);
             }
             else
             {
