@@ -75,43 +75,62 @@ public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
         if (config == null)
             return false;
 
-        if (config.Transform == null || config.Transform.Length < 4)
-            return false;
-
-        if (config.SvgBounds == null || config.SvgBounds.Length < 2)
-            return false;
-
         try
         {
-            // 1. 게임 좌표 → Leaflet 좌표 (lat=z, lng=x)
-            var lat = gameZ ?? 0;
-            var lng = gameX;
+            double finalX, finalY;
 
-            // 2. 회전 적용
-            var (rotatedLng, rotatedLat) = ApplyRotation(lng, lat, config.CoordinateRotation);
+            // 보정된 변환이 있으면 IDW 보정을 적용한 변환 사용
+            if (config.CalibratedTransform != null && config.CalibratedTransform.Length >= 6)
+            {
+                var calibrationService = MapCalibrationService.Instance;
+                (finalX, finalY) = calibrationService.ApplyCalibratedTransformWithIDW(
+                    config.CalibratedTransform,
+                    config.CalibrationPoints,
+                    gameX,
+                    gameZ ?? 0);
+            }
+            else
+            {
+                // 기존 Transform 방식 사용
+                if (config.Transform == null || config.Transform.Length < 4)
+                    return false;
 
-            // 3. CRS Transform (Y축 반전 포함)
-            var scaleX = config.Transform[0];
-            var marginX = config.Transform[1];
-            var scaleY = config.Transform[2] * -1;
-            var marginY = config.Transform[3];
+                if (config.SvgBounds == null || config.SvgBounds.Length < 2)
+                    return false;
 
-            var markerPixelX = scaleX * rotatedLng + marginX;
-            var markerPixelY = scaleY * rotatedLat + marginY;
+                // 1. 게임 좌표 → Leaflet 좌표 (lat=z, lng=x)
+                var lat = gameZ ?? 0;
+                var lng = gameX;
 
-            // 4. SVG bounds → pixel bounds
-            var (svgPixelXMin, svgPixelXMax, svgPixelYMin, svgPixelYMax) =
-                CalculateSvgPixelBounds(config, scaleX, marginX, scaleY, marginY);
+                // 2. 회전 적용
+                var (rotatedLng, rotatedLat) = ApplyRotation(lng, lat, config.CoordinateRotation);
 
-            // 5. ViewBox 좌표로 정규화
-            var normalizedX = (markerPixelX - svgPixelXMin) / (svgPixelXMax - svgPixelXMin);
-            var normalizedY = (markerPixelY - svgPixelYMin) / (svgPixelYMax - svgPixelYMin);
+                // 3. CRS Transform (Y축 반전 포함)
+                var scaleX = config.Transform[0];
+                var marginX = config.Transform[1];
+                var scaleY = config.Transform[2] * -1;
+                var marginY = config.Transform[3];
+
+                var markerPixelX = scaleX * rotatedLng + marginX;
+                var markerPixelY = scaleY * rotatedLat + marginY;
+
+                // 4. SVG bounds → pixel bounds
+                var (svgPixelXMin, svgPixelXMax, svgPixelYMin, svgPixelYMax) =
+                    CalculateSvgPixelBounds(config, scaleX, marginX, scaleY, marginY);
+
+                // 5. ViewBox 좌표로 정규화
+                var normalizedX = (markerPixelX - svgPixelXMin) / (svgPixelXMax - svgPixelXMin);
+                var normalizedY = (markerPixelY - svgPixelYMin) / (svgPixelYMax - svgPixelYMin);
+
+                finalX = normalizedX * config.ImageWidth;
+                finalY = normalizedY * config.ImageHeight;
+            }
 
             screenPosition = new ScreenPosition
             {
                 MapKey = config.Key,
-                X = normalizedX * config.ImageWidth,
-                Y = normalizedY * config.ImageHeight,
+                X = finalX,
+                Y = finalY,
                 Angle = angle,
                 OriginalPosition = new EftPosition
                 {
@@ -215,5 +234,110 @@ public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
     public IReadOnlyList<string> GetAllMapKeys()
     {
         return _mapConfigs.Keys.ToList().AsReadOnly();
+    }
+
+    /// <summary>
+    /// 구 지도 변환을 기반으로 게임 좌표를 신 지도 좌표로 변환합니다.
+    /// 수동 보정 데이터가 있으면 구→신 매핑을 적용합니다.
+    /// </summary>
+    /// <param name="mapKey">맵 키</param>
+    /// <param name="gameX">게임 X 좌표</param>
+    /// <param name="gameZ">게임 Z 좌표</param>
+    /// <param name="angle">방향 각도</param>
+    /// <param name="screenPosition">변환된 화면 좌표</param>
+    /// <returns>변환 성공 여부</returns>
+    public bool TryTransformWithAutoCalibration(string mapKey, double gameX, double gameZ, double? angle, out ScreenPosition? screenPosition)
+    {
+        screenPosition = null;
+
+        var config = GetMapConfig(mapKey);
+        if (config == null)
+            return false;
+
+        try
+        {
+            double finalX, finalY;
+
+            // 수동 보정 데이터가 있으면 자동 보정 사용
+            if (config.CalibrationPoints != null && config.CalibrationPoints.Count >= 3)
+            {
+                var autoCalibration = AutoCalibrationService.Instance;
+                var result = autoCalibration.CalibrateFromExistingPoints(config);
+
+                if (result.Success && result.OldToNewMapping != null)
+                {
+                    var transformed = autoCalibration.TransformWithMapping(mapKey, gameX, gameZ, result.OldToNewMapping);
+                    if (transformed != null)
+                    {
+                        finalX = transformed.Value.x;
+                        finalY = transformed.Value.y;
+                    }
+                    else
+                    {
+                        // 폴백: IDW 변환
+                        return TryTransformGameCoordinate(mapKey, gameX, gameZ, angle, out screenPosition);
+                    }
+                }
+                else
+                {
+                    // 폴백: IDW 변환
+                    return TryTransformGameCoordinate(mapKey, gameX, gameZ, angle, out screenPosition);
+                }
+            }
+            else
+            {
+                // 보정 데이터 없으면 구 지도 기반 단순 변환
+                var oldTransform = OldMapTransformService.Instance;
+                var result = oldTransform.TransformToNewScreenSimple(mapKey, gameX, gameZ);
+                if (result == null)
+                    return false;
+
+                finalX = result.Value.x;
+                finalY = result.Value.y;
+            }
+
+            screenPosition = new ScreenPosition
+            {
+                MapKey = config.Key,
+                X = finalX,
+                Y = finalY,
+                Angle = angle,
+                OriginalPosition = new EftPosition
+                {
+                    MapName = mapKey,
+                    X = gameX,
+                    Y = 0,
+                    Z = gameZ,
+                    Angle = angle,
+                    Timestamp = DateTime.Now
+                }
+            };
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 맵의 자동 보정 결과를 가져옵니다.
+    /// </summary>
+    public AutoCalibrationResult? GetAutoCalibrationResult(string mapKey)
+    {
+        var config = GetMapConfig(mapKey);
+        if (config == null)
+            return null;
+
+        return AutoCalibrationService.Instance.CalibrateFromExistingPoints(config);
+    }
+
+    /// <summary>
+    /// 모든 맵의 자동 보정 결과를 가져옵니다.
+    /// </summary>
+    public Dictionary<string, AutoCalibrationResult> GetAllAutoCalibrationResults()
+    {
+        return AutoCalibrationService.Instance.CalibrateAllMaps(_mapConfigs.Values);
     }
 }

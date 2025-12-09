@@ -67,6 +67,15 @@ public partial class MapTrackerPage : UserControl
     private bool _drawerCurrentMapOnly = false;
     private bool _drawerGroupByQuest = false;
 
+    // 보정 모드 관련 필드
+    private readonly MapCalibrationService _calibrationService = MapCalibrationService.Instance;
+    private bool _isCalibrationMode;
+    private FrameworkElement? _draggingExtractMarker;
+    private Point _extractDragStartPoint;
+    private double _extractMarkerOriginalLeft;
+    private double _extractMarkerOriginalTop;
+    private MapExtract? _draggingExtract;
+
     public MapTrackerPage()
     {
         try
@@ -114,6 +123,12 @@ public partial class MapTrackerPage : UserControl
 
             LoadSettings();
             PopulateMapComboBox();
+
+            // Debug 빌드에서만 보정 버튼 표시
+#if DEBUG
+            BtnCalibrationMode.Visibility = Visibility.Visible;
+            BtnAutoCalibrate.Visibility = Visibility.Visible;
+#endif
 
             // 저장된 맵 상태 복원
             RestoreMapState();
@@ -1978,6 +1993,9 @@ public partial class MapTrackerPage : UserControl
         canvas.ToolTip = $"[{factionText}] {displayName}";
         canvas.Cursor = Cursors.Hand;
 
+        // 보정 모드용 드래그 이벤트 설정
+        SetupExtractMarkerForCalibration(canvas, extract);
+
         return canvas;
     }
 
@@ -2026,6 +2044,251 @@ public partial class MapTrackerPage : UserControl
         _extractMarkerElements.Clear();
         ExtractMarkersContainer.Children.Clear();
     }
+
+    #region Calibration Mode
+
+    private void BtnCalibrationMode_Changed(object sender, RoutedEventArgs e)
+    {
+        _isCalibrationMode = BtnCalibrationMode.IsChecked == true;
+
+        if (_isCalibrationMode)
+        {
+            TxtStatus.Text = "Calibration mode: Drag extract markers to correct positions. Need 3+ points.";
+
+            // 현재 맵의 보정 포인트 수 표시
+            var config = _trackerService?.GetMapConfig(_currentMapKey ?? "");
+            var pointCount = config?.CalibrationPoints?.Count ?? 0;
+            if (pointCount > 0)
+            {
+                TxtStatus.Text += $" ({pointCount} points set)";
+            }
+        }
+        else
+        {
+            TxtStatus.Text = "Calibration mode disabled.";
+            SaveCalibrationAndRefresh();
+        }
+    }
+
+    private void SaveCalibrationAndRefresh()
+    {
+        if (_trackerService == null) return;
+
+        var config = _trackerService.GetMapConfig(_currentMapKey ?? "");
+        if (config?.CalibrationPoints != null && config.CalibrationPoints.Count >= 3)
+        {
+            // 변환 행렬 재계산
+            config.CalibratedTransform = _calibrationService.CalculateAffineTransform(config.CalibrationPoints);
+
+            if (config.CalibratedTransform != null)
+            {
+                TxtStatus.Text = $"Calibration saved! ({config.CalibrationPoints.Count} points)";
+
+                // 설정 저장
+                _trackerService.SaveSettings();
+
+                // 마커 새로고침
+                RefreshExtractMarkers();
+                RefreshQuestMarkers();
+            }
+            else
+            {
+                TxtStatus.Text = "Calibration calculation failed.";
+            }
+        }
+        else
+        {
+            _trackerService.SaveSettings();
+        }
+    }
+
+    private void SetupExtractMarkerForCalibration(FrameworkElement marker, MapExtract extract)
+    {
+        marker.Tag = extract;
+        marker.Cursor = Cursors.SizeAll;
+        marker.MouseLeftButtonDown += ExtractMarker_CalibrationMouseDown;
+        marker.MouseMove += ExtractMarker_CalibrationMouseMove;
+        marker.MouseLeftButtonUp += ExtractMarker_CalibrationMouseUp;
+    }
+
+    private void ExtractMarker_CalibrationMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isCalibrationMode) return;
+        if (sender is not FrameworkElement marker) return;
+
+        _draggingExtractMarker = marker;
+        _draggingExtract = marker.Tag as MapExtract;
+        _extractDragStartPoint = e.GetPosition(ExtractMarkersContainer);
+        _extractMarkerOriginalLeft = Canvas.GetLeft(marker);
+        _extractMarkerOriginalTop = Canvas.GetTop(marker);
+
+        marker.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void ExtractMarker_CalibrationMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isCalibrationMode || _draggingExtractMarker == null) return;
+
+        var currentPoint = e.GetPosition(ExtractMarkersContainer);
+        var deltaX = currentPoint.X - _extractDragStartPoint.X;
+        var deltaY = currentPoint.Y - _extractDragStartPoint.Y;
+
+        Canvas.SetLeft(_draggingExtractMarker, _extractMarkerOriginalLeft + deltaX);
+        Canvas.SetTop(_draggingExtractMarker, _extractMarkerOriginalTop + deltaY);
+    }
+
+    private void ExtractMarker_CalibrationMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isCalibrationMode || _draggingExtractMarker == null || _draggingExtract == null) return;
+
+        _draggingExtractMarker.ReleaseMouseCapture();
+
+        // 최종 위치 계산 (마커 중심 기준)
+        var finalLeft = Canvas.GetLeft(_draggingExtractMarker);
+        var finalTop = Canvas.GetTop(_draggingExtractMarker);
+
+        // 마커 크기의 절반을 더해 중심점 계산
+        var markerWidth = _draggingExtractMarker.ActualWidth > 0 ? _draggingExtractMarker.ActualWidth : 20;
+        var markerHeight = _draggingExtractMarker.ActualHeight > 0 ? _draggingExtractMarker.ActualHeight : 20;
+        var centerX = finalLeft + markerWidth / 2;
+        var centerY = finalTop + markerHeight / 2;
+
+        // 보정 포인트 추가
+        var config = _trackerService?.GetMapConfig(_currentMapKey ?? "");
+        if (config != null)
+        {
+            var calibrationPoint = new CalibrationPoint
+            {
+                Id = _draggingExtract.Id,
+                Name = _draggingExtract.Name,
+                GameX = _draggingExtract.X,
+                GameZ = _draggingExtract.Z,
+                ScreenX = centerX,
+                ScreenY = centerY
+            };
+
+            var hasEnough = _calibrationService.AddCalibrationPoint(config, calibrationPoint);
+            var pointCount = config.CalibrationPoints?.Count ?? 0;
+
+            TxtStatus.Text = $"Calibration point set: {_draggingExtract.Name} ({pointCount} points)";
+            if (pointCount >= 3)
+            {
+                TxtStatus.Text += " - Ready to apply!";
+            }
+            else
+            {
+                TxtStatus.Text += $" - Need {3 - pointCount} more points";
+            }
+        }
+
+        _draggingExtractMarker = null;
+        _draggingExtract = null;
+        e.Handled = true;
+    }
+
+    private void BtnAutoCalibrate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_trackerService == null || string.IsNullOrEmpty(_currentMapKey))
+        {
+            MessageBox.Show("맵을 먼저 선택해주세요.", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var config = _trackerService.GetMapConfig(_currentMapKey);
+        if (config == null)
+        {
+            MessageBox.Show($"맵 설정을 찾을 수 없습니다: {_currentMapKey}", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var autoCalService = AutoCalibrationService.Instance;
+
+        // 수동 보정 포인트가 있는 경우: 기존 분석 방식
+        if (config.CalibrationPoints != null && config.CalibrationPoints.Count >= 3)
+        {
+            var result = autoCalService.CalibrateFromExistingPoints(config);
+
+            if (!result.Success)
+            {
+                MessageBox.Show($"자동 보정 분석 실패:\n{result.ErrorMessage}", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var analysis = result.Analysis;
+            var message = $"맵: {result.MapKey}\n" +
+                          $"참조 포인트: {result.ReferencePointCount}개\n\n" +
+                          $"[오차 분석]\n" +
+                          $"평균 오차 (RMSE): {analysis?.MeanError:F2} px\n" +
+                          $"최대 오차: {analysis?.MaxError:F2} px\n" +
+                          $"최소 오차: {analysis?.MinError:F2} px\n\n";
+
+            if (result.OldToNewMapping != null)
+            {
+                var newTransform = autoCalService.CalculateNewCalibratedTransform(_currentMapKey, result.OldToNewMapping);
+                if (newTransform != null)
+                {
+                    message += "새로운 변환 행렬 계산 완료.\n적용하시겠습니까?";
+
+                    var applyResult = MessageBox.Show(message, "Auto-Calibration 결과",
+                        MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+                    if (applyResult == MessageBoxResult.Yes)
+                    {
+                        config.CalibratedTransform = newTransform;
+                        _trackerService.SaveSettings();
+
+                        RefreshExtractMarkers();
+                        RefreshQuestMarkers();
+
+                        TxtStatus.Text = $"Auto-Calibration 적용 완료 (RMSE: {analysis?.MeanError:F2}px)";
+                    }
+                }
+                else
+                {
+                    message += "새로운 변환 행렬 계산에 실패했습니다.";
+                    MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            else
+            {
+                MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        else
+        {
+            // 수동 보정 포인트가 없는 경우: 구 지도 변환 기반 자동 보정 제안
+            var newTransform = autoCalService.CalculateTransformFromOldMap(_currentMapKey);
+            if (newTransform != null)
+            {
+                var message = $"맵: {_currentMapKey}\n\n" +
+                              $"수동 보정 포인트가 없습니다.\n" +
+                              $"구 지도(tarkov.dev) 변환을 기반으로 자동 보정을 적용합니다.\n\n" +
+                              $"적용하시겠습니까?";
+
+                var applyResult = MessageBox.Show(message, "Auto-Calibration (구 지도 기반)",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+                if (applyResult == MessageBoxResult.Yes)
+                {
+                    config.CalibratedTransform = newTransform;
+                    _trackerService.SaveSettings();
+
+                    RefreshExtractMarkers();
+                    RefreshQuestMarkers();
+
+                    TxtStatus.Text = $"Auto-Calibration 적용 완료 (구 지도 변환 기반)";
+                }
+            }
+            else
+            {
+                MessageBox.Show($"맵 '{_currentMapKey}'에 대한 구 지도 참조 데이터를 찾을 수 없습니다.",
+                    "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+    }
+
+    #endregion
 
     private void ChkShowExtractMarkers_Changed(object sender, RoutedEventArgs e)
     {
