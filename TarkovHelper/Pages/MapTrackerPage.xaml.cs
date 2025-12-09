@@ -2181,6 +2181,75 @@ public partial class MapTrackerPage : UserControl
         e.Handled = true;
     }
 
+    private void BtnAutoCalibrate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_trackerService == null || string.IsNullOrEmpty(_currentMapKey))
+        {
+            MessageBox.Show("맵을 먼저 선택해주세요.", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var config = _trackerService.GetMapConfig(_currentMapKey);
+        if (config == null)
+        {
+            MessageBox.Show($"맵 설정을 찾을 수 없습니다: {_currentMapKey}", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // 자동 보정 분석 실행
+        var autoCalService = AutoCalibrationService.Instance;
+        var result = autoCalService.CalibrateFromExistingPoints(config);
+
+        if (!result.Success)
+        {
+            MessageBox.Show($"자동 보정 분석 실패:\n{result.ErrorMessage}", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // 결과 표시
+        var analysis = result.Analysis;
+        var message = $"맵: {result.MapKey}\n" +
+                      $"참조 포인트: {result.ReferencePointCount}개\n\n" +
+                      $"[오차 분석]\n" +
+                      $"평균 오차 (RMSE): {analysis?.MeanError:F2} px\n" +
+                      $"최대 오차: {analysis?.MaxError:F2} px\n" +
+                      $"최소 오차: {analysis?.MinError:F2} px\n\n";
+
+        // 새 CalibratedTransform 계산 제안
+        if (result.OldToNewMapping != null)
+        {
+            var newTransform = autoCalService.CalculateNewCalibratedTransform(_currentMapKey, result.OldToNewMapping);
+            if (newTransform != null)
+            {
+                message += "새로운 변환 행렬 계산 완료.\n적용하시겠습니까?";
+
+                var applyResult = MessageBox.Show(message, "Auto-Calibration 결과",
+                    MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+                if (applyResult == MessageBoxResult.Yes)
+                {
+                    config.CalibratedTransform = newTransform;
+                    _trackerService.SaveSettings();
+
+                    // 마커 새로고침
+                    RefreshExtractMarkers();
+                    RefreshQuestMarkers();
+
+                    TxtStatus.Text = $"Auto-Calibration 적용 완료 (RMSE: {analysis?.MeanError:F2}px)";
+                }
+            }
+            else
+            {
+                message += "새로운 변환 행렬 계산에 실패했습니다.";
+                MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        else
+        {
+            MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
     #endregion
 
     private void ChkShowExtractMarkers_Changed(object sender, RoutedEventArgs e)
