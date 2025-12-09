@@ -2202,57 +2202,89 @@ public partial class MapTrackerPage : UserControl
             return;
         }
 
-        // 자동 보정 분석 실행
         var autoCalService = AutoCalibrationService.Instance;
-        var result = autoCalService.CalibrateFromExistingPoints(config);
 
-        if (!result.Success)
+        // 수동 보정 포인트가 있는 경우: 기존 분석 방식
+        if (config.CalibrationPoints != null && config.CalibrationPoints.Count >= 3)
         {
-            MessageBox.Show($"자동 보정 분석 실패:\n{result.ErrorMessage}", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            var result = autoCalService.CalibrateFromExistingPoints(config);
+
+            if (!result.Success)
+            {
+                MessageBox.Show($"자동 보정 분석 실패:\n{result.ErrorMessage}", "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var analysis = result.Analysis;
+            var message = $"맵: {result.MapKey}\n" +
+                          $"참조 포인트: {result.ReferencePointCount}개\n\n" +
+                          $"[오차 분석]\n" +
+                          $"평균 오차 (RMSE): {analysis?.MeanError:F2} px\n" +
+                          $"최대 오차: {analysis?.MaxError:F2} px\n" +
+                          $"최소 오차: {analysis?.MinError:F2} px\n\n";
+
+            if (result.OldToNewMapping != null)
+            {
+                var newTransform = autoCalService.CalculateNewCalibratedTransform(_currentMapKey, result.OldToNewMapping);
+                if (newTransform != null)
+                {
+                    message += "새로운 변환 행렬 계산 완료.\n적용하시겠습니까?";
+
+                    var applyResult = MessageBox.Show(message, "Auto-Calibration 결과",
+                        MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+                    if (applyResult == MessageBoxResult.Yes)
+                    {
+                        config.CalibratedTransform = newTransform;
+                        _trackerService.SaveSettings();
+
+                        RefreshExtractMarkers();
+                        RefreshQuestMarkers();
+
+                        TxtStatus.Text = $"Auto-Calibration 적용 완료 (RMSE: {analysis?.MeanError:F2}px)";
+                    }
+                }
+                else
+                {
+                    message += "새로운 변환 행렬 계산에 실패했습니다.";
+                    MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            else
+            {
+                MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
-
-        // 결과 표시
-        var analysis = result.Analysis;
-        var message = $"맵: {result.MapKey}\n" +
-                      $"참조 포인트: {result.ReferencePointCount}개\n\n" +
-                      $"[오차 분석]\n" +
-                      $"평균 오차 (RMSE): {analysis?.MeanError:F2} px\n" +
-                      $"최대 오차: {analysis?.MaxError:F2} px\n" +
-                      $"최소 오차: {analysis?.MinError:F2} px\n\n";
-
-        // 새 CalibratedTransform 계산 제안
-        if (result.OldToNewMapping != null)
+        else
         {
-            var newTransform = autoCalService.CalculateNewCalibratedTransform(_currentMapKey, result.OldToNewMapping);
+            // 수동 보정 포인트가 없는 경우: 구 지도 변환 기반 자동 보정 제안
+            var newTransform = autoCalService.CalculateTransformFromOldMap(_currentMapKey);
             if (newTransform != null)
             {
-                message += "새로운 변환 행렬 계산 완료.\n적용하시겠습니까?";
+                var message = $"맵: {_currentMapKey}\n\n" +
+                              $"수동 보정 포인트가 없습니다.\n" +
+                              $"구 지도(tarkov.dev) 변환을 기반으로 자동 보정을 적용합니다.\n\n" +
+                              $"적용하시겠습니까?";
 
-                var applyResult = MessageBox.Show(message, "Auto-Calibration 결과",
-                    MessageBoxButton.YesNo, MessageBoxImage.Information);
+                var applyResult = MessageBox.Show(message, "Auto-Calibration (구 지도 기반)",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question);
 
                 if (applyResult == MessageBoxResult.Yes)
                 {
                     config.CalibratedTransform = newTransform;
                     _trackerService.SaveSettings();
 
-                    // 마커 새로고침
                     RefreshExtractMarkers();
                     RefreshQuestMarkers();
 
-                    TxtStatus.Text = $"Auto-Calibration 적용 완료 (RMSE: {analysis?.MeanError:F2}px)";
+                    TxtStatus.Text = $"Auto-Calibration 적용 완료 (구 지도 변환 기반)";
                 }
             }
             else
             {
-                message += "새로운 변환 행렬 계산에 실패했습니다.";
-                MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show($"맵 '{_currentMapKey}'에 대한 구 지도 참조 데이터를 찾을 수 없습니다.",
+                    "Auto-Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
-        }
-        else
-        {
-            MessageBox.Show(message, "Auto-Calibration 결과", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 

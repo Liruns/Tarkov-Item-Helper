@@ -128,6 +128,59 @@ public sealed class AutoCalibrationService
     }
 
     /// <summary>
+    /// 수동 보정 없이 구 지도 변환만으로 CalibratedTransform을 계산합니다.
+    /// 구 지도 변환이 정확한 경우 (Labs 등) 사용합니다.
+    /// </summary>
+    /// <param name="mapKey">맵 키</param>
+    /// <returns>CalibratedTransform 배열 또는 null</returns>
+    public double[]? CalculateTransformFromOldMap(string mapKey)
+    {
+        var reference = _oldTransform.GetReferenceData(mapKey);
+        if (reference == null)
+            return null;
+
+        // 구 지도 변환 결과를 사용하여 게임좌표→화면좌표 매핑 생성
+        var gameToScreenPoints = new List<(double gameX, double gameZ, double screenX, double screenY)>();
+
+        // 맵 영역을 그리드로 나눠서 테스트 포인트 생성
+        var bounds = reference.OldSvgBounds;
+        var minLng = Math.Min(bounds[0][0], bounds[1][0]);
+        var maxLng = Math.Max(bounds[0][0], bounds[1][0]);
+        var minLat = Math.Min(bounds[0][1], bounds[1][1]);
+        var maxLat = Math.Max(bounds[0][1], bounds[1][1]);
+
+        const int gridSize = 5;
+        for (int i = 0; i <= gridSize; i++)
+        {
+            for (int j = 0; j <= gridSize; j++)
+            {
+                var gameX = minLng + (maxLng - minLng) * i / gridSize;
+                var gameZ = minLat + (maxLat - minLat) * j / gridSize;
+
+                // 구 지도 변환 → 스케일링된 신 지도 좌표
+                var result = _oldTransform.TransformToNewScreenSimple(mapKey, gameX, gameZ);
+                if (result != null)
+                {
+                    gameToScreenPoints.Add((gameX, gameZ, result.Value.x, result.Value.y));
+                }
+            }
+        }
+
+        if (gameToScreenPoints.Count < 3)
+            return null;
+
+        // 게임좌표 → 화면좌표 affine 변환 계산
+        return MapCalibrationService.Instance.CalculateAffineTransform(
+            gameToScreenPoints.Select(p => new CalibrationPoint
+            {
+                GameX = p.gameX,
+                GameZ = p.gameZ,
+                ScreenX = p.screenX,
+                ScreenY = p.screenY
+            }).ToList());
+    }
+
+    /// <summary>
     /// 보정 결과를 기반으로 새로운 CalibratedTransform을 계산합니다.
     /// 이 값은 MapConfig에 저장하여 IDW 없이도 정확한 변환을 수행할 수 있습니다.
     /// </summary>

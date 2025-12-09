@@ -557,7 +557,7 @@ public sealed class MapTrackerSettings
                 Aliases = new List<string> { "groundzero", "GROUNDZERO", "Sandbox", "sandbox", "ground-zero", "ground-zero-21" },
                 MarkerScale = 3.0
             },
-            // Labs: No calibration yet - using original transform
+            // Labs: Calibrated from 5 reference points
             new()
             {
                 Key = "Labs",
@@ -565,9 +565,15 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Labs.svg",
                 ImageWidth = 5500,
                 ImageHeight = 4200,
-                Transform = [0.575 * 7.639, 281.2 * 7.639, 0.575 * 7.167, 193.7 * 7.167],
-                CoordinateRotation = 270,
-                SvgBounds = [[-80, -477], [-287, -193]],
+                CalibratedTransform = [-0.06475489648812036, 15.461642379397855, 18.704109904840276, 0.31533351406309695, 7946.959753722009, 5877.909736136232],
+                CalibrationPoints = new List<CalibrationPoint>
+                {
+                    new() { Id = "c5c6f818755ac844b4723b1a2cf057569da410ee", Name = "Parking Gate", GameX = -231.73, GameZ = -434.816376, ScreenX = 1310.2241588945453, ScreenY = 1422.0933740932383 },
+                    new() { Id = "1a5ae89d5401d277f8b317c18951dfe0e1bfd695", Name = "Main Elevator", GameX = -282.304016, GameZ = -334.896, ScreenX = 2733.997401688906, ScreenY = 480.00396747518374 },
+                    new() { Id = "c846e13f4bf7afe28c0cf214bd9e7b4685ba592f", Name = "Sewage Conduit", GameX = -122.889992, GameZ = -258.3245, ScreenX = 4011.244465227256, ScreenY = 3515.778232018718 },
+                    new() { Id = "ed029f26c9d60bf00d926b4d7e7876b0591b411a", Name = "Medical Block Elevator", GameX = -112.423, GameZ = -343.986, ScreenX = 2607.884374465454, ScreenY = 3645.1769947510384 },
+                    new() { Id = "4cfc8fb5003e428d6cb9f8492690068afba50c71", Name = "Cargo Elevator", GameX = -112.152, GameZ = -408.64, ScreenX = 1595.2620604394808, ScreenY = 3651.4213017493394 }
+                },
                 Aliases = new List<string> { "labs", "LABS", "laboratory", "the-lab" }
             }
         };
