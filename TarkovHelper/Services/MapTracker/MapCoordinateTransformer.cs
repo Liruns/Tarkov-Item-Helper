@@ -75,43 +75,59 @@ public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
         if (config == null)
             return false;
 
-        if (config.Transform == null || config.Transform.Length < 4)
-            return false;
-
-        if (config.SvgBounds == null || config.SvgBounds.Length < 2)
-            return false;
-
         try
         {
-            // 1. 게임 좌표 → Leaflet 좌표 (lat=z, lng=x)
-            var lat = gameZ ?? 0;
-            var lng = gameX;
+            double finalX, finalY;
 
-            // 2. 회전 적용
-            var (rotatedLng, rotatedLat) = ApplyRotation(lng, lat, config.CoordinateRotation);
+            // 보정된 변환이 있으면 우선 사용
+            if (config.CalibratedTransform != null && config.CalibratedTransform.Length >= 6)
+            {
+                var calibrationService = MapCalibrationService.Instance;
+                (finalX, finalY) = calibrationService.ApplyCalibratedTransform(
+                    config.CalibratedTransform, gameX, gameZ ?? 0);
+            }
+            else
+            {
+                // 기존 Transform 방식 사용
+                if (config.Transform == null || config.Transform.Length < 4)
+                    return false;
 
-            // 3. CRS Transform (Y축 반전 포함)
-            var scaleX = config.Transform[0];
-            var marginX = config.Transform[1];
-            var scaleY = config.Transform[2] * -1;
-            var marginY = config.Transform[3];
+                if (config.SvgBounds == null || config.SvgBounds.Length < 2)
+                    return false;
 
-            var markerPixelX = scaleX * rotatedLng + marginX;
-            var markerPixelY = scaleY * rotatedLat + marginY;
+                // 1. 게임 좌표 → Leaflet 좌표 (lat=z, lng=x)
+                var lat = gameZ ?? 0;
+                var lng = gameX;
 
-            // 4. SVG bounds → pixel bounds
-            var (svgPixelXMin, svgPixelXMax, svgPixelYMin, svgPixelYMax) =
-                CalculateSvgPixelBounds(config, scaleX, marginX, scaleY, marginY);
+                // 2. 회전 적용
+                var (rotatedLng, rotatedLat) = ApplyRotation(lng, lat, config.CoordinateRotation);
 
-            // 5. ViewBox 좌표로 정규화
-            var normalizedX = (markerPixelX - svgPixelXMin) / (svgPixelXMax - svgPixelXMin);
-            var normalizedY = (markerPixelY - svgPixelYMin) / (svgPixelYMax - svgPixelYMin);
+                // 3. CRS Transform (Y축 반전 포함)
+                var scaleX = config.Transform[0];
+                var marginX = config.Transform[1];
+                var scaleY = config.Transform[2] * -1;
+                var marginY = config.Transform[3];
+
+                var markerPixelX = scaleX * rotatedLng + marginX;
+                var markerPixelY = scaleY * rotatedLat + marginY;
+
+                // 4. SVG bounds → pixel bounds
+                var (svgPixelXMin, svgPixelXMax, svgPixelYMin, svgPixelYMax) =
+                    CalculateSvgPixelBounds(config, scaleX, marginX, scaleY, marginY);
+
+                // 5. ViewBox 좌표로 정규화
+                var normalizedX = (markerPixelX - svgPixelXMin) / (svgPixelXMax - svgPixelXMin);
+                var normalizedY = (markerPixelY - svgPixelYMin) / (svgPixelYMax - svgPixelYMin);
+
+                finalX = normalizedX * config.ImageWidth;
+                finalY = normalizedY * config.ImageHeight;
+            }
 
             screenPosition = new ScreenPosition
             {
                 MapKey = config.Key,
-                X = normalizedX * config.ImageWidth,
-                Y = normalizedY * config.ImageHeight,
+                X = finalX,
+                Y = finalY,
                 Angle = angle,
                 OriginalPosition = new EftPosition
                 {

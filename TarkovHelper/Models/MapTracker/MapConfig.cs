@@ -115,4 +115,20 @@ public sealed class MapConfig
     /// 기본값: 1.0
     /// </summary>
     public double MarkerScale { get; set; } = 1.0;
+
+    /// <summary>
+    /// 좌표 보정 포인트 목록.
+    /// 사용자가 수동으로 조정한 탈출구 위치를 기반으로 좌표 변환을 보정합니다.
+    /// 최소 3개 이상의 포인트가 있으면 affine 변환을 계산합니다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<CalibrationPoint>? CalibrationPoints { get; set; }
+
+    /// <summary>
+    /// 보정된 좌표 변환 행렬 [a, b, c, d, tx, ty].
+    /// CalibrationPoints에서 자동 계산됩니다.
+    /// 변환 공식: screenX = a*gameX + b*gameZ + tx, screenY = c*gameX + d*gameZ + ty
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? CalibratedTransform { get; set; }
 }

@@ -67,6 +67,15 @@ public partial class MapTrackerPage : UserControl
     private bool _drawerCurrentMapOnly = false;
     private bool _drawerGroupByQuest = false;
 
+    // 보정 모드 관련 필드
+    private readonly MapCalibrationService _calibrationService = MapCalibrationService.Instance;
+    private bool _isCalibrationMode;
+    private FrameworkElement? _draggingExtractMarker;
+    private Point _extractDragStartPoint;
+    private double _extractMarkerOriginalLeft;
+    private double _extractMarkerOriginalTop;
+    private MapExtract? _draggingExtract;
+
     public MapTrackerPage()
     {
         try
@@ -1978,6 +1987,9 @@ public partial class MapTrackerPage : UserControl
         canvas.ToolTip = $"[{factionText}] {displayName}";
         canvas.Cursor = Cursors.Hand;
 
+        // 보정 모드용 드래그 이벤트 설정
+        SetupExtractMarkerForCalibration(canvas, extract);
+
         return canvas;
     }
 
@@ -2026,6 +2038,150 @@ public partial class MapTrackerPage : UserControl
         _extractMarkerElements.Clear();
         ExtractMarkersContainer.Children.Clear();
     }
+
+    #region Calibration Mode
+
+    private void BtnCalibrationMode_Changed(object sender, RoutedEventArgs e)
+    {
+        _isCalibrationMode = BtnCalibrationMode.IsChecked == true;
+
+        if (_isCalibrationMode)
+        {
+            TxtStatus.Text = "Calibration mode: Drag extract markers to correct positions. Need 3+ points.";
+
+            // 현재 맵의 보정 포인트 수 표시
+            var config = _trackerService?.GetMapConfig(_currentMapKey ?? "");
+            var pointCount = config?.CalibrationPoints?.Count ?? 0;
+            if (pointCount > 0)
+            {
+                TxtStatus.Text += $" ({pointCount} points set)";
+            }
+        }
+        else
+        {
+            TxtStatus.Text = "Calibration mode disabled.";
+            SaveCalibrationAndRefresh();
+        }
+    }
+
+    private void SaveCalibrationAndRefresh()
+    {
+        if (_trackerService == null) return;
+
+        var config = _trackerService.GetMapConfig(_currentMapKey ?? "");
+        if (config?.CalibrationPoints != null && config.CalibrationPoints.Count >= 3)
+        {
+            // 변환 행렬 재계산
+            config.CalibratedTransform = _calibrationService.CalculateAffineTransform(config.CalibrationPoints);
+
+            if (config.CalibratedTransform != null)
+            {
+                TxtStatus.Text = $"Calibration saved! ({config.CalibrationPoints.Count} points)";
+
+                // 설정 저장
+                _trackerService.SaveSettings();
+
+                // 마커 새로고침
+                RefreshExtractMarkers();
+                RefreshQuestMarkers();
+            }
+            else
+            {
+                TxtStatus.Text = "Calibration calculation failed.";
+            }
+        }
+        else
+        {
+            _trackerService.SaveSettings();
+        }
+    }
+
+    private void SetupExtractMarkerForCalibration(FrameworkElement marker, MapExtract extract)
+    {
+        marker.Tag = extract;
+        marker.Cursor = Cursors.SizeAll;
+        marker.MouseLeftButtonDown += ExtractMarker_CalibrationMouseDown;
+        marker.MouseMove += ExtractMarker_CalibrationMouseMove;
+        marker.MouseLeftButtonUp += ExtractMarker_CalibrationMouseUp;
+    }
+
+    private void ExtractMarker_CalibrationMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isCalibrationMode) return;
+        if (sender is not FrameworkElement marker) return;
+
+        _draggingExtractMarker = marker;
+        _draggingExtract = marker.Tag as MapExtract;
+        _extractDragStartPoint = e.GetPosition(ExtractMarkersContainer);
+        _extractMarkerOriginalLeft = Canvas.GetLeft(marker);
+        _extractMarkerOriginalTop = Canvas.GetTop(marker);
+
+        marker.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void ExtractMarker_CalibrationMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isCalibrationMode || _draggingExtractMarker == null) return;
+
+        var currentPoint = e.GetPosition(ExtractMarkersContainer);
+        var deltaX = currentPoint.X - _extractDragStartPoint.X;
+        var deltaY = currentPoint.Y - _extractDragStartPoint.Y;
+
+        Canvas.SetLeft(_draggingExtractMarker, _extractMarkerOriginalLeft + deltaX);
+        Canvas.SetTop(_draggingExtractMarker, _extractMarkerOriginalTop + deltaY);
+    }
+
+    private void ExtractMarker_CalibrationMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isCalibrationMode || _draggingExtractMarker == null || _draggingExtract == null) return;
+
+        _draggingExtractMarker.ReleaseMouseCapture();
+
+        // 최종 위치 계산 (마커 중심 기준)
+        var finalLeft = Canvas.GetLeft(_draggingExtractMarker);
+        var finalTop = Canvas.GetTop(_draggingExtractMarker);
+
+        // 마커 크기의 절반을 더해 중심점 계산
+        var markerWidth = _draggingExtractMarker.ActualWidth > 0 ? _draggingExtractMarker.ActualWidth : 20;
+        var markerHeight = _draggingExtractMarker.ActualHeight > 0 ? _draggingExtractMarker.ActualHeight : 20;
+        var centerX = finalLeft + markerWidth / 2;
+        var centerY = finalTop + markerHeight / 2;
+
+        // 보정 포인트 추가
+        var config = _trackerService?.GetMapConfig(_currentMapKey ?? "");
+        if (config != null)
+        {
+            var calibrationPoint = new CalibrationPoint
+            {
+                Id = _draggingExtract.Id,
+                Name = _draggingExtract.Name,
+                GameX = _draggingExtract.X,
+                GameZ = _draggingExtract.Z,
+                ScreenX = centerX,
+                ScreenY = centerY
+            };
+
+            var hasEnough = _calibrationService.AddCalibrationPoint(config, calibrationPoint);
+            var pointCount = config.CalibrationPoints?.Count ?? 0;
+
+            TxtStatus.Text = $"Calibration point set: {_draggingExtract.Name} ({pointCount} points)";
+            if (pointCount >= 3)
+            {
+                TxtStatus.Text += " - Ready to apply!";
+            }
+            else
+            {
+                TxtStatus.Text += $" - Need {3 - pointCount} more points";
+            }
+        }
+
+        _draggingExtractMarker = null;
+        _draggingExtract = null;
+        e.Handled = true;
+    }
+
+    #endregion
 
     private void ChkShowExtractMarkers_Changed(object sender, RoutedEventArgs e)
     {

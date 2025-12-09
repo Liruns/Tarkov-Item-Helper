@@ -373,7 +373,7 @@ public sealed class MapTrackerSettings
         // - Transform 값은 viewBox 비율에 맞게 스케일링
         return new List<MapConfig>
         {
-            // Woods: Old 1401.87 x 1420.60 → New 4800 x 4800 (ratio: 3.424, 3.379)
+            // Woods: Calibrated from 9 reference points
             new()
             {
                 Key = "Woods",
@@ -381,12 +381,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Woods.svg",
                 ImageWidth = 4800,
                 ImageHeight = 4800,
-                Transform = [0.1855 * 3.424, 113.1 * 3.424, 0.1855 * 3.379, 167.8 * 3.379],
-                CoordinateRotation = 180,
-                SvgBounds = [[650, -945], [-695, 470]],
+                CalibratedTransform = [-3.394478979463914, -0.00672470985271966, 0.028968077414678935, 3.3624781094363794, 2073.690129251411, 3161.542755683878],
                 Aliases = new List<string> { "woods", "WOODS" }
             },
-            // Customs: Old 1062.48 x 535.17 → New 4400 x 3200 (ratio: 4.142, 5.979)
+            // Customs: Calibrated from 10 reference points
             new()
             {
                 Key = "Customs",
@@ -394,12 +392,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Customs.svg",
                 ImageWidth = 4400,
                 ImageHeight = 3200,
-                Transform = [0.239 * 4.142, 168.65 * 4.142, 0.239 * 5.979, 136.35 * 5.979],
-                CoordinateRotation = 180,
-                SvgBounds = [[698, -307], [-372, 237]],
+                CalibratedTransform = [-3.6649134212117196, 0.2964105833041642, -0.09212328415752055, 4.934946350706538, 2940.3734739766946, 1626.687757738243],
                 Aliases = new List<string> { "customs", "CUSTOMS", "bigmap" }
             },
-            // Shoreline: Old 1559.57 x 1032.49 → New 3700 x 3100 (ratio: 2.372, 3.003)
+            // Shoreline: Calibrated from 10 reference points
             new()
             {
                 Key = "Shoreline",
@@ -407,12 +403,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Shoreline.svg",
                 ImageWidth = 3700,
                 ImageHeight = 3100,
-                Transform = [0.16 * 2.372, 83.2 * 2.372, 0.16 * 3.003, 111.1 * 3.003],
-                CoordinateRotation = 180,
-                SvgBounds = [[508, -415], [-1060, 618]],
+                CalibratedTransform = [-2.147451106044105, 0.015949683724444705, -0.0062445432176331545, 2.8002156918819003, 1256.0507944168528, 1290.7979930779154],
                 Aliases = new List<string> { "shoreline", "SHORELINE" }
             },
-            // Interchange: Old 977.10 x 977.10 → New 4000 x 3900 (ratio: 4.094, 3.992)
+            // Interchange: Calibrated from 3 reference points
             new()
             {
                 Key = "Interchange",
@@ -420,12 +414,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Interchange.svg",
                 ImageWidth = 4000,
                 ImageHeight = 3900,
-                Transform = [0.265 * 4.094, 150.6 * 4.094, 0.265 * 3.992, 134.6 * 3.992],
-                CoordinateRotation = 180,
-                SvgBounds = [[532.75, -442.75], [-364, 453.5]],
+                CalibratedTransform = [-4.3629135184885035, -0.46787647488898804, 0.01740221516511105, 4.08171562795115, 2309.0213766878187, 1987.6213844573472],
                 Aliases = new List<string> { "interchange", "INTERCHANGE" }
             },
-            // Reserve: Old 827.29 x 761.16 → New 3200 x 3000 (ratio: 3.867, 3.941)
+            // Reserve: Calibrated from 5 reference points
             new()
             {
                 Key = "Reserve",
@@ -433,12 +425,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Reserve.svg",
                 ImageWidth = 3200,
                 ImageHeight = 3000,
-                Transform = [0.395 * 3.867, 122.0 * 3.867, 0.395 * 3.941, 137.65 * 3.941],
-                CoordinateRotation = 180,
-                SvgBounds = [[289, -338], [-303, 336]],
+                CalibratedTransform = [-4.659551818591078, 1.4968674164044333, 1.4130686420734615, 6.194225988393516, 1605.6973392433374, 1531.5214718745203],
                 Aliases = new List<string> { "reserve", "RESERVE", "RezervBase" }
             },
-            // Lighthouse: Old 1059.38 x 1722.95 → New 3100 x 3700 (ratio: 2.926, 2.147)
+            // Lighthouse: Calibrated from 8 reference points
             new()
             {
                 Key = "Lighthouse",
@@ -446,12 +436,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Lighthouse.svg",
                 ImageWidth = 3100,
                 ImageHeight = 3700,
-                Transform = [0.2 * 2.926, 0 * 2.926, 0.2 * 2.147, 0 * 2.147],
-                CoordinateRotation = 180,
-                SvgBounds = [[515, -998], [-545, 725]],
+                CalibratedTransform = [-2.90420012444279, -0.03695247261865274, 0.07784072176584508, 2.177892974033182, 1528.3789482998613, 2306.9268299580804],
                 Aliases = new List<string> { "lighthouse", "LIGHTHOUSE" }
             },
-            // Streets: Old 605.32 x 831.58 → New 3260 x 3500 (ratio: 5.386, 4.208)
+            // Streets: Calibrated from 10 reference points
             new()
             {
                 Key = "StreetsOfTarkov",
@@ -459,13 +447,10 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/StreetsOfTarkov.svg",
                 ImageWidth = 3260,
                 ImageHeight = 3500,
-                Transform = [0.38 * 5.386, 0 * 5.386, 0.38 * 4.208, 0 * 4.208],
-                CoordinateRotation = 180,
-                SvgBounds = [[323, -317], [-280, 554]],
+                CalibratedTransform = [-4.9755636069074605, 0.17678253000661656, -0.04605367100221113, 4.532788724198274, 1635.6669035346636, 1040.0215325356564],
                 Aliases = new List<string> { "streets", "STREETS", "TarkovStreets", "streets-of-tarkov" }
             },
-            // Factory: Old 130.82 x 141.23 → New 3600 x 3600 (ratio: 27.519, 25.489)
-            // Note: Factory uses large MarkerScale multiplier
+            // Factory: Calibrated from 4 reference points
             new()
             {
                 Key = "Factory",
@@ -473,13 +458,11 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/Factory.svg",
                 ImageWidth = 3600,
                 ImageHeight = 3600,
-                Transform = [1.629 * 27.519, 119.9 * 27.519, 1.629 * 25.489, 139.3 * 25.489],
-                CoordinateRotation = 90,
-                SvgBounds = [[79, -64.5], [-66.5, 67.4]],
+                CalibratedTransform = [0.2798878415258037, -21.627674282585662, -22.72576612862695, 0.024192513858156503, 1780.53763466516, 1900.045614685979],
                 Aliases = new List<string> { "factory", "FACTORY", "factory4_day", "factory4_night" },
                 MarkerScale = 5.0
             },
-            // GroundZero: Old 348.93 x 488.45 → New 2800 x 3100 (ratio: 8.025, 6.347)
+            // GroundZero: Calibrated from 5 reference points
             new()
             {
                 Key = "GroundZero",
@@ -487,13 +470,11 @@ public sealed class MapTrackerSettings
                 ImagePath = "Assets/Maps/GroundZero.svg",
                 ImageWidth = 2800,
                 ImageHeight = 3100,
-                Transform = [0.524 * 8.025, 167.3 * 8.025, 0.524 * 6.347, 65.1 * 6.347],
-                CoordinateRotation = 180,
-                SvgBounds = [[249, -124], [-99, 364]],
+                CalibratedTransform = [-6.95950558606309, 0.1838843128357617, 1.7246964250980257, 5.988803108076605, 2088.258569967093, 789.6971540291354],
                 Aliases = new List<string> { "groundzero", "GROUNDZERO", "Sandbox", "sandbox", "ground-zero", "ground-zero-21" },
                 MarkerScale = 3.0
             },
-            // Labs: Old 720 x 586 → New 5500 x 4200 (ratio: 7.639, 7.167)
+            // Labs: No calibration yet - using original transform
             new()
             {
                 Key = "Labs",
