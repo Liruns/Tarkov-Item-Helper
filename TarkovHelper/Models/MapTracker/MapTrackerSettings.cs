@@ -66,12 +66,12 @@ public sealed class MapTrackerSettings
     /// <summary>
     /// 퀘스트 마커 크기 (픽셀)
     /// </summary>
-    public int MarkerSize { get; set; } = 16;
+    public int MarkerSize { get; set; } = 12;
 
     /// <summary>
     /// 플레이어 위치 마커 크기 (픽셀)
     /// </summary>
-    public int PlayerMarkerSize { get; set; } = 16;
+    public int PlayerMarkerSize { get; set; } = 12;
 
     /// <summary>
     /// 마커 색상 (ARGB hex, 예: "#FFFF0000" = 빨간색)
@@ -106,7 +106,7 @@ public sealed class MapTrackerSettings
     /// <summary>
     /// 탈출구 이름 텍스트 크기
     /// </summary>
-    public double ExtractNameTextSize { get; set; } = 10.0;
+    public double ExtractNameTextSize { get; set; } = 16.0;
 
     /// <summary>
     /// 퀘스트 마커 표시 여부

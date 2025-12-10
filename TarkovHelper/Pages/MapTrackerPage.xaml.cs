@@ -138,6 +138,9 @@ public partial class MapTrackerPage : UserControl
             // 탈출구 데이터 로드
             await LoadExtractsAsync();
 
+            // Drawer 기본 표시 및 내용 새로고침
+            RefreshQuestDrawer();
+
             // 퀘스트 진행 상태 변경 이벤트 구독
             _progressService.ProgressChanged += OnQuestProgressChanged;
             _progressService.ObjectiveProgressChanged += OnObjectiveProgressChanged;
@@ -808,20 +811,40 @@ public partial class MapTrackerPage : UserControl
     {
         // 다음 프리셋으로 줌
         var nextPreset = ZoomPresets.FirstOrDefault(p => p > _zoomLevel);
-        if (nextPreset > 0)
-            SetZoom(nextPreset);
-        else
-            SetZoom(_zoomLevel * 1.25);
+        var newZoom = nextPreset > 0 ? nextPreset : _zoomLevel * 1.25;
+        ZoomToMouse(newZoom);
     }
 
     private void BtnZoomOut_Click(object sender, RoutedEventArgs e)
     {
         // 이전 프리셋으로 줌
         var prevPreset = ZoomPresets.LastOrDefault(p => p < _zoomLevel);
-        if (prevPreset > 0)
-            SetZoom(prevPreset);
-        else
-            SetZoom(_zoomLevel * 0.8);
+        var newZoom = prevPreset > 0 ? prevPreset : _zoomLevel * 0.8;
+        ZoomToMouse(newZoom);
+    }
+
+    /// <summary>
+    /// 마우스 위치를 중심으로 줌합니다.
+    /// </summary>
+    private void ZoomToMouse(double newZoom)
+    {
+        var oldZoom = _zoomLevel;
+        newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
+
+        if (Math.Abs(newZoom - oldZoom) < 0.001) return;
+
+        // 마우스 위치 가져오기 (MapViewerGrid 기준)
+        var mousePos = Mouse.GetPosition(MapViewerGrid);
+
+        // 마우스 위치에서 캔버스상의 실제 좌표 계산
+        var canvasX = (mousePos.X - MapTranslate.X) / oldZoom;
+        var canvasY = (mousePos.Y - MapTranslate.Y) / oldZoom;
+
+        // 줌 후에도 마우스 위치가 동일한 캔버스 좌표를 가리키도록 translate 조정
+        MapTranslate.X = mousePos.X - canvasX * newZoom;
+        MapTranslate.Y = mousePos.Y - canvasY * newZoom;
+
+        SetZoom(newZoom);
     }
 
     private void CmbZoomLevel_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -896,8 +919,8 @@ public partial class MapTrackerPage : UserControl
 
     private void MapViewer_MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        // 마우스 위치를 중심으로 줌
-        var mousePos = e.GetPosition(MapCanvas);
+        // 마우스 위치를 중심으로 줌 (MapViewerGrid 기준)
+        var mousePos = e.GetPosition(MapViewerGrid);
         var oldZoom = _zoomLevel;
 
         // 줌 계산
@@ -906,16 +929,17 @@ public partial class MapTrackerPage : UserControl
 
         if (Math.Abs(newZoom - oldZoom) < 0.001) return;
 
-        // 마우스 위치 기준 줌
-        var scaleChange = newZoom / oldZoom;
+        // 마우스 위치에서 캔버스상의 실제 좌표 계산
+        // mousePos = canvasPos * oldZoom + translate
+        // canvasPos = (mousePos - translate) / oldZoom
+        var canvasX = (mousePos.X - MapTranslate.X) / oldZoom;
+        var canvasY = (mousePos.Y - MapTranslate.Y) / oldZoom;
 
-        // 현재 마우스 위치의 실제 캔버스 좌표
-        var canvasX = (mousePos.X - MapTranslate.X / oldZoom);
-        var canvasY = (mousePos.Y - MapTranslate.Y / oldZoom);
-
-        // 새로운 오프셋 계산 (마우스 위치가 고정되도록)
-        MapTranslate.X -= canvasX * (scaleChange - 1) * oldZoom;
-        MapTranslate.Y -= canvasY * (scaleChange - 1) * oldZoom;
+        // 줌 후에도 마우스 위치가 동일한 캔버스 좌표를 가리키도록 translate 조정
+        // mousePos = canvasPos * newZoom + newTranslate
+        // newTranslate = mousePos - canvasPos * newZoom
+        MapTranslate.X = mousePos.X - canvasX * newZoom;
+        MapTranslate.Y = mousePos.Y - canvasY * newZoom;
 
         SetZoom(newZoom);
         e.Handled = true;
@@ -1241,6 +1265,55 @@ public partial class MapTrackerPage : UserControl
         CmbZoomLevel.SelectionChanged -= CmbZoomLevel_SelectionChanged;
         CmbZoomLevel.Text = $"{_zoomLevel * 100:F0}%";
         CmbZoomLevel.SelectionChanged += CmbZoomLevel_SelectionChanged;
+
+        // 마커들의 역스케일 업데이트 (고정 크기 유지)
+        UpdateMarkerScales();
+    }
+
+    /// <summary>
+    /// 모든 마커의 역스케일을 현재 줌 레벨에 맞게 업데이트합니다.
+    /// </summary>
+    private void UpdateMarkerScales()
+    {
+        var inverseScale = 1.0 / _zoomLevel;
+
+        // 퀘스트 마커 업데이트
+        foreach (var marker in _questMarkerElements)
+        {
+            if (marker is Canvas canvas)
+            {
+                canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+            }
+        }
+
+        // 탈출구 마커 업데이트
+        foreach (var marker in _extractMarkerElements)
+        {
+            if (marker is Canvas canvas)
+            {
+                canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+            }
+        }
+
+        // 플레이어 마커 업데이트
+        UpdatePlayerMarkerScale(inverseScale);
+    }
+
+    /// <summary>
+    /// 플레이어 마커의 역스케일을 업데이트합니다.
+    /// </summary>
+    private void UpdatePlayerMarkerScale(double inverseScale)
+    {
+        if (MarkerScale != null)
+        {
+            MarkerScale.ScaleX = inverseScale;
+            MarkerScale.ScaleY = inverseScale;
+        }
+        if (DotScale != null)
+        {
+            DotScale.ScaleX = inverseScale;
+            DotScale.ScaleY = inverseScale;
+        }
     }
 
     /// <summary>
@@ -1663,6 +1736,11 @@ public partial class MapTrackerPage : UserControl
         Canvas.SetLeft(canvas, screenPos.X);
         Canvas.SetTop(canvas, screenPos.Y);
 
+        // 줌에 상관없이 고정 크기 유지를 위한 역스케일 적용
+        var inverseScale = 1.0 / _zoomLevel;
+        canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+        canvas.RenderTransformOrigin = new Point(0, 0);
+
         // 클릭 이벤트
         canvas.MouseLeftButtonDown += QuestMarker_Click;
         canvas.Cursor = Cursors.Hand;
@@ -1822,6 +1900,30 @@ public partial class MapTrackerPage : UserControl
         CloseQuestDrawer();
     }
 
+    private void BtnToggleDrawer_Click(object sender, RoutedEventArgs e)
+    {
+        if (QuestDrawerPanel.Visibility == Visibility.Visible)
+        {
+            CloseQuestDrawer();
+        }
+        else
+        {
+            OpenQuestDrawer();
+        }
+    }
+
+    private void OpenQuestDrawer()
+    {
+        QuestDrawerColumn.Width = new GridLength(320);
+        QuestDrawerColumn.MinWidth = 250;
+        QuestDrawerPanel.Visibility = Visibility.Visible;
+        DrawerSplitter.Visibility = Visibility.Visible;
+        TxtDrawerToggleIcon.Text = "◀";
+
+        // Drawer 내용 새로고침
+        RefreshQuestDrawer();
+    }
+
     private void CloseQuestDrawer()
     {
         // 선택 상태 초기화
@@ -1832,6 +1934,7 @@ public partial class MapTrackerPage : UserControl
         QuestDrawerColumn.MinWidth = 0;
         QuestDrawerPanel.Visibility = Visibility.Collapsed;
         DrawerSplitter.Visibility = Visibility.Collapsed;
+        TxtDrawerToggleIcon.Text = "▶";
     }
 
     private void QuestObjectiveItem_Click(object sender, MouseButtonEventArgs e)
@@ -2101,6 +2204,11 @@ public partial class MapTrackerPage : UserControl
         // 위치 설정
         Canvas.SetLeft(canvas, screenPos.X);
         Canvas.SetTop(canvas, screenPos.Y);
+
+        // 줌에 상관없이 고정 크기 유지를 위한 역스케일 적용
+        var inverseScale = 1.0 / _zoomLevel;
+        canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+        canvas.RenderTransformOrigin = new Point(0, 0);
 
         // 툴팁
         var factionText = faction switch

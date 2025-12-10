@@ -118,7 +118,7 @@
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <!-- 퀘스트 상세 Drawer (왼쪽) -->
-                <ColumnDefinition x:Name="QuestDrawerColumn" Width="0" MinWidth="0"/>
+                <ColumnDefinition x:Name="QuestDrawerColumn" Width="320" MinWidth="0"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition x:Name="SettingsColumn" Width="0"/>
@@ -128,7 +128,7 @@
             <Border x:Name="QuestDrawerPanel" Grid.Column="0"
                     Background="{StaticResource BackgroundMediumBrush}"
                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
-                    Visibility="Collapsed">
+                    Visibility="Visible">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -201,7 +201,7 @@
                                               FontSize="10" Margin="0,0,8,4"
                                               VerticalAlignment="Center"
                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                              IsChecked="False"
+                                              IsChecked="True"
                                               Checked="ChkCurrentMapOnly_Changed"
                                               Unchecked="ChkCurrentMapOnly_Changed">
                                         <TextBlock x:Name="TxtCurrentMapOnly" Text="이 맵만" FontSize="10"/>
@@ -211,7 +211,7 @@
                                               FontSize="10" Margin="0,0,0,4"
                                               VerticalAlignment="Center"
                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                              IsChecked="False"
+                                              IsChecked="True"
                                               Checked="ChkGroupByQuest_Changed"
                                               Unchecked="ChkGroupByQuest_Changed">
                                         <TextBlock x:Name="TxtGroupByQuest" Text="그룹" FontSize="10"/>
@@ -331,12 +331,27 @@
                 </Grid>
             </Border>
 
-            <!-- Drawer 리사이즈 핸들 -->
-            <GridSplitter x:Name="DrawerSplitter" Grid.Column="1" Width="5"
-                          HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                          Background="{StaticResource BorderBrush}"
-                          Visibility="Collapsed" Cursor="SizeWE"
-                          ShowsPreview="True"/>
+            <!-- Drawer 리사이즈 핸들 + 토글 버튼 -->
+            <Grid Grid.Column="1">
+                <GridSplitter x:Name="DrawerSplitter" Width="5"
+                              HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                              Background="{StaticResource BorderBrush}"
+                              Visibility="Visible" Cursor="SizeWE"
+                              ShowsPreview="True"/>
+                <!-- Drawer 토글 버튼 (세로 중앙) -->
+                <Button x:Name="BtnToggleDrawer"
+                        Width="16" Height="48"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{StaticResource BackgroundLightBrush}"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1"
+                        Click="BtnToggleDrawer_Click"
+                        Cursor="Hand"
+                        Panel.ZIndex="10">
+                    <TextBlock x:Name="TxtDrawerToggleIcon" Text="◀" FontSize="10"
+                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                </Button>
+            </Grid>
 
             <!-- 맵 뷰어 -->
             <Border Grid.Column="2" Background="{StaticResource BackgroundDarkBrush}"
@@ -527,7 +542,7 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <TextBlock x:Name="TxtQuestNameSizeLabel" Text="Quest Name:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderQuestNameTextSize" Width="120" Minimum="8" Maximum="50"
+                            <Slider x:Name="SliderQuestNameTextSize" Width="120" Minimum="8" Maximum="24"
                                     Value="12" ValueChanged="SliderQuestNameTextSize_ValueChanged"/>
                             <TextBlock x:Name="TxtQuestNameTextSize" Text="12" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
@@ -538,9 +553,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <TextBlock x:Name="TxtQuestMarkerSizeLabel" Text="Quest Marker:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderMarkerSize" Width="120" Minimum="8" Maximum="48"
-                                    Value="16" ValueChanged="SliderMarkerSize_ValueChanged"/>
-                            <TextBlock x:Name="TxtMarkerSize" Text="16" Width="30"
+                            <Slider x:Name="SliderMarkerSize" Width="120" Minimum="8" Maximum="24"
+                                    Value="12" ValueChanged="SliderMarkerSize_ValueChanged"/>
+                            <TextBlock x:Name="TxtMarkerSize" Text="12" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Center" Margin="8,0,0,0"/>
                         </StackPanel>
@@ -549,9 +564,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
                             <TextBlock x:Name="TxtPlayerMarkerSizeLabel" Text="Player Marker:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderPlayerMarkerSize" Width="120" Minimum="8" Maximum="64"
-                                    Value="16" ValueChanged="SliderPlayerMarkerSize_ValueChanged"/>
-                            <TextBlock x:Name="TxtPlayerMarkerSize" Text="16" Width="30"
+                            <Slider x:Name="SliderPlayerMarkerSize" Width="120" Minimum="8" Maximum="24"
+                                    Value="12" ValueChanged="SliderPlayerMarkerSize_ValueChanged"/>
+                            <TextBlock x:Name="TxtPlayerMarkerSize" Text="12" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Center" Margin="8,0,0,0"/>
                         </StackPanel>
@@ -576,9 +591,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
                             <TextBlock x:Name="TxtExtractNameSizeLabel" Text="Name Size:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderExtractTextSize" Width="120" Minimum="6" Maximum="20"
-                                    Value="10" ValueChanged="SliderExtractTextSize_ValueChanged"/>
-                            <TextBlock x:Name="TxtExtractTextSize" Text="10" Width="30"
+                            <Slider x:Name="SliderExtractTextSize" Width="120" Minimum="8" Maximum="24"
+                                    Value="16" ValueChanged="SliderExtractTextSize_ValueChanged"/>
+                            <TextBlock x:Name="TxtExtractTextSize" Text="16" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Center" Margin="8,0,0,0"/>
                         </StackPanel>
