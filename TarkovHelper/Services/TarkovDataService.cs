@@ -337,10 +337,10 @@ namespace TarkovHelper.Services
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                if (factionNames.Count == 1)
+                if (factionNames.Count == 1 && factionNames[0] != null)
                 {
                     // All variants have same faction (e.g., all BEAR) - this is a faction-specific quest
-                    apiFaction = factionNames[0].ToLowerInvariant();
+                    apiFaction = factionNames[0]!.ToLowerInvariant();
                 }
                 else if (factionNames.Count > 1)
                 {
@@ -817,6 +817,136 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
+        /// Match tasks with Tarkov Market quests and generate mismatch report
+        /// Uses bsgId from Tarkov Market to match with tarkov.dev task IDs
+        /// </summary>
+        public async Task<QuestMismatchReport> MatchTarkovMarketQuestsAsync(
+            List<TarkovTask> tasks,
+            Action<string>? progressCallback = null)
+        {
+            var report = new QuestMismatchReport
+            {
+                GeneratedAt = DateTime.UtcNow,
+                TotalWikiQuests = tasks.Count
+            };
+
+            var marketService = TarkovMarketService.Instance;
+
+            // Fetch quests from Tarkov Market
+            progressCallback?.Invoke("Fetching quests from Tarkov Market...");
+            var marketQuests = await marketService.FetchQuestsAsync(progressCallback);
+
+            if (marketQuests == null || marketQuests.Count == 0)
+            {
+                progressCallback?.Invoke("Failed to fetch Tarkov Market quests");
+                report.Mismatches.Add(new QuestMismatchInfo
+                {
+                    Type = "API_ERROR",
+                    Reason = "Failed to fetch quests from Tarkov Market API"
+                });
+                return report;
+            }
+
+            report.TotalTarkovMarketQuests = marketQuests.Count;
+            progressCallback?.Invoke($"Fetched {marketQuests.Count} quests from Tarkov Market");
+
+            // Save Tarkov Market quests for reference
+            await marketService.SaveQuestsToJsonAsync(marketQuests);
+            progressCallback?.Invoke("Saved tarkov_market_quests.json");
+
+            // Build lookup: bsgId -> TarkovMarketQuest
+            var marketQuestsByBsgId = new Dictionary<string, TarkovMarketQuest>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mq in marketQuests)
+            {
+                if (!string.IsNullOrEmpty(mq.BsgId))
+                {
+                    marketQuestsByBsgId[mq.BsgId] = mq;
+                }
+            }
+
+            // Build lookup: name -> TarkovMarketQuest (fallback matching)
+            var marketQuestsByName = new Dictionary<string, TarkovMarketQuest>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mq in marketQuests)
+            {
+                if (!string.IsNullOrEmpty(mq.Name))
+                {
+                    marketQuestsByName[mq.Name] = mq;
+                }
+            }
+
+            // Track matched Tarkov Market quests
+            var matchedMarketQuestUids = new HashSet<string>();
+
+            // Match each task with Tarkov Market quest
+            int matched = 0;
+            foreach (var task in tasks)
+            {
+                TarkovMarketQuest? matchedQuest = null;
+
+                // Method 1: Match by tarkov.dev ID (bsgId)
+                if (task.Ids != null && task.Ids.Count > 0)
+                {
+                    foreach (var taskId in task.Ids)
+                    {
+                        if (marketQuestsByBsgId.TryGetValue(taskId, out var quest))
+                        {
+                            matchedQuest = quest;
+                            break;
+                        }
+                    }
+                }
+
+                // Method 2: Fallback - Match by name
+                if (matchedQuest == null && !string.IsNullOrEmpty(task.Name))
+                {
+                    marketQuestsByName.TryGetValue(task.Name, out matchedQuest);
+                }
+
+                if (matchedQuest != null)
+                {
+                    task.TarkovMarketQuestUid = matchedQuest.Uid;
+                    matchedMarketQuestUids.Add(matchedQuest.Uid);
+                    matched++;
+                }
+                else
+                {
+                    // Wiki/tarkov.dev quest not found in Tarkov Market
+                    report.Mismatches.Add(new QuestMismatchInfo
+                    {
+                        Type = "WIKI_ONLY",
+                        WikiName = task.Name,
+                        TarkovDevId = task.Ids?.FirstOrDefault(),
+                        Reason = "Quest exists in wiki/tarkov.dev but not found in Tarkov Market"
+                    });
+                }
+            }
+
+            report.MatchedQuests = matched;
+
+            // Find Tarkov Market quests not matched to wiki/tarkov.dev
+            foreach (var mq in marketQuests)
+            {
+                if (!matchedMarketQuestUids.Contains(mq.Uid))
+                {
+                    report.Mismatches.Add(new QuestMismatchInfo
+                    {
+                        Type = "MARKET_ONLY",
+                        TarkovMarketName = mq.Name,
+                        TarkovMarketBsgId = mq.BsgId,
+                        TarkovMarketUid = mq.Uid,
+                        Reason = "Quest exists in Tarkov Market but not matched to wiki/tarkov.dev"
+                    });
+                }
+            }
+
+            // Save mismatch report
+            await marketService.SaveMismatchReportAsync(report);
+            progressCallback?.Invoke($"Matched {matched}/{tasks.Count} quests, {report.Mismatches.Count} mismatches saved to quest_mismatch_report.json");
+
+            return report;
+        }
+
+        /// <summary>
         /// Complete data refresh: WikiQuestData download, Quest Pages fetch, and API merge
         /// This is the main entry point for refreshing all task data
         /// </summary>
@@ -881,10 +1011,10 @@ namespace TarkovHelper.Services
                 }
 
                 // Step 1: Fetch master data (items, skills) from tarkov.dev API
-                progressCallback?.Invoke("[1/4] Fetching master data from tarkov.dev API...");
+                progressCallback?.Invoke("[1/5] Fetching master data from tarkov.dev API...");
                 var masterDataResult = await masterDataService.RefreshMasterDataAsync(msg =>
                 {
-                    progressCallback?.Invoke($"[1/4] {msg}");
+                    progressCallback?.Invoke($"[1/5] {msg}");
                 });
 
                 if (!masterDataResult.Success)
@@ -898,61 +1028,61 @@ namespace TarkovHelper.Services
                 result.SkillCount = masterDataResult.SkillCount;
                 result.SkillsWithKorean = masterDataResult.SkillsWithKorean;
                 result.SkillsWithJapanese = masterDataResult.SkillsWithJapanese;
-                progressCallback?.Invoke($"[1/4] Fetched {masterDataResult.ItemCount} items, {masterDataResult.SkillCount} skills");
+                progressCallback?.Invoke($"[1/5] Fetched {masterDataResult.ItemCount} items, {masterDataResult.SkillCount} skills");
 
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // Step 2: Download WikiQuestData (quest list from wiki)
-                progressCallback?.Invoke("[2/4] Downloading Wiki quest list...");
+                progressCallback?.Invoke("[2/5] Downloading Wiki quest list...");
                 var quests = await wikiService.RefreshQuestsDataAsync();
                 result.TotalQuestsInWiki = quests.Values.Sum(q => q.Count);
-                progressCallback?.Invoke($"[2/4] Downloaded {result.TotalQuestsInWiki} quests from wiki");
+                progressCallback?.Invoke($"[2/5] Downloaded {result.TotalQuestsInWiki} quests from wiki");
 
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // Step 3: Fetch all Quest Pages (.wiki files) using Special:Export (fast, no 503 errors)
-                progressCallback?.Invoke("[3/4] Downloading quest pages via Special:Export...");
+                progressCallback?.Invoke("[3/5] Downloading quest pages via Special:Export...");
                 var (downloaded, skipped, failed, failedQuests) = await wikiService.DownloadAllQuestPagesViaExportAsync(
                     forceDownload: false,
                     progress: (current, total, message) =>
                     {
-                        progressCallback?.Invoke($"[3/4] ({current}/{total}) {message}");
+                        progressCallback?.Invoke($"[3/5] ({current}/{total}) {message}");
                     },
                     cancellationToken: cancellationToken);
 
-                progressCallback?.Invoke($"[3/4] Export: {downloaded} downloaded, {skipped} cached, {failed} not found");
+                progressCallback?.Invoke($"[3/5] Export: {downloaded} downloaded, {skipped} cached, {failed} not found");
 
                 // Step 3b: Retry failed pages using MediaWiki API (Special:Export has page limits on Fandom)
                 if (failedQuests.Count > 0)
                 {
-                    progressCallback?.Invoke($"[3/4] Retrying {failedQuests.Count} pages via MediaWiki API...");
+                    progressCallback?.Invoke($"[3/5] Retrying {failedQuests.Count} pages via MediaWiki API...");
                     var (apiDownloaded, apiFailed, apiFailedQuests) = await wikiService.DownloadSpecificQuestPagesAsync(
                         failedQuests,
                         progress: (current, total, message) =>
                         {
-                            progressCallback?.Invoke($"[3/4] API ({current}/{total}) {message}");
+                            progressCallback?.Invoke($"[3/5] API ({current}/{total}) {message}");
                         },
                         cancellationToken: cancellationToken);
 
                     downloaded += apiDownloaded;
                     failed = apiFailed;  // Update to final failure count
                     failedQuests = apiFailedQuests;  // Update to final failed list
-                    progressCallback?.Invoke($"[3/4] API retry: {apiDownloaded} downloaded, {apiFailed} not found");
+                    progressCallback?.Invoke($"[3/5] API retry: {apiDownloaded} downloaded, {apiFailed} not found");
                 }
 
                 result.QuestPagesDownloaded = downloaded;
                 result.QuestPagesSkipped = skipped;
                 result.QuestPagesFailed = failed;
                 result.FailedQuestPages = failedQuests;
-                progressCallback?.Invoke($"[3/4] Quest pages: {downloaded} downloaded, {skipped} skipped, {failed} failed");
+                progressCallback?.Invoke($"[3/5] Quest pages: {downloaded} downloaded, {skipped} skipped, {failed} failed");
 
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // Step 4: Merge with tarkov.dev API
-                progressCallback?.Invoke("[4/4] Fetching and merging with tarkov.dev API...");
+                progressCallback?.Invoke("[4/5] Fetching and merging with tarkov.dev API...");
                 var (tasks, missingTasks) = await RefreshTasksDataAsync(message =>
                 {
-                    progressCallback?.Invoke($"[4/4] {message}");
+                    progressCallback?.Invoke($"[4/5] {message}");
                 });
 
                 result.TotalTasksMerged = tasks.Count;
@@ -960,6 +1090,22 @@ namespace TarkovHelper.Services
                 result.WikiOnlyTasks = tasks.Count(t => t.Ids == null || t.Ids.Count == 0);
                 result.KappaRequiredTasks = tasks.Count(t => t.ReqKappa);
                 result.MissingApiTasks = missingTasks.Count;
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Step 5: Fetch and match Tarkov Market quests
+                progressCallback?.Invoke("[5/5] Fetching Tarkov Market quests for matching...");
+                var mismatchReport = await MatchTarkovMarketQuestsAsync(tasks, message =>
+                {
+                    progressCallback?.Invoke($"[5/5] {message}");
+                });
+
+                // Save updated tasks with tarkovMarketQuestUid
+                await SaveTasksToJsonAsync(tasks);
+                progressCallback?.Invoke($"[5/5] Updated tasks.json with Tarkov Market UIDs");
+
+                result.TarkovMarketQuestsMatched = mismatchReport.MatchedQuests;
+                result.TarkovMarketMismatches = mismatchReport.Mismatches.Count;
 
                 // Save cache metadata for lifecycle management
                 var newCacheMetadata = new DataCacheMetadata
@@ -972,7 +1118,7 @@ namespace TarkovHelper.Services
                 await SaveCacheMetadataAsync(newCacheMetadata);
                 result.CacheTimestamp = newCacheMetadata.LastRefreshTime;
 
-                progressCallback?.Invoke($"[Complete] {result.TotalTasksMerged} tasks, {result.ItemCount} items, {result.SkillCount} skills");
+                progressCallback?.Invoke($"[Complete] {result.TotalTasksMerged} tasks, {result.ItemCount} items, {result.TarkovMarketQuestsMatched} market matches, {result.TarkovMarketMismatches} mismatches");
                 result.Success = true;
             }
             catch (OperationCanceledException)
@@ -1030,6 +1176,10 @@ namespace TarkovHelper.Services
         public int WikiOnlyTasks { get; set; }
         public int KappaRequiredTasks { get; set; }
         public int MissingApiTasks { get; set; }
+
+        // Tarkov Market matching stats
+        public int TarkovMarketQuestsMatched { get; set; }
+        public int TarkovMarketMismatches { get; set; }
     }
 
     /// <summary>

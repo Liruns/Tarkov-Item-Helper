@@ -74,7 +74,9 @@ public partial class MapTrackerPage : UserControl
 
     // 보정 모드 관련 필드
     private readonly MapCalibrationService _calibrationService = MapCalibrationService.Instance;
+#pragma warning disable CS0649 // Field is never assigned to
     private bool _isCalibrationMode;
+#pragma warning restore CS0649
     private FrameworkElement? _draggingExtractMarker;
     private Point _extractDragStartPoint;
     private double _extractMarkerOriginalLeft;
@@ -772,7 +774,9 @@ public partial class MapTrackerPage : UserControl
         }
     }
 
+#pragma warning disable CS0414 // Field is assigned but never used
     private bool _isFullScreen;
+#pragma warning restore CS0414
 
     private void BtnFullScreen_Click(object sender, RoutedEventArgs e)
     {

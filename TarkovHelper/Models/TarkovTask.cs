@@ -132,6 +132,13 @@ namespace TarkovHelper.Models
         /// </summary>
         [JsonPropertyName("taskRequirements")]
         public List<TaskRequirement>? TaskRequirements { get; set; }
+
+        /// <summary>
+        /// Tarkov Market internal quest UID (UUID)
+        /// Used for matching with quest markers from Tarkov Market API
+        /// </summary>
+        [JsonPropertyName("tarkovMarketQuestUid")]
+        public string? TarkovMarketQuestUid { get; set; }
     }
 
     /// <summary>

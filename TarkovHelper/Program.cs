@@ -1,3 +1,4 @@
+using System.IO;
 using TarkovHelper.Debug;
 using TarkovHelper.Services;
 
@@ -44,6 +45,13 @@ public class Program
         if (args.Length > 0 && args[0] == "--kappa-path")
         {
             RunKappaPathAsync().GetAwaiter().GetResult();
+            return;
+        }
+
+        // CLI mode: --compare-market
+        if (args.Length > 0 && args[0] == "--compare-market")
+        {
+            RunCompareMarketAsync().GetAwaiter().GetResult();
             return;
         }
 
@@ -362,6 +370,201 @@ public class Program
                     Console.WriteLine($"  - {quest.QuestName}: x{quest.Amount} ({quest.Requirement}){firText}");
                 }
             }
+        }
+    }
+
+    private static async Task RunCompareMarketAsync()
+    {
+        Console.WriteLine("Comparing Wiki/tarkov.dev data with Tarkov Market...");
+        Console.WriteLine();
+
+        var tasksJson = await File.ReadAllTextAsync(Path.Combine(AppEnv.DataPath, "tasks.json"));
+        var marketJsonPath = Path.Combine(AppEnv.DataPath, "tarkov_market_raw_response.json");
+
+        if (!File.Exists(marketJsonPath))
+        {
+            Console.WriteLine("Error: tarkov_market_raw_response.json not found.");
+            Console.WriteLine("Run a Refresh with Force option first to fetch Tarkov Market data.");
+            return;
+        }
+
+        var marketJson = await File.ReadAllTextAsync(marketJsonPath);
+
+        var tasks = System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(tasksJson)!;
+        var marketQuests = System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(marketJson)!;
+
+        Console.WriteLine($"Wiki/tarkov.dev tasks: {tasks.Count}");
+        Console.WriteLine($"Tarkov Market quests: {marketQuests.Count}");
+        Console.WriteLine();
+
+        // Build lookups
+        var tasksByMarketUid = new Dictionary<string, System.Text.Json.JsonElement>();
+        foreach (var task in tasks)
+        {
+            if (task.TryGetProperty("tarkovMarketQuestUid", out var uidProp) &&
+                uidProp.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var uid = uidProp.GetString();
+                if (!string.IsNullOrEmpty(uid))
+                    tasksByMarketUid[uid] = task;
+            }
+        }
+
+        var marketByUid = new Dictionary<string, System.Text.Json.JsonElement>();
+        foreach (var q in marketQuests)
+        {
+            var uid = q.GetProperty("uid").GetString();
+            if (!string.IsNullOrEmpty(uid))
+                marketByUid[uid] = q;
+        }
+
+        Console.WriteLine($"Matched quests: {tasksByMarketUid.Count}");
+        Console.WriteLine();
+
+        // === FACTION COMPARISON ===
+        Console.WriteLine("=== FACTION COMPARISON ===");
+        int factionMatch = 0, factionDiff = 0, factionWikiOnly = 0, factionMarketOnly = 0;
+        var factionDiffs = new List<(string name, string? wiki, string? market)>();
+
+        foreach (var kvp in tasksByMarketUid)
+        {
+            var marketUid = kvp.Key;
+            var wikiTask = kvp.Value;
+
+            if (!marketByUid.TryGetValue(marketUid, out var marketQuest))
+                continue;
+
+            string? wikiFaction = null;
+            if (wikiTask.TryGetProperty("faction", out var wfp) && wfp.ValueKind == System.Text.Json.JsonValueKind.String)
+                wikiFaction = wfp.GetString()?.ToLower();
+
+            string? marketSide = null;
+            if (marketQuest.TryGetProperty("side", out var msp) && msp.ValueKind == System.Text.Json.JsonValueKind.String)
+                marketSide = msp.GetString()?.ToLower();
+
+            // Normalize
+            if (marketSide == "pmc") marketSide = null;
+            if (wikiFaction == "any" || wikiFaction == "") wikiFaction = null;
+
+            var taskName = wikiTask.GetProperty("name").GetString()!;
+
+            if (wikiFaction == marketSide)
+            {
+                factionMatch++;
+            }
+            else if (wikiFaction == null && marketSide != null)
+            {
+                factionMarketOnly++;
+                factionDiffs.Add((taskName, null, marketSide));
+            }
+            else if (wikiFaction != null && marketSide == null)
+            {
+                factionWikiOnly++;
+                factionDiffs.Add((taskName, wikiFaction, null));
+            }
+            else
+            {
+                factionDiff++;
+                factionDiffs.Add((taskName, wikiFaction, marketSide));
+            }
+        }
+
+        Console.WriteLine($"Faction match: {factionMatch}");
+        Console.WriteLine($"Faction differs: {factionDiff}");
+        Console.WriteLine($"Wiki has faction, Market doesn't: {factionWikiOnly}");
+        Console.WriteLine($"Market has side, Wiki doesn't: {factionMarketOnly}");
+        Console.WriteLine();
+
+        if (factionDiffs.Count > 0)
+        {
+            Console.WriteLine("Details:");
+            foreach (var (name, wiki, market) in factionDiffs.Take(50))
+            {
+                var wikiStr = wiki ?? "null";
+                var marketStr = market ?? "null";
+                Console.WriteLine($"  {name}: wiki={wikiStr}, market={marketStr}");
+            }
+            if (factionDiffs.Count > 50)
+                Console.WriteLine($"  ... and {factionDiffs.Count - 50} more");
+        }
+        Console.WriteLine();
+
+        // === PREREQUISITES COMPARISON ===
+        Console.WriteLine("=== PREREQUISITES COMPARISON ===");
+        int prereqMatch = 0, prereqDiff = 0;
+        int wikiHasMore = 0, marketHasMore = 0;
+        var prereqDiffs = new List<(string name, int wiki, int market, List<string> wikiNames, List<string> marketNames)>();
+
+        foreach (var kvp in tasksByMarketUid)
+        {
+            var marketUid = kvp.Key;
+            var wikiTask = kvp.Value;
+
+            if (!marketByUid.TryGetValue(marketUid, out var marketQuest))
+                continue;
+
+            var taskName = wikiTask.GetProperty("name").GetString()!;
+
+            // Wiki previous
+            var wikiPrevNames = new List<string>();
+            if (wikiTask.TryGetProperty("previous", out var wpProp) && wpProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var p in wpProp.EnumerateArray())
+                    if (p.ValueKind == System.Text.Json.JsonValueKind.String)
+                        wikiPrevNames.Add(p.GetString()!);
+            }
+
+            // Market require
+            var marketPrevNames = new List<string>();
+            if (marketQuest.TryGetProperty("require", out var mrProp) && mrProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var r in mrProp.EnumerateArray())
+                {
+                    if (r.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var reqUid = r.GetString()!;
+                        if (marketByUid.TryGetValue(reqUid, out var prereqQuest))
+                            marketPrevNames.Add(prereqQuest.GetProperty("name").GetString()!);
+                        else
+                            marketPrevNames.Add($"[Unknown: {reqUid}]");
+                    }
+                }
+            }
+
+            if (wikiPrevNames.Count == marketPrevNames.Count)
+            {
+                prereqMatch++;
+            }
+            else
+            {
+                prereqDiff++;
+                if (wikiPrevNames.Count > marketPrevNames.Count) wikiHasMore++;
+                else marketHasMore++;
+
+                if (prereqDiffs.Count < 50)
+                    prereqDiffs.Add((taskName, wikiPrevNames.Count, marketPrevNames.Count, wikiPrevNames, marketPrevNames));
+            }
+        }
+
+        Console.WriteLine($"Prereq count match: {prereqMatch}");
+        Console.WriteLine($"Prereq count differs: {prereqDiff}");
+        Console.WriteLine($"  - Wiki has more prereqs: {wikiHasMore}");
+        Console.WriteLine($"  - Market has more prereqs: {marketHasMore}");
+        Console.WriteLine();
+
+        if (prereqDiffs.Count > 0)
+        {
+            Console.WriteLine("Sample differences:");
+            foreach (var (name, wiki, market, wikiNames, marketNames) in prereqDiffs.Take(30))
+            {
+                Console.WriteLine($"  {name}: wiki={wiki}, market={market}");
+                if (wikiNames.Count > 0)
+                    Console.WriteLine($"    Wiki: [{string.Join(", ", wikiNames)}]");
+                if (marketNames.Count > 0)
+                    Console.WriteLine($"    Market: [{string.Join(", ", marketNames)}]");
+            }
+            if (prereqDiffs.Count > 30)
+                Console.WriteLine($"  ... and {prereqDiffs.Count - 30} more");
         }
     }
 
