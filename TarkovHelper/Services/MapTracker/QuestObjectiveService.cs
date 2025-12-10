@@ -101,6 +101,18 @@ public sealed class QuestObjectiveService : IDisposable
 
         [JsonPropertyName("zones")]
         public List<ApiTaskZone>? Zones { get; set; }
+
+        [JsonPropertyName("possibleLocations")]
+        public List<ApiPossibleLocation>? PossibleLocations { get; set; }
+    }
+
+    private class ApiPossibleLocation
+    {
+        [JsonPropertyName("map")]
+        public ApiZoneMap? Map { get; set; }
+
+        [JsonPropertyName("positions")]
+        public List<ApiZonePosition>? Positions { get; set; }
     }
 
     private class ApiTaskZone
@@ -223,8 +235,11 @@ public sealed class QuestObjectiveService : IDisposable
 
             foreach (var objective in task.Objectives)
             {
-                // 위치 정보가 있는 목표만 처리
-                if (objective.Zones == null || objective.Zones.Count == 0)
+                // zones 또는 possibleLocations 중 하나라도 있어야 함
+                var hasZones = objective.Zones != null && objective.Zones.Count > 0;
+                var hasPossibleLocations = objective.PossibleLocations != null && objective.PossibleLocations.Count > 0;
+
+                if (!hasZones && !hasPossibleLocations)
                     continue;
 
                 var descKo = koObjectiveLookup.TryGetValue(objective.Id, out var ko) ? ko : null;
@@ -242,35 +257,65 @@ public sealed class QuestObjectiveService : IDisposable
                     Locations = new List<QuestObjectiveLocation>()
                 };
 
-                foreach (var zone in objective.Zones)
+                // zones에서 위치 추가
+                if (hasZones)
                 {
-                    if (zone.Map == null || zone.Position == null)
-                        continue;
-
-                    var location = new QuestObjectiveLocation
+                    foreach (var zone in objective.Zones!)
                     {
-                        Id = zone.Id,
-                        MapId = zone.Map.Id,
-                        MapName = zone.Map.Name,
-                        MapNormalizedName = zone.Map.NormalizedName,
-                        X = zone.Position.X,
-                        Y = zone.Position.Y,
-                        Z = zone.Position.Z,
-                        Top = zone.Top,
-                        Bottom = zone.Bottom
-                    };
+                        if (zone.Map == null || zone.Position == null)
+                            continue;
 
-                    // outline 변환
-                    if (zone.Outline != null && zone.Outline.Count > 0)
-                    {
-                        location.Outline = zone.Outline.Select(p => new OutlinePoint
+                        var location = new QuestObjectiveLocation
                         {
-                            X = p.X,
-                            Y = p.Y
-                        }).ToList();
-                    }
+                            Id = zone.Id,
+                            MapId = zone.Map.Id,
+                            MapName = zone.Map.Name,
+                            MapNormalizedName = zone.Map.NormalizedName,
+                            X = zone.Position.X,
+                            Y = zone.Position.Y,
+                            Z = zone.Position.Z,
+                            Top = zone.Top,
+                            Bottom = zone.Bottom
+                        };
 
-                    objectiveWithLocation.Locations.Add(location);
+                        // outline 변환
+                        if (zone.Outline != null && zone.Outline.Count > 0)
+                        {
+                            location.Outline = zone.Outline.Select(p => new OutlinePoint
+                            {
+                                X = p.X,
+                                Y = p.Y
+                            }).ToList();
+                        }
+
+                        objectiveWithLocation.Locations.Add(location);
+                    }
+                }
+
+                // possibleLocations에서 위치 추가 (findQuestItem 타입)
+                if (hasPossibleLocations)
+                {
+                    foreach (var possibleLoc in objective.PossibleLocations!)
+                    {
+                        if (possibleLoc.Map == null || possibleLoc.Positions == null)
+                            continue;
+
+                        foreach (var pos in possibleLoc.Positions)
+                        {
+                            var location = new QuestObjectiveLocation
+                            {
+                                Id = $"{objective.Id}_{possibleLoc.Map.NormalizedName}_{pos.X}_{pos.Y}_{pos.Z}",
+                                MapId = possibleLoc.Map.Id,
+                                MapName = possibleLoc.Map.Name,
+                                MapNormalizedName = possibleLoc.Map.NormalizedName,
+                                X = pos.X,
+                                Y = pos.Y,
+                                Z = pos.Z
+                            };
+
+                            objectiveWithLocation.Locations.Add(location);
+                        }
+                    }
                 }
 
                 // 위치가 있는 목표만 추가
@@ -309,9 +354,26 @@ public sealed class QuestObjectiveService : IDisposable
                 bottom
             }";
 
+        // possibleLocations 필드 (TaskObjectiveQuestItem 전용)
+        // findQuestItem 타입의 목표에서 아이템을 찾을 수 있는 위치
+        var possibleLocationsFragment = @"
+            possibleLocations {
+                map {
+                    id
+                    name
+                    normalizedName
+                }
+                positions {
+                    x
+                    y
+                    z
+                }
+            }";
+
         // zones 필드가 있는 타입들을 쿼리
         // TaskObjectiveQuestItem: findQuestItem, plantQuestItem 등 (예: Delivery from the Past)
         // TaskObjectiveItem: plantItem 등
+        // TaskObjectiveUseItem: useItem 등
         var query = $@"{{
             tasks(lang: {lang}) {{
                 id
@@ -324,8 +386,9 @@ public sealed class QuestObjectiveService : IDisposable
                     ... on TaskObjectiveBasic {{ {zoneFragment} }}
                     ... on TaskObjectiveMark {{ {zoneFragment} }}
                     ... on TaskObjectiveShoot {{ {zoneFragment} }}
-                    ... on TaskObjectiveQuestItem {{ {zoneFragment} }}
+                    ... on TaskObjectiveQuestItem {{ {zoneFragment} {possibleLocationsFragment} }}
                     ... on TaskObjectiveItem {{ {zoneFragment} }}
+                    ... on TaskObjectiveUseItem {{ {zoneFragment} }}
                 }}
             }}
         }}";
