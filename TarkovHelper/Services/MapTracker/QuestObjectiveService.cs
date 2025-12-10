@@ -548,7 +548,18 @@ public sealed class QuestObjectiveService : IDisposable
         foreach (var objective in mapObjectives)
         {
             // 퀘스트 상태 확인
+            // API에서는 "[PVP ZONE]" 퀘스트가 별도 이름으로 제공되지만 (예: easy-money-part-1-pvp-zone)
+            // 위키/tasks.json에서는 접미사 없이 저장됨 (예: easy-money-part-1)
             var task = progressService.GetTask(objective.TaskNormalizedName);
+            if (task == null)
+            {
+                // PVP ZONE 접미사 제거 후 재시도
+                var normalizedName = NormalizePvpZoneName(objective.TaskNormalizedName);
+                if (normalizedName != objective.TaskNormalizedName)
+                {
+                    task = progressService.GetTask(normalizedName);
+                }
+            }
             if (task == null) continue;
 
             var status = progressService.GetStatus(task);
@@ -665,6 +676,25 @@ public sealed class QuestObjectiveService : IDisposable
 
         System.Diagnostics.Debug.WriteLine($"[GetObjectiveIndex] Failed to match: task={task.NormalizedName}, desc={description}");
         return -1;
+    }
+
+    /// <summary>
+    /// PVP ZONE 접미사를 제거하여 표준화된 퀘스트 이름을 반환합니다.
+    /// 예: "easy-money-part-1-pvp-zone" → "easy-money-part-1"
+    /// </summary>
+    private static string NormalizePvpZoneName(string taskNormalizedName)
+    {
+        if (string.IsNullOrEmpty(taskNormalizedName))
+            return taskNormalizedName;
+
+        // "-pvp-zone" 접미사 제거
+        const string pvpZoneSuffix = "-pvp-zone";
+        if (taskNormalizedName.EndsWith(pvpZoneSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return taskNormalizedName[..^pvpZoneSuffix.Length];
+        }
+
+        return taskNormalizedName;
     }
 
     /// <summary>
