@@ -381,6 +381,16 @@ public sealed class TarkovMarketMarkerService : IDisposable
     }
 
     /// <summary>
+    /// 특정 맵의 트랜짓 마커를 반환합니다.
+    /// </summary>
+    public List<TarkovMarketMarker> GetTransitMarkersForMap(string mapKey)
+    {
+        return GetMarkersForMap(mapKey)
+            .Where(m => m.SubCategory == "Transition")
+            .ToList();
+    }
+
+    /// <summary>
     /// 특정 맵의 활성 퀘스트 마커를 반환합니다.
     /// </summary>
     /// <param name="mapKey">맵 키</param>

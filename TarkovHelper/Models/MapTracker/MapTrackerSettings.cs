@@ -129,6 +129,11 @@ public sealed class MapTrackerSettings
     public bool ShowExtractMarkers { get; set; } = true;
 
     /// <summary>
+    /// 트랜짓 마커 표시 여부
+    /// </summary>
+    public bool ShowTransitMarkers { get; set; } = true;
+
+    /// <summary>
     /// 완료된 퀘스트 목표 마커 숨기기 여부
     /// </summary>
     public bool HideCompletedObjectives { get; set; } = false;
