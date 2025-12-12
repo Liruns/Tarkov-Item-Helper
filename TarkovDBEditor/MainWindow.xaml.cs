@@ -430,8 +430,12 @@ public partial class MainWindow : Window
         try
         {
             using var refreshService = new RefreshDataService();
+            using var tarkovDevService = new TarkovDevDataService();
+            using var wikiCacheService = new WikiCacheService();
             var result = await refreshService.RefreshDataFromCacheAsync(
                 DatabaseService.Instance.DatabasePath,
+                tarkovDevService,
+                wikiCacheService,
                 progress => Dispatcher.Invoke(() => ViewModel.StatusMessage = progress));
 
             if (result.Success)

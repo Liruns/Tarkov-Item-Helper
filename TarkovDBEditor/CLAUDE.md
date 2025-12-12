@@ -51,6 +51,25 @@ xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
 <svgc:SvgViewbox Source="..." />
 ```
 
+### Schema Metadata Updates (IMPORTANT)
+
+When adding/modifying columns in database tables, you MUST update **both**:
+
+1. **CREATE TABLE statement** - The actual table schema (e.g., `CreateQuestsTableIfNotExistsAsync`)
+2. **RegisterSchemaAsync method** - The `_schema_meta` entry for UI display (e.g., `RegisterQuestsSchemaAsync`)
+
+The UI uses `_schema_meta.SchemaJson` to display columns in the DataGrid. If you only update the CREATE TABLE without updating the schema registration, the new column won't appear in the UI.
+
+```csharp
+// Example: Adding a new column to Quests table
+// 1. Update CreateQuestsTableIfNotExistsAsync - add column to CREATE TABLE
+// 2. Add ALTER TABLE migration for existing databases
+// 3. Update RegisterQuestsSchemaAsync - add ColumnSchema entry
+// 4. Update DbQuest class - add property
+// 5. Update UpsertQuestsAsync - add to INSERT/UPDATE queries
+// 6. Update AddQuestParameters - add parameter binding
+```
+
 ## Architecture
 
 ### Pattern: MVVM with Singleton Services
@@ -153,6 +172,10 @@ CREATE TABLE Quests (
     MinScavKarma INTEGER,
     MinScavKarmaApproved INTEGER NOT NULL DEFAULT 0,
     MinScavKarmaApprovedAt TEXT,
+    KappaRequired INTEGER NOT NULL DEFAULT 0,  -- Required for Kappa container (from Wiki reqkappa field)
+    Faction TEXT,              -- Bear, Usec, or NULL (from Wiki Requirements section)
+    IsApproved INTEGER NOT NULL DEFAULT 0,     -- Quest itself approved
+    ApprovedAt TEXT,
     UpdatedAt TEXT
 )
 
@@ -187,7 +210,8 @@ CREATE TABLE QuestObjectives (
     RequiresFIR INTEGER NOT NULL DEFAULT 0,  -- Found In Raid
     MapName TEXT,              -- Specific map for this objective
     LocationName TEXT,         -- Named location within map
-    LocationPoints TEXT,       -- JSON array of LocationPoint [{X, Y, Z, FloorId}]
+    LocationPoints TEXT,       -- JSON array of LocationPoint [{X, Y, Z, FloorId}] - defines area (polygon/line/point)
+    OptionalPoints TEXT,       -- JSON array of LocationPoint [{X, Y, Z, FloorId}] - OR locations (alternative spots)
     Conditions TEXT,           -- Additional conditions text
     ContentHash TEXT,
     IsApproved INTEGER NOT NULL DEFAULT 0,
@@ -231,6 +255,18 @@ CREATE TABLE QuestRequiredItems (
     FOREIGN KEY (ItemId) REFERENCES Items(Id) ON DELETE SET NULL
 )
 -- Indexes: idx_questreqitem_questid, idx_questreqitem_itemid
+
+-- Traders from tarkov.dev API
+CREATE TABLE Traders (
+    Id TEXT PRIMARY KEY,       -- tarkov.dev ID
+    Name TEXT NOT NULL,        -- English name
+    NameKO TEXT,               -- Korean name
+    NameJA TEXT,               -- Japanese name
+    NormalizedName TEXT,       -- URL-friendly name
+    ImageLink TEXT,            -- Icon URL from tarkov.dev
+    LocalIconPath TEXT,        -- Local cached icon path (wiki_data/icons/traders/{Id}.ext)
+    UpdatedAt TEXT
+)
 ```
 
 #### Hideout Tables (created by HideoutDataService)
@@ -358,6 +394,17 @@ CREATE TABLE MapMarkers (
 - 1 point: Single marker
 - 2 points: Line between points
 - 3+ points: Polygon area
+
+#### OptionalPoints (QuestObjectives.OptionalPoints)
+```json
+[
+  {"X": 100.0, "Y": 0, "Z": -50.0, "FloorId": "main"},
+  {"X": 200.0, "Y": 0, "Z": -60.0, "FloorId": "main"}
+]
+```
+- Each point represents an alternative location (OR relationship)
+- Used for objectives that can be completed at one of several locations
+- Displayed as orange markers with "OR1", "OR2", etc. labels
 
 #### ColumnSchema (in _schema_meta.SchemaJson)
 ```json

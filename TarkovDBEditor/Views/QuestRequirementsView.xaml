@@ -207,8 +207,25 @@
                     <Border Grid.Row="0" Background="{StaticResource AccentBrush}" CornerRadius="4,4,0,0" Padding="10,8">
                         <Grid>
                             <StackPanel>
-                                <TextBlock FontWeight="Bold" Foreground="White" FontSize="{StaticResource FontSizeLarge}"
-                                           Text="{Binding SelectedQuest.Name, FallbackValue='(Select a quest)'}"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock FontWeight="Bold" Foreground="White" FontSize="{StaticResource FontSizeLarge}"
+                                               Text="{Binding SelectedQuest.Name, FallbackValue='(Select a quest)'}" VerticalAlignment="Center"/>
+                                    <!-- Faction Badge (BEAR - Red) -->
+                                    <Border Background="#B71C1C" CornerRadius="3" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                            Visibility="{Binding SelectedQuest.IsBearOnly, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="BEAR" Foreground="White" FontSize="11" FontWeight="Bold"/>
+                                    </Border>
+                                    <!-- Faction Badge (USEC - Blue) -->
+                                    <Border Background="#1565C0" CornerRadius="3" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                            Visibility="{Binding SelectedQuest.IsUsecOnly, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="USEC" Foreground="White" FontSize="11" FontWeight="Bold"/>
+                                    </Border>
+                                    <!-- Kappa Badge -->
+                                    <Border Background="#F9A825" CornerRadius="3" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                            Visibility="{Binding SelectedQuest.KappaRequired, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="KAPPA" Foreground="#1A1A1A" FontSize="11" FontWeight="Bold"/>
+                                    </Border>
+                                </StackPanel>
                                 <TextBlock Foreground="#CCFFFFFF" FontSize="12"
                                            Text="{Binding SelectedQuest.TraderAndLocation, FallbackValue=''}"/>
                             </StackPanel>
@@ -256,10 +273,63 @@
                                     <RowDefinition Height="*"/>
                                 </Grid.RowDefinitions>
 
-                                <!-- Unlock Requirements (MinLevel, MinScavKarma) -->
+                                <!-- Unlock Requirements (MinLevel, MinScavKarma, Quest Approval) -->
                                 <StackPanel Grid.Row="0" Margin="0,8,0,12">
                                     <TextBlock Text="Unlock Requirements" FontWeight="Bold"
                                                Foreground="{StaticResource TextBrush}" Margin="0,0,0,8"/>
+
+                                    <!-- Quest Approval -->
+                                    <Border Background="{StaticResource PrimaryBrush}" CornerRadius="4"
+                                            Margin="0,2" Padding="10,8">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <CheckBox Grid.Column="0" x:Name="QuestApprovalCheckbox"
+                                                      IsChecked="{Binding SelectedQuest.IsApproved}"
+                                                      Margin="0,0,10,0" VerticalAlignment="Center"
+                                                      Checked="QuestApprovalCheckbox_Changed" Unchecked="QuestApprovalCheckbox_Changed"/>
+
+                                            <StackPanel Grid.Column="1">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Quest Approved" FontWeight="SemiBold"/>
+                                                    <Border Background="#7B1FA2" CornerRadius="3" Padding="6,1" Margin="8,0,0,0">
+                                                        <TextBlock Text="Quest" Foreground="White" FontSize="10"/>
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Text="Mark this quest as validated and approved"
+                                                           Foreground="{StaticResource TextDimBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                            </StackPanel>
+
+                                            <Border Grid.Column="2" CornerRadius="3" Padding="6,2" Margin="2">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="#C62828"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding SelectedQuest.IsApproved}" Value="True">
+                                                                <Setter Property="Background" Value="#2E7D32"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Foreground="White" FontSize="10">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="Pending"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding SelectedQuest.IsApproved}" Value="True">
+                                                                    <Setter Property="Text" Value="Approved"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                        </Grid>
+                                    </Border>
 
                                     <!-- Min Level -->
                                     <Border Background="{StaticResource PrimaryBrush}" CornerRadius="4"
@@ -562,6 +632,17 @@
                                                             <TextBlock Text="{Binding CoordinatesDisplay}" FontSize="11" Margin="8,0,0,0"
                                                                        Foreground="#4CAF50" FontFamily="Consolas"
                                                                        Visibility="{Binding HasCoordinates, Converter={StaticResource BoolToVisibility}}"/>
+                                                        </StackPanel>
+
+                                                        <!-- Optional Points (OR locations) - separate from Location Info -->
+                                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                                                                    Visibility="{Binding HasOptionalPoints, Converter={StaticResource BoolToVisibility}}">
+                                                            <Border Background="#FF5722" CornerRadius="3" Padding="6,2">
+                                                                <TextBlock Foreground="White" FontSize="10">
+                                                                    <Run Text="OR Locations: "/>
+                                                                    <Run Text="{Binding OptionalPointsDisplay, Mode=OneWay}"/>
+                                                                </TextBlock>
+                                                            </Border>
                                                         </StackPanel>
 
                                                         <!-- Item Name (if present) -->

@@ -423,9 +423,10 @@ namespace TarkovDBEditor.Services
                             // Infobox에서 트레이더 정보 추출
                             cached.Trader = ExtractTraderFromInfobox(content);
 
-                            // Requirements 섹션에서 MinLevel, MinScavKarma 추출
+                            // Requirements 섹션에서 MinLevel, MinScavKarma, Faction 추출
                             cached.MinLevel = ExtractMinLevel(content);
                             cached.MinScavKarma = ExtractMinScavKarma(content);
+                            cached.Faction = ExtractFaction(content);
                         }
 
                         completed++;
@@ -537,6 +538,27 @@ namespace TarkovDBEditor.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// PageContent에서 Kappa 필수 여부를 추출
+        /// Infobox의 |reqkappa = Yes/No 필드를 파싱
+        /// </summary>
+        public static bool ExtractKappaRequired(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return false;
+
+            // Infobox에서 reqkappa 필드 찾기
+            // 예: |reqkappa     =<font color="red">Yes</font>
+            // 예: |reqkappa     =<font color="green">No</font>
+            var match = Regex.Match(content, @"\|reqkappa\s*=\s*(?:<font[^>]*>)?\s*(Yes|No)\s*(?:</font>)?", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                return match.Groups[1].Value.Equals("Yes", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -1129,6 +1151,39 @@ namespace TarkovDBEditor.Services
         }
 
         /// <summary>
+        /// PageContent에서 ==Requirements== 섹션의 Faction 정보 추출
+        /// 패턴: "This quest is only obtainable by [[BEAR]] PMCs" 또는 "This quest is only obtainable by [[USEC]] PMCs"
+        /// Wiki 원문은 [[BEAR]] 형태로 링크되어 있음
+        /// </summary>
+        public static string? ExtractFaction(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return null;
+
+            // ==Requirements== 섹션 찾기
+            var reqMatch = Regex.Match(content, @"==\s*Requirements\s*==\s*(.*?)(?===|\z)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            if (!reqMatch.Success)
+                return null;
+
+            var requirementsSection = reqMatch.Groups[1].Value;
+
+            // "This quest is only obtainable by [[BEAR]] PMCs" - Wiki 링크 형태
+            // \[\[BEAR\]\] 또는 plain BEAR 둘 다 매칭
+            if (Regex.IsMatch(requirementsSection, @"only\s+obtainable\s+by\s+(?:\[\[)?BEAR(?:\]\])?\s+PMCs?", RegexOptions.IgnoreCase))
+            {
+                return "Bear";
+            }
+
+            // "This quest is only obtainable by [[USEC]] PMCs" - Wiki 링크 형태
+            if (Regex.IsMatch(requirementsSection, @"only\s+obtainable\s+by\s+(?:\[\[)?USEC(?:\]\])?\s+PMCs?", RegexOptions.IgnoreCase))
+            {
+                return "Usec";
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// PageContent에서 |related 필드를 파싱하여 대체 퀘스트(Other Choices) 목록 반환
         /// 주의: |related2, |related3 등은 다른 용도이므로 |related만 정확히 매칭해야 함
         /// </summary>
@@ -1656,6 +1711,9 @@ namespace TarkovDBEditor.Services
 
         [JsonPropertyName("minScavKarma")]
         public int? MinScavKarma { get; set; }
+
+        [JsonPropertyName("faction")]
+        public string? Faction { get; set; }
 
         [JsonPropertyName("cachedAt")]
         public DateTime CachedAt { get; set; }

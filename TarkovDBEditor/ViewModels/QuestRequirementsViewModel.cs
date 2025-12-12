@@ -147,11 +147,14 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
 
-        // Load all quests with MinLevel, MinScavKarma, and Location
+        // Migrate OptionalPoints column if not exists
+        await MigrateOptionalPointsColumnAsync(connection);
+
+        // Load all quests with MinLevel, MinScavKarma, Location, Faction, KappaRequired, IsApproved
         var questSql = @"SELECT Id, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, BsgId,
                          MinLevel, MinLevelApproved, MinLevelApprovedAt,
                          MinScavKarma, MinScavKarmaApproved, MinScavKarmaApprovedAt,
-                         Location
+                         Location, Faction, KappaRequired, IsApproved, ApprovedAt
                          FROM Quests ORDER BY Name";
         await using var questCmd = new SqliteCommand(questSql, connection);
         await using var questReader = await questCmd.ExecuteReaderAsync();
@@ -175,7 +178,11 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
                 MinScavKarma = questReader.IsDBNull(11) ? null : questReader.GetInt32(11),
                 MinScavKarmaApproved = !questReader.IsDBNull(12) && questReader.GetInt64(12) != 0,
                 MinScavKarmaApprovedAt = questReader.IsDBNull(13) ? null : DateTime.Parse(questReader.GetString(13)),
-                Location = questReader.IsDBNull(14) ? null : questReader.GetString(14)
+                Location = questReader.IsDBNull(14) ? null : questReader.GetString(14),
+                Faction = questReader.IsDBNull(15) ? null : questReader.GetString(15),
+                KappaRequired = !questReader.IsDBNull(16) && questReader.GetInt64(16) != 0,
+                IsApproved = !questReader.IsDBNull(17) && questReader.GetInt64(17) != 0,
+                ApprovedAt = questReader.IsDBNull(18) ? null : DateTime.Parse(questReader.GetString(18))
             });
         }
 
@@ -445,7 +452,7 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         var sql = @"
             SELECT o.Id, o.QuestId, o.SortOrder, o.ObjectiveType, o.Description,
                    o.TargetType, o.TargetCount, o.ItemId, o.ItemName, o.RequiresFIR,
-                   o.MapName, o.LocationName, o.LocationPoints,
+                   o.MapName, o.LocationName, o.LocationPoints, o.OptionalPoints,
                    o.Conditions, o.IsApproved, o.ApprovedAt
             FROM QuestObjectives o
             WHERE o.QuestId = @QuestId
@@ -472,9 +479,10 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
                 MapName = reader.IsDBNull(10) ? null : reader.GetString(10),
                 LocationName = reader.IsDBNull(11) ? null : reader.GetString(11),
                 LocationPointsJson = reader.IsDBNull(12) ? null : reader.GetString(12),
-                Conditions = reader.IsDBNull(13) ? null : reader.GetString(13),
-                IsApproved = !reader.IsDBNull(14) && reader.GetInt64(14) != 0,
-                ApprovedAt = reader.IsDBNull(15) ? null : DateTime.Parse(reader.GetString(15)),
+                OptionalPointsJson = reader.IsDBNull(13) ? null : reader.GetString(13),
+                Conditions = reader.IsDBNull(14) ? null : reader.GetString(14),
+                IsApproved = !reader.IsDBNull(15) && reader.GetInt64(15) != 0,
+                ApprovedAt = reader.IsDBNull(16) ? null : DateTime.Parse(reader.GetString(16)),
                 // Quest의 Location을 fallback으로 설정 (Quest Item의 경우 MapName이 없을 때 사용)
                 QuestLocation = _selectedQuest?.Location
             };
@@ -722,6 +730,29 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveLocationPointsAsync] Updated {rows} row(s) for ObjectiveId={objectiveId}, LocationPointsJson={(locationPointsJson ?? "null")}");
     }
 
+    public async Task UpdateObjectiveOptionalPointsAsync(string objectiveId, string? optionalPointsJson)
+    {
+        if (!_db.IsConnected)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveOptionalPointsAsync] DB not connected!");
+            return;
+        }
+
+        var connectionString = $"Data Source={_db.DatabasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        var sql = @"UPDATE QuestObjectives
+                    SET OptionalPoints = @OptionalPoints
+                    WHERE Id = @Id";
+
+        await using var cmd = new SqliteCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@Id", objectiveId);
+        cmd.Parameters.AddWithValue("@OptionalPoints", (object?)optionalPointsJson ?? DBNull.Value);
+        var rows = await cmd.ExecuteNonQueryAsync();
+        System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveOptionalPointsAsync] Updated {rows} row(s) for ObjectiveId={objectiveId}, OptionalPointsJson={(optionalPointsJson ?? "null")}");
+    }
+
     public async Task UpdateApprovalAsync(string requirementId, bool isApproved)
     {
         if (!_db.IsConnected)
@@ -831,11 +862,61 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// 퀘스트 자체 승인 상태 업데이트
+    /// </summary>
+    public async Task UpdateQuestApprovalAsync(string questId, bool isApproved)
+    {
+        if (!_db.IsConnected) return;
+
+        var connectionString = $"Data Source={_db.DatabasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        var sql = isApproved
+            ? "UPDATE Quests SET IsApproved = 1, ApprovedAt = @ApprovedAt WHERE Id = @Id"
+            : "UPDATE Quests SET IsApproved = 0, ApprovedAt = NULL WHERE Id = @Id";
+
+        await using var cmd = new SqliteCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@Id", questId);
+        if (isApproved)
+        {
+            cmd.Parameters.AddWithValue("@ApprovedAt", DateTime.UtcNow.ToString("o"));
+        }
+        await cmd.ExecuteNonQueryAsync();
+
+        // Update local quest
+        if (_selectedQuest != null && _selectedQuest.Id == questId)
+        {
+            _selectedQuest.IsApproved = isApproved;
+            _selectedQuest.ApprovedAt = isApproved ? DateTime.UtcNow : null;
+        }
+
+        var questInList = _allQuests.FirstOrDefault(q => q.Id == questId);
+        if (questInList != null)
+        {
+            questInList.IsApproved = isApproved;
+            questInList.ApprovedAt = isApproved ? DateTime.UtcNow : null;
+        }
+    }
+
     public (int Approved, int Total) GetApprovalProgress()
     {
         var total = _allQuests.Sum(q => q.TotalRequirements);
         var approved = _allQuests.Sum(q => q.ApprovedCount);
         return (approved, total);
+    }
+
+    private async Task MigrateOptionalPointsColumnAsync(SqliteConnection connection)
+    {
+        try
+        {
+            using var alterCmd = new SqliteCommand(
+                "ALTER TABLE QuestObjectives ADD COLUMN OptionalPoints TEXT",
+                connection);
+            await alterCmd.ExecuteNonQueryAsync();
+        }
+        catch { /* Column already exists - ignore */ }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -857,6 +938,9 @@ public class QuestItem : INotifyPropertyChanged
     private bool _minLevelApproved;
     private int? _minScavKarma;
     private bool _minScavKarmaApproved;
+    private bool _kappaRequired;
+    private string? _faction;
+    private bool _isApproved;
 
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
@@ -910,6 +994,38 @@ public class QuestItem : INotifyPropertyChanged
 
     public DateTime? MinScavKarmaApprovedAt { get; set; }
 
+    /// <summary>
+    /// 카파 컨테이너 필수 여부
+    /// </summary>
+    public bool KappaRequired
+    {
+        get => _kappaRequired;
+        set { _kappaRequired = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 퀘스트 진영 제한 (Bear / Usec / null)
+    /// </summary>
+    public string? Faction
+    {
+        get => _faction;
+        set { _faction = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsBearOnly)); OnPropertyChanged(nameof(IsUsecOnly)); }
+    }
+
+    public bool IsBearOnly => string.Equals(Faction, "Bear", StringComparison.OrdinalIgnoreCase);
+    public bool IsUsecOnly => string.Equals(Faction, "Usec", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 퀘스트 자체 승인 상태
+    /// </summary>
+    public bool IsApproved
+    {
+        get => _isApproved;
+        set { _isApproved = value; OnPropertyChanged(); OnPropertyChanged(nameof(ApprovedCount)); OnPropertyChanged(nameof(ApprovalStatus)); }
+    }
+
+    public DateTime? ApprovedAt { get; set; }
+
     public bool HasMinLevel => MinLevel.HasValue && MinLevel.Value > 0;
     public bool HasMinScavKarma => MinScavKarma.HasValue;
 
@@ -920,6 +1036,8 @@ public class QuestItem : INotifyPropertyChanged
             var total = _totalRequirements + _totalObjectives + _totalOptionalQuests + _totalRequiredItems;
             if (HasMinLevel) total++;
             if (HasMinScavKarma) total++;
+            // 퀘스트 자체도 1개로 카운트 (항상 포함)
+            total++;
             return total;
         }
         set { _totalRequirements = value; OnPropertyChanged(); OnPropertyChanged(nameof(ApprovalStatus)); }
@@ -932,6 +1050,8 @@ public class QuestItem : INotifyPropertyChanged
             var count = _approvedCount + _objectiveApprovedCount + _optionalQuestApprovedCount + _requiredItemApprovedCount;
             if (HasMinLevel && MinLevelApproved) count++;
             if (HasMinScavKarma && MinScavKarmaApproved) count++;
+            // 퀘스트 자체 승인 상태도 카운트
+            if (IsApproved) count++;
             return count;
         }
         set { _approvedCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(ApprovalStatus)); }

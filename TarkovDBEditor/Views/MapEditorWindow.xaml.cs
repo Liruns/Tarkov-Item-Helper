@@ -44,6 +44,8 @@ public partial class MapEditorWindow : Window
     // Objective being edited
     private readonly QuestObjectiveItem? _objective;
     private readonly List<LocationPoint> _locationPoints = new();
+    private readonly List<LocationPoint> _optionalPoints = new();
+    private bool _isEditingOptionalPoints;
 
     // Marker editing mode (when no objective is provided)
     private bool _isMarkerMode;
@@ -77,10 +79,16 @@ public partial class MapEditorWindow : Window
         _objective = objective;
         _isMarkerMode = false;
 
-        // Copy existing points (preserve floor info)
+        // Copy existing location points (preserve floor info)
         foreach (var point in objective.LocationPoints)
         {
             _locationPoints.Add(new LocationPoint(point.X, point.Y, point.Z, point.FloorId));
+        }
+
+        // Copy existing optional points (preserve floor info)
+        foreach (var point in objective.OptionalPoints)
+        {
+            _optionalPoints.Add(new LocationPoint(point.X, point.Y, point.Z, point.FloorId));
         }
     }
 
@@ -428,36 +436,61 @@ public partial class MapEditorWindow : Window
         // Convert screen coordinates to game coordinates
         var (gameX, gameZ) = _currentMapConfig.ScreenToGame(screenX, screenY);
 
-        // Add point with current floor info
-        _locationPoints.Add(new LocationPoint(gameX, 0, gameZ, _currentFloorId));
+        // Add point with current floor info to the appropriate list
+        var newPoint = new LocationPoint(gameX, 0, gameZ, _currentFloorId);
+        if (_isEditingOptionalPoints)
+        {
+            _optionalPoints.Add(newPoint);
+        }
+        else
+        {
+            _locationPoints.Add(newPoint);
+        }
+
         UpdatePointsDisplay();
         RedrawPoints();
 
         var floorInfo = _currentFloorId != null ? $" (Floor: {_currentFloorId})" : "";
-        StatusText.Text = $"Added point: ({gameX:F1}, {gameZ:F1}){floorInfo}";
+        var pointType = _isEditingOptionalPoints ? "OR location" : "point";
+        StatusText.Text = $"Added {pointType}: ({gameX:F1}, {gameZ:F1}){floorInfo}";
     }
 
     private void RemoveLastPoint()
     {
-        if (_locationPoints.Count > 0)
+        if (_isEditingOptionalPoints)
         {
-            _locationPoints.RemoveAt(_locationPoints.Count - 1);
-            UpdatePointsDisplay();
-            RedrawPoints();
-            StatusText.Text = "Removed last point";
+            if (_optionalPoints.Count > 0)
+            {
+                _optionalPoints.RemoveAt(_optionalPoints.Count - 1);
+                UpdatePointsDisplay();
+                RedrawPoints();
+                StatusText.Text = "Removed last OR location";
+            }
+        }
+        else
+        {
+            if (_locationPoints.Count > 0)
+            {
+                _locationPoints.RemoveAt(_locationPoints.Count - 1);
+                UpdatePointsDisplay();
+                RedrawPoints();
+                StatusText.Text = "Removed last point";
+            }
         }
     }
 
     private void UpdatePointsDisplay()
     {
         PointsCountText.Text = _locationPoints.Count.ToString();
+        OptionalPointsCountText.Text = $" / {_optionalPoints.Count} OR";
     }
 
     private void RedrawPoints()
     {
         PointsCanvas.Children.Clear();
 
-        if (_currentMapConfig == null || _locationPoints.Count == 0) return;
+        if (_currentMapConfig == null) return;
+        if (_locationPoints.Count == 0 && _optionalPoints.Count == 0) return;
 
         System.Diagnostics.Debug.WriteLine($"[MapEditor.RedrawPoints] CurrentMap: Key={_currentMapConfig.Key}, Transform={string.Join(",", _currentMapConfig.CalibratedTransform ?? Array.Empty<double>())}");
         foreach (var pt in _locationPoints)
@@ -653,25 +686,137 @@ public partial class MapEditorWindow : Window
 
             index++;
         }
+
+        // Draw Optional Points (OR locations) - always as individual markers with different color
+        if (_optionalPoints.Count > 0)
+        {
+            var optMarkerSize = 48 * inverseScale;
+            var optIndex = 1;
+            foreach (var point in _optionalPoints)
+            {
+                var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+
+                // Determine opacity based on floor
+                double optOpacity = 1.0;
+                if (hasFloors && _currentFloorId != null && point.FloorId != null)
+                {
+                    optOpacity = string.Equals(point.FloorId, _currentFloorId, StringComparison.OrdinalIgnoreCase) ? 1.0 : 0.3;
+                }
+                var isOptCurrentFloor = optOpacity > 0.5;
+
+                // Orange circle for OR locations
+                var optEllipse = new Ellipse
+                {
+                    Width = optMarkerSize,
+                    Height = optMarkerSize,
+                    Fill = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 255), 255, 87, 34)), // #FF5722
+                    Stroke = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 255), 255, 255, 255)),
+                    StrokeThickness = 4 * inverseScale
+                };
+
+                Canvas.SetLeft(optEllipse, sx - optMarkerSize / 2);
+                Canvas.SetTop(optEllipse, sy - optMarkerSize / 2);
+                PointsCanvas.Children.Add(optEllipse);
+
+                // "OR" prefix label
+                var orLabel = new TextBlock
+                {
+                    Text = $"OR{optIndex}",
+                    Foreground = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 255), 255, 255, 255)),
+                    FontSize = 36 * inverseScale,
+                    FontWeight = FontWeights.Bold
+                };
+
+                Canvas.SetLeft(orLabel, sx + optMarkerSize / 2 + 8 * inverseScale);
+                Canvas.SetTop(orLabel, sy - optMarkerSize / 2);
+                PointsCanvas.Children.Add(orLabel);
+
+                // Floor indicator (if different floor)
+                if (hasFloors && point.FloorId != null && !isOptCurrentFloor)
+                {
+                    var floorDisplayName = _sortedFloors?
+                        .FirstOrDefault(f => string.Equals(f.LayerId, point.FloorId, StringComparison.OrdinalIgnoreCase))
+                        ?.DisplayName ?? point.FloorId;
+
+                    var floorLabel = new TextBlock
+                    {
+                        Text = $"[{floorDisplayName}]",
+                        Foreground = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 200), 154, 136, 102)),
+                        FontSize = 28 * inverseScale,
+                        FontStyle = FontStyles.Italic
+                    };
+
+                    Canvas.SetLeft(floorLabel, sx + optMarkerSize / 2 + 8 * inverseScale);
+                    Canvas.SetTop(floorLabel, sy + optMarkerSize / 2);
+                    PointsCanvas.Children.Add(floorLabel);
+                }
+
+                optIndex++;
+            }
+        }
+    }
+
+    private void PointTypeToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button btn || btn.Tag is not string mode) return;
+
+        _isEditingOptionalPoints = mode == "Optional";
+
+        // Update button visuals
+        if (_isEditingOptionalPoints)
+        {
+            BtnLocationMode.Background = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44));
+            BtnLocationMode.Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88));
+            BtnOptionalMode.Background = new SolidColorBrush(Color.FromRgb(0xFF, 0x57, 0x22)); // #FF5722
+            BtnOptionalMode.Foreground = Brushes.White;
+            StatusText.Text = "Mode: OR Locations (click to add alternative locations)";
+        }
+        else
+        {
+            BtnLocationMode.Background = new SolidColorBrush(Color.FromRgb(0x70, 0xA8, 0x00)); // #70A800
+            BtnLocationMode.Foreground = Brushes.White;
+            BtnOptionalMode.Background = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44));
+            BtnOptionalMode.Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88));
+            StatusText.Text = "Mode: Area (click to define area points)";
+        }
     }
 
     private void ClearPoints_Click(object sender, RoutedEventArgs e)
     {
-        if (_locationPoints.Count > 0)
+        if (_isEditingOptionalPoints)
         {
-            var result = MessageBox.Show("Clear all points?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result == MessageBoxResult.Yes)
+            if (_optionalPoints.Count > 0)
             {
-                _locationPoints.Clear();
-                UpdatePointsDisplay();
-                RedrawPoints();
-                StatusText.Text = "All points cleared";
+                var result = MessageBox.Show("Clear all OR locations?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    _optionalPoints.Clear();
+                    UpdatePointsDisplay();
+                    RedrawPoints();
+                    StatusText.Text = "All OR locations cleared";
+                }
+            }
+        }
+        else
+        {
+            if (_locationPoints.Count > 0)
+            {
+                var result = MessageBox.Show("Clear all area points?", "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    _locationPoints.Clear();
+                    UpdatePointsDisplay();
+                    RedrawPoints();
+                    StatusText.Text = "All area points cleared";
+                }
             }
         }
     }
 
     private void SaveAndClose_Click(object sender, RoutedEventArgs e)
     {
+        System.Diagnostics.Debug.WriteLine($"[SaveAndClose] _locationPoints: {_locationPoints.Count}, _optionalPoints: {_optionalPoints.Count}");
+
         if (_objective != null)
         {
             // Update objective's location points (including FloorId)
@@ -680,6 +825,17 @@ public partial class MapEditorWindow : Window
             {
                 _objective.LocationPoints.Add(new LocationPoint(point.X, point.Y, point.Z, point.FloorId));
             }
+
+            // Update objective's optional points (including FloorId)
+            _objective.OptionalPoints.Clear();
+            foreach (var point in _optionalPoints)
+            {
+                _objective.OptionalPoints.Add(new LocationPoint(point.X, point.Y, point.Z, point.FloorId));
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[SaveAndClose] After save - LocationPoints: {_objective.LocationPoints.Count}, OptionalPoints: {_objective.OptionalPoints.Count}");
+            System.Diagnostics.Debug.WriteLine($"[SaveAndClose] LocationPointsJson: {_objective.LocationPointsJson}");
+            System.Diagnostics.Debug.WriteLine($"[SaveAndClose] OptionalPointsJson: {_objective.OptionalPointsJson}");
         }
 
         WasSaved = true;

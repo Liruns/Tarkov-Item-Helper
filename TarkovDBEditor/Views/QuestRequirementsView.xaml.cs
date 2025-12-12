@@ -160,6 +160,20 @@ public partial class QuestRequirementsView : Window
             : $"Unapproved MinScavKarma requirement for {_viewModel.SelectedQuest.Name}";
     }
 
+    private async void QuestApprovalCheckbox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedQuest == null) return;
+        if (sender is not CheckBox cb) return;
+
+        var isApproved = cb.IsChecked ?? false;
+        _viewModel.SelectedQuest.IsApproved = isApproved; // Update model immediately
+        await _viewModel.UpdateQuestApprovalAsync(_viewModel.SelectedQuest.Id, isApproved);
+        UpdateProgressText();
+        StatusText.Text = isApproved
+            ? $"Approved quest: {_viewModel.SelectedQuest.Name}"
+            : $"Unapproved quest: {_viewModel.SelectedQuest.Name}";
+    }
+
     private async void ApproveAll_Click(object sender, RoutedEventArgs e)
     {
         if (_viewModel.SelectedQuest == null) return;
@@ -317,14 +331,35 @@ public partial class QuestRequirementsView : Window
 
         if (result == true && mapEditor.WasSaved)
         {
-            // Save to database
-            var json = selectedObj.LocationPointsJson;
-            await _viewModel.UpdateObjectiveLocationPointsAsync(selectedObj.Id, json);
+            System.Diagnostics.Debug.WriteLine($"[ObjectivesList_MouseDoubleClick] Before save - LocationPoints: {selectedObj.LocationPoints.Count}, OptionalPoints: {selectedObj.OptionalPoints.Count}");
+
+            // Save LocationPoints to database
+            var locationJson = selectedObj.LocationPointsJson;
+            System.Diagnostics.Debug.WriteLine($"[ObjectivesList_MouseDoubleClick] locationJson: {locationJson}");
+            await _viewModel.UpdateObjectiveLocationPointsAsync(selectedObj.Id, locationJson);
+
+            // Save OptionalPoints to database
+            var optionalJson = selectedObj.OptionalPointsJson;
+            System.Diagnostics.Debug.WriteLine($"[ObjectivesList_MouseDoubleClick] optionalJson: {optionalJson}");
+            await _viewModel.UpdateObjectiveOptionalPointsAsync(selectedObj.Id, optionalJson);
 
             var desc = selectedObj.Description.Length > 50
                 ? selectedObj.Description.Substring(0, 50) + "..."
                 : selectedObj.Description;
-            StatusText.Text = $"Location points saved ({selectedObj.LocationPoints.Count} points) for: {desc}";
+
+            var pointInfo = new List<string>();
+            if (selectedObj.LocationPoints.Count > 0)
+                pointInfo.Add($"{selectedObj.LocationPoints.Count} area");
+            if (selectedObj.OptionalPoints.Count > 0)
+                pointInfo.Add($"{selectedObj.OptionalPoints.Count} OR");
+
+            StatusText.Text = $"Points saved ({string.Join(", ", pointInfo)}) for: {desc}";
+
+            System.Diagnostics.Debug.WriteLine($"[ObjectivesList_MouseDoubleClick] After save - StatusText: {StatusText.Text}");
+            System.Diagnostics.Debug.WriteLine($"[ObjectivesList_MouseDoubleClick] HasOptionalPoints: {selectedObj.HasOptionalPoints}, OptionalPointsDisplay: {selectedObj.OptionalPointsDisplay}");
+
+            // Force UI refresh for the updated item
+            ObjectivesList.Items.Refresh();
         }
     }
 

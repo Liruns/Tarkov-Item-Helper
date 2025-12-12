@@ -69,11 +69,13 @@ namespace TarkovDBEditor.Services
         #region Refresh Data
 
         /// <summary>
-        /// 캐시된 Wiki 데이터로 .db 파일의 Quests 테이블을 업데이트 (Wiki 요청 없음)
+        /// 캐시된 Wiki 데이터로 .db 파일의 Quests, Traders 테이블을 업데이트 (네트워크 요청 없음)
         /// Items는 기존 DB에서 로드하여 사용 (Items 테이블은 변경하지 않음)
         /// </summary>
         public async Task<RefreshResult> RefreshDataFromCacheAsync(
             string databasePath,
+            TarkovDevDataService? tarkovDevService = null,
+            WikiCacheService? wikiCacheService = null,
             Action<string>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -123,6 +125,20 @@ namespace TarkovDBEditor.Services
                 result.ItemsCount = existingItems.Count;
                 result.QuestsCount = questsResult.Quests.Count;
 
+                // Traders 업데이트 (tarkovDevService가 제공된 경우에만)
+                var tradersStats = (inserted: 0, updated: 0, deleted: 0);
+                if (tarkovDevService != null)
+                {
+                    progress?.Invoke("Updating Traders table...");
+                    tradersStats = await UpdateTradersFromCacheAsync(
+                        databasePath,
+                        tarkovDevService,
+                        wikiCacheService,
+                        progress,
+                        cancellationToken);
+                    logBuilder.AppendLine($"Traders: {tradersStats.inserted} inserted, {tradersStats.updated} updated, {tradersStats.deleted} deleted");
+                }
+
                 result.Success = true;
                 result.CompletedAt = DateTime.Now;
 
@@ -131,6 +147,10 @@ namespace TarkovDBEditor.Services
                 logBuilder.AppendLine($"Duration: {(result.CompletedAt - result.StartedAt).TotalSeconds:F1} seconds");
                 logBuilder.AppendLine($"Items: {result.ItemsCount} (not updated, loaded from DB)");
                 logBuilder.AppendLine($"Quests Updated: {result.QuestsUpdated} ({result.QuestsCount} quests)");
+                if (tarkovDevService != null)
+                {
+                    logBuilder.AppendLine($"Traders: {tradersStats.inserted + tradersStats.updated} total");
+                }
             }
             catch (Exception ex)
             {
@@ -503,7 +523,14 @@ namespace TarkovDBEditor.Services
                     dbQuest.MinScavKarma = cached.MinScavKarma ?? WikiQuestService.ExtractMinScavKarma(cached.PageContent ?? "");
                 }
 
-                // tarkov.dev 매칭 (캐시된 데이터 사용)
+                // Wiki 캐시에서 KappaRequired, Faction 파싱
+                if (cachedQuests.TryGetValue(questName, out var cachedForKappa) && !string.IsNullOrEmpty(cachedForKappa.PageContent))
+                {
+                    dbQuest.KappaRequired = WikiQuestService.ExtractKappaRequired(cachedForKappa.PageContent);
+                    dbQuest.Faction = cachedForKappa.Faction ?? WikiQuestService.ExtractFaction(cachedForKappa.PageContent);
+                }
+
+                // tarkov.dev 매칭 (캐시된 데이터 사용) - 번역용
                 TarkovDevQuestCacheItem? devQuest = null;
                 if (devQuestsCached.TryGetValue(wikiPageLink, out devQuest) ||
                     devQuestsByNormalizedName.TryGetValue(NormalizeQuestName(questName), out devQuest))
@@ -851,7 +878,11 @@ namespace TarkovDBEditor.Services
                 dbQuest.MinLevel = cached.MinLevel ?? WikiQuestService.ExtractMinLevel(cached.PageContent ?? "");
                 dbQuest.MinScavKarma = cached.MinScavKarma ?? WikiQuestService.ExtractMinScavKarma(cached.PageContent ?? "");
 
-                // tarkov.dev 매칭
+                // Wiki 캐시에서 KappaRequired, Faction 파싱
+                dbQuest.KappaRequired = WikiQuestService.ExtractKappaRequired(cached.PageContent ?? "");
+                dbQuest.Faction = cached.Faction ?? WikiQuestService.ExtractFaction(cached.PageContent ?? "");
+
+                // tarkov.dev 매칭 - 번역용
                 TarkovDevQuestCacheItem? devQuest = null;
                 if (devQuestsCached.TryGetValue(wikiPageLink, out devQuest) ||
                     devQuestsByNormalizedName.TryGetValue(NormalizeQuestName(questName), out devQuest))
@@ -1184,7 +1215,10 @@ namespace TarkovDBEditor.Services
                 new() { Name = "Location", DisplayName = "Location", Type = ColumnType.Text, SortOrder = 8 },
                 new() { Name = "MinLevel", DisplayName = "Min Level", Type = ColumnType.Integer, SortOrder = 9 },
                 new() { Name = "MinScavKarma", DisplayName = "Min Scav Karma", Type = ColumnType.Integer, SortOrder = 10 },
-                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 11 }
+                new() { Name = "KappaRequired", DisplayName = "Kappa Required", Type = ColumnType.Boolean, SortOrder = 11 },
+                new() { Name = "Faction", DisplayName = "Faction", Type = ColumnType.Text, SortOrder = 12 },
+                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, SortOrder = 13 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 14 }
             };
 
             var schemaJson = JsonSerializer.Serialize(columns);
@@ -1267,6 +1301,10 @@ namespace TarkovDBEditor.Services
                     MinScavKarma INTEGER,
                     MinScavKarmaApproved INTEGER NOT NULL DEFAULT 0,
                     MinScavKarmaApprovedAt TEXT,
+                    KappaRequired INTEGER NOT NULL DEFAULT 0,
+                    Faction TEXT,
+                    IsApproved INTEGER NOT NULL DEFAULT 0,
+                    ApprovedAt TEXT,
                     UpdatedAt TEXT
                 )";
 
@@ -1282,7 +1320,11 @@ namespace TarkovDBEditor.Services
                 "ALTER TABLE Quests ADD COLUMN MinScavKarma INTEGER",
                 "ALTER TABLE Quests ADD COLUMN MinScavKarmaApproved INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE Quests ADD COLUMN MinScavKarmaApprovedAt TEXT",
-                "ALTER TABLE Quests ADD COLUMN Location TEXT"
+                "ALTER TABLE Quests ADD COLUMN Location TEXT",
+                "ALTER TABLE Quests ADD COLUMN KappaRequired INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE Quests ADD COLUMN Faction TEXT",
+                "ALTER TABLE Quests ADD COLUMN IsApproved INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE Quests ADD COLUMN ApprovedAt TEXT"
             };
 
             foreach (var alterSql in newColumns)
@@ -1398,6 +1440,7 @@ namespace TarkovDBEditor.Services
                     MapName TEXT,
                     LocationName TEXT,
                     LocationPoints TEXT,
+                    OptionalPoints TEXT,
                     Conditions TEXT,
                     ContentHash TEXT,
                     IsApproved INTEGER NOT NULL DEFAULT 0,
@@ -1417,6 +1460,16 @@ namespace TarkovDBEditor.Services
                 CREATE INDEX IF NOT EXISTS idx_questobj_map ON QuestObjectives(MapName)";
             using var indexCmd = new SqliteCommand(indexSql, connection, transaction);
             await indexCmd.ExecuteNonQueryAsync();
+
+            // OptionalPoints 컬럼 마이그레이션 (기존 DB용)
+            try
+            {
+                using var alterCmd = new SqliteCommand(
+                    "ALTER TABLE QuestObjectives ADD COLUMN OptionalPoints TEXT",
+                    connection, transaction);
+                await alterCmd.ExecuteNonQueryAsync();
+            }
+            catch { /* 이미 존재하면 무시 */ }
         }
 
         private async Task MigrateQuestObjectivesTableAsync(SqliteConnection connection, SqliteTransaction transaction)
@@ -1466,11 +1519,12 @@ namespace TarkovDBEditor.Services
                 new() { Name = "MapName", DisplayName = "Map", Type = ColumnType.Text, SortOrder = 10 },
                 new() { Name = "LocationName", DisplayName = "Location", Type = ColumnType.Text, SortOrder = 11 },
                 new() { Name = "LocationPoints", DisplayName = "Location Points", Type = ColumnType.Json, SortOrder = 12 },
-                new() { Name = "Conditions", DisplayName = "Conditions", Type = ColumnType.Text, SortOrder = 13 },
-                new() { Name = "ContentHash", DisplayName = "Content Hash", Type = ColumnType.Text, SortOrder = 14 },
-                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, IsRequired = true, SortOrder = 15 },
-                new() { Name = "ApprovedAt", DisplayName = "Approved At", Type = ColumnType.DateTime, SortOrder = 16 },
-                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 17 }
+                new() { Name = "OptionalPoints", DisplayName = "Optional Points", Type = ColumnType.Json, SortOrder = 13 },
+                new() { Name = "Conditions", DisplayName = "Conditions", Type = ColumnType.Text, SortOrder = 14 },
+                new() { Name = "ContentHash", DisplayName = "Content Hash", Type = ColumnType.Text, SortOrder = 15 },
+                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, IsRequired = true, SortOrder = 16 },
+                new() { Name = "ApprovedAt", DisplayName = "Approved At", Type = ColumnType.DateTime, SortOrder = 17 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 18 }
             };
 
             var schemaJson = JsonSerializer.Serialize(columns);
@@ -1574,6 +1628,199 @@ namespace TarkovDBEditor.Services
             var schemaJson = JsonSerializer.Serialize(columns);
             await UpsertSchemaMetaAsync(connection, transaction, "QuestRequiredItems", "Quest Required Items", schemaJson);
         }
+
+        #region Traders Table (Public)
+
+        /// <summary>
+        /// tarkov.dev 캐시에서 Traders 데이터를 DB에 업데이트
+        /// Refresh Data 시 호출됨 (캐시된 데이터만 사용, 네트워크 요청 없음)
+        /// </summary>
+        public async Task<(int inserted, int updated, int deleted)> UpdateTradersFromCacheAsync(
+            string databasePath,
+            TarkovDevDataService tarkovDevService,
+            WikiCacheService? wikiCacheService,
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            progress?.Invoke("Loading cached Traders data...");
+
+            // 캐시된 Traders 데이터 로드
+            var cachedTraders = await tarkovDevService.LoadCachedTradersAsync(cancellationToken);
+            if (cachedTraders == null || cachedTraders.Count == 0)
+            {
+                progress?.Invoke("No cached Traders data found. Run 'Cache Tarkov Dev Data' first.");
+                return (0, 0, 0);
+            }
+
+            progress?.Invoke($"Loaded {cachedTraders.Count} traders from cache");
+
+            // DbTrader로 변환
+            var dbTraders = cachedTraders.Select(t => new DbTrader
+            {
+                Id = t.Id,
+                Name = t.Name,
+                NameKO = t.NameKO,
+                NameJA = t.NameJA,
+                NormalizedName = t.NormalizedName,
+                ImageLink = t.ImageLink
+            }).ToList();
+
+            // DB 업데이트
+            using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync(cancellationToken);
+
+            using var transaction = connection.BeginTransaction();
+
+            try
+            {
+                await EnsureSchemaMetaTableAsync(connection, transaction);
+                await CreateTradersTableIfNotExistsAsync(connection, transaction);
+                await RegisterTradersSchemaAsync(connection, transaction);
+
+                var stats = await UpsertTradersAsync(connection, transaction, dbTraders, wikiCacheService, null);
+
+                transaction.Commit();
+
+                progress?.Invoke($"Traders update complete: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted");
+                return (stats.Inserted, stats.Updated, stats.Deleted);
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+        }
+
+        #endregion
+
+        #region Traders Table (Private)
+
+        private async Task CreateTradersTableIfNotExistsAsync(SqliteConnection connection, SqliteTransaction transaction)
+        {
+            var sql = @"
+                CREATE TABLE IF NOT EXISTS Traders (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    NameKO TEXT,
+                    NameJA TEXT,
+                    NormalizedName TEXT,
+                    ImageLink TEXT,
+                    LocalIconPath TEXT,
+                    UpdatedAt TEXT
+                )";
+
+            using var cmd = new SqliteCommand(sql, connection, transaction);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private async Task RegisterTradersSchemaAsync(SqliteConnection connection, SqliteTransaction transaction)
+        {
+            var columns = new List<ColumnSchema>
+            {
+                new() { Name = "Id", DisplayName = "ID", Type = ColumnType.Text, IsPrimaryKey = true, IsRequired = true, SortOrder = 0 },
+                new() { Name = "Name", DisplayName = "Name", Type = ColumnType.Text, IsRequired = true, SortOrder = 1 },
+                new() { Name = "NameKO", DisplayName = "Name (KO)", Type = ColumnType.Text, SortOrder = 2 },
+                new() { Name = "NameJA", DisplayName = "Name (JA)", Type = ColumnType.Text, SortOrder = 3 },
+                new() { Name = "NormalizedName", DisplayName = "Normalized Name", Type = ColumnType.Text, SortOrder = 4 },
+                new() { Name = "ImageLink", DisplayName = "Image Link", Type = ColumnType.Text, SortOrder = 5 },
+                new() { Name = "LocalIconPath", DisplayName = "Local Icon Path", Type = ColumnType.Text, SortOrder = 6 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 7 }
+            };
+
+            var schemaJson = JsonSerializer.Serialize(columns);
+            await UpsertSchemaMetaAsync(connection, transaction, "Traders", "Traders", schemaJson);
+        }
+
+        private async Task<UpsertStats> UpsertTradersAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            List<DbTrader> traders,
+            WikiCacheService? wikiCacheService,
+            StringBuilder? logBuilder)
+        {
+            var stats = new UpsertStats();
+            var now = DateTime.UtcNow.ToString("o");
+
+            // 현재 DB에 있는 모든 Trader ID 조회
+            var existingIds = new HashSet<string>();
+            var selectAllSql = "SELECT Id FROM Traders";
+            using (var selectAllCmd = new SqliteCommand(selectAllSql, connection, transaction))
+            using (var reader = await selectAllCmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    existingIds.Add(reader.GetString(0));
+                }
+            }
+
+            // 새로 가져온 Trader ID 집합
+            var newTraderIds = new HashSet<string>(traders.Select(t => t.Id));
+
+            // DB에 있지만 새 목록에 없는 Trader 삭제
+            var idsToDelete = existingIds.Except(newTraderIds).ToList();
+            if (idsToDelete.Count > 0)
+            {
+                foreach (var idToDelete in idsToDelete)
+                {
+                    var deleteSql = "DELETE FROM Traders WHERE Id = @Id";
+                    using var deleteCmd = new SqliteCommand(deleteSql, connection, transaction);
+                    deleteCmd.Parameters.AddWithValue("@Id", idToDelete);
+                    await deleteCmd.ExecuteNonQueryAsync();
+                    stats.Deleted++;
+                    logBuilder?.AppendLine($"  [DELETE] Id: {idToDelete}");
+                }
+            }
+
+            foreach (var trader in traders)
+            {
+                bool exists = existingIds.Contains(trader.Id);
+
+                // 로컬 아이콘 경로 확인
+                var localIconPath = wikiCacheService?.GetTraderIconPath(trader.Id);
+
+                if (!exists)
+                {
+                    var insertSql = @"
+                        INSERT INTO Traders (Id, Name, NameKO, NameJA, NormalizedName, ImageLink, LocalIconPath, UpdatedAt)
+                        VALUES (@Id, @Name, @NameKO, @NameJA, @NormalizedName, @ImageLink, @LocalIconPath, @UpdatedAt)";
+
+                    using var insertCmd = new SqliteCommand(insertSql, connection, transaction);
+                    AddTraderParameters(insertCmd, trader, localIconPath, now);
+                    await insertCmd.ExecuteNonQueryAsync();
+                    stats.Inserted++;
+                    logBuilder?.AppendLine($"  [INSERT] {trader.Name}");
+                }
+                else
+                {
+                    var updateSql = @"
+                        UPDATE Traders SET
+                            Name = @Name, NameKO = @NameKO, NameJA = @NameJA,
+                            NormalizedName = @NormalizedName, ImageLink = @ImageLink, LocalIconPath = @LocalIconPath, UpdatedAt = @UpdatedAt
+                        WHERE Id = @Id";
+
+                    using var updateCmd = new SqliteCommand(updateSql, connection, transaction);
+                    AddTraderParameters(updateCmd, trader, localIconPath, now);
+                    await updateCmd.ExecuteNonQueryAsync();
+                    stats.Updated++;
+                }
+            }
+
+            return stats;
+        }
+
+        private void AddTraderParameters(SqliteCommand cmd, DbTrader trader, string? localIconPath, string now)
+        {
+            cmd.Parameters.AddWithValue("@Id", trader.Id);
+            cmd.Parameters.AddWithValue("@Name", trader.Name);
+            cmd.Parameters.AddWithValue("@NameKO", (object?)trader.NameKO ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@NameJA", (object?)trader.NameJA ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@NormalizedName", (object?)trader.NormalizedName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ImageLink", (object?)trader.ImageLink ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocalIconPath", (object?)localIconPath ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UpdatedAt", now);
+        }
+
+        #endregion
 
         private async Task<UpsertStats> UpsertQuestRequiredItemsAsync(
             SqliteConnection connection,
@@ -2091,8 +2338,8 @@ namespace TarkovDBEditor.Services
                 if (!exists)
                 {
                     var insertSql = @"
-                        INSERT INTO Quests (Id, BsgId, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, Location, MinLevel, MinScavKarma, UpdatedAt)
-                        VALUES (@Id, @BsgId, @Name, @NameEN, @NameKO, @NameJA, @WikiPageLink, @Trader, @Location, @MinLevel, @MinScavKarma, @UpdatedAt)";
+                        INSERT INTO Quests (Id, BsgId, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, Location, MinLevel, MinScavKarma, KappaRequired, Faction, UpdatedAt)
+                        VALUES (@Id, @BsgId, @Name, @NameEN, @NameKO, @NameJA, @WikiPageLink, @Trader, @Location, @MinLevel, @MinScavKarma, @KappaRequired, @Faction, @UpdatedAt)";
 
                     using var insertCmd = new SqliteCommand(insertSql, connection, transaction);
                     AddQuestParameters(insertCmd, quest, now);
@@ -2106,7 +2353,7 @@ namespace TarkovDBEditor.Services
                     var updateSql = @"
                         UPDATE Quests SET
                             BsgId = @BsgId, Name = @Name, NameEN = @NameEN, NameKO = @NameKO, NameJA = @NameJA,
-                            WikiPageLink = @WikiPageLink, Trader = @Trader, Location = @Location, MinLevel = @MinLevel, MinScavKarma = @MinScavKarma, UpdatedAt = @UpdatedAt
+                            WikiPageLink = @WikiPageLink, Trader = @Trader, Location = @Location, MinLevel = @MinLevel, MinScavKarma = @MinScavKarma, KappaRequired = @KappaRequired, Faction = @Faction, UpdatedAt = @UpdatedAt
                         WHERE Id = @Id";
 
                     using var updateCmd = new SqliteCommand(updateSql, connection, transaction);
@@ -2132,6 +2379,8 @@ namespace TarkovDBEditor.Services
             cmd.Parameters.AddWithValue("@Location", (object?)quest.Location ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@MinLevel", (object?)quest.MinLevel ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@MinScavKarma", (object?)quest.MinScavKarma ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@KappaRequired", quest.KappaRequired ? 1 : 0);
+            cmd.Parameters.AddWithValue("@Faction", (object?)quest.Faction ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UpdatedAt", now);
         }
 
@@ -2482,6 +2731,18 @@ namespace TarkovDBEditor.Services
         public string? Location { get; set; }
         public int? MinLevel { get; set; }
         public int? MinScavKarma { get; set; }
+        public bool KappaRequired { get; set; }
+        public string? Faction { get; set; }
+    }
+
+    public class DbTrader
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? NameKO { get; set; }
+        public string? NameJA { get; set; }
+        public string? NormalizedName { get; set; }
+        public string? ImageLink { get; set; }
     }
 
     public class UpsertStats

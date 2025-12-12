@@ -147,12 +147,23 @@ public partial class MapPreviewWindow : Window
             var result = await checkCmd.ExecuteScalarAsync();
             if (result == null) return;
 
-            // Load objectives with location points
+            // Migrate OptionalPoints column if not exists
+            try
+            {
+                using var alterCmd = new SqliteCommand(
+                    "ALTER TABLE QuestObjectives ADD COLUMN OptionalPoints TEXT",
+                    connection);
+                await alterCmd.ExecuteNonQueryAsync();
+            }
+            catch { /* Column already exists - ignore */ }
+
+            // Load objectives with location points or optional points
             var sql = @"
-                SELECT o.Id, o.QuestId, o.Description, o.MapName, o.LocationPoints, q.Location as QuestLocation
+                SELECT o.Id, o.QuestId, o.Description, o.MapName, o.LocationPoints, q.Location as QuestLocation, o.OptionalPoints
                 FROM QuestObjectives o
                 LEFT JOIN Quests q ON o.QuestId = q.Id
-                WHERE o.LocationPoints IS NOT NULL AND o.LocationPoints != ''";
+                WHERE (o.LocationPoints IS NOT NULL AND o.LocationPoints != '')
+                   OR (o.OptionalPoints IS NOT NULL AND o.OptionalPoints != '')";
 
             await using var cmd = new SqliteCommand(sql, connection);
             await using var reader = await cmd.ExecuteReaderAsync();
@@ -171,7 +182,12 @@ public partial class MapPreviewWindow : Window
                 var locationJson = reader.IsDBNull(4) ? null : reader.GetString(4);
                 objective.LocationPointsJson = locationJson;
 
-                if (objective.HasCoordinates)
+                var optionalJson = reader.IsDBNull(6) ? null : reader.GetString(6);
+                System.Diagnostics.Debug.WriteLine($"[LoadQuestObjectivesAsync] Id={objective.Id}, optionalJson={optionalJson}");
+                objective.OptionalPointsJson = optionalJson;
+                System.Diagnostics.Debug.WriteLine($"[LoadQuestObjectivesAsync] After parse - OptionalPoints.Count={objective.OptionalPoints.Count}");
+
+                if (objective.HasCoordinates || objective.HasOptionalPoints)
                 {
                     _questObjectives.Add(objective);
                 }
@@ -608,9 +624,10 @@ public partial class MapPreviewWindow : Window
 
         foreach (var objective in objectivesForMap)
         {
-            if (objective.LocationPoints.Count == 0) continue;
+            // Skip only if BOTH LocationPoints AND OptionalPoints are empty
+            if (objective.LocationPoints.Count == 0 && objective.OptionalPoints.Count == 0) continue;
 
-            System.Diagnostics.Debug.WriteLine($"[RedrawObjectives] Objective: {objective.Id}, EffectiveMapName={objective.EffectiveMapName}, Points={objective.LocationPoints.Count}");
+            System.Diagnostics.Debug.WriteLine($"[RedrawObjectives] Objective: {objective.Id}, EffectiveMapName={objective.EffectiveMapName}, LocationPoints={objective.LocationPoints.Count}, OptionalPoints={objective.OptionalPoints.Count}");
             foreach (var pt in objective.LocationPoints)
             {
                 var (sx, sy) = _currentMapConfig.GameToScreen(pt.X, pt.Z);
@@ -825,6 +842,75 @@ public partial class MapPreviewWindow : Window
                     Canvas.SetLeft(floorLabel, sx + fadedSize / 2 + 4 * inverseScale);
                     Canvas.SetTop(floorLabel, sy - 8 * inverseScale);
                     ObjectivesCanvas.Children.Add(floorLabel);
+                }
+            }
+
+            // Draw Optional Points (OR locations) - orange markers
+            System.Diagnostics.Debug.WriteLine($"[RedrawObjectives] Objective {objective.Id}: OptionalPoints.Count = {objective.OptionalPoints.Count}");
+            if (objective.OptionalPoints.Count > 0)
+            {
+                var optMarkerSize = 40 * inverseScale;
+                var optIndex = 1;
+                foreach (var point in objective.OptionalPoints)
+                {
+                    var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+
+                    // Determine opacity based on floor
+                    double optOpacity = 1.0;
+                    if (hasFloors && _currentFloorId != null && point.FloorId != null)
+                    {
+                        optOpacity = string.Equals(point.FloorId, _currentFloorId, StringComparison.OrdinalIgnoreCase) ? 1.0 : 0.3;
+                    }
+                    var isOptCurrentFloor = optOpacity > 0.5;
+
+                    // Orange circle for OR locations
+                    var optEllipse = new Ellipse
+                    {
+                        Width = optMarkerSize,
+                        Height = optMarkerSize,
+                        Fill = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 255), 255, 87, 34)), // #FF5722
+                        Stroke = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 255), 255, 255, 255)),
+                        StrokeThickness = 3 * inverseScale
+                    };
+
+                    Canvas.SetLeft(optEllipse, sx - optMarkerSize / 2);
+                    Canvas.SetTop(optEllipse, sy - optMarkerSize / 2);
+                    ObjectivesCanvas.Children.Add(optEllipse);
+
+                    // "OR" prefix label
+                    var orLabel = new TextBlock
+                    {
+                        Text = $"OR{optIndex}",
+                        Foreground = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 255), 255, 255, 255)),
+                        FontSize = 28 * inverseScale,
+                        FontWeight = FontWeights.Bold
+                    };
+
+                    Canvas.SetLeft(orLabel, sx + optMarkerSize / 2 + 8 * inverseScale);
+                    Canvas.SetTop(orLabel, sy - optMarkerSize / 2);
+                    ObjectivesCanvas.Children.Add(orLabel);
+
+                    // Floor indicator (if different floor)
+                    if (hasFloors && point.FloorId != null && !isOptCurrentFloor)
+                    {
+                        var floorDisplayName = _sortedFloors?
+                            .FirstOrDefault(f => string.Equals(f.LayerId, point.FloorId, StringComparison.OrdinalIgnoreCase))
+                            ?.DisplayName ?? point.FloorId;
+
+                        var floorLabel = new TextBlock
+                        {
+                            Text = $"[{floorDisplayName}]",
+                            Foreground = new SolidColorBrush(Color.FromArgb((byte)(optOpacity * 200), 154, 136, 102)),
+                            FontSize = 20 * inverseScale,
+                            FontStyle = FontStyles.Italic
+                        };
+
+                        Canvas.SetLeft(floorLabel, sx + optMarkerSize / 2 + 8 * inverseScale);
+                        Canvas.SetTop(floorLabel, sy + optMarkerSize / 2);
+                        ObjectivesCanvas.Children.Add(floorLabel);
+                    }
+
+                    optIndex++;
                 }
             }
         }

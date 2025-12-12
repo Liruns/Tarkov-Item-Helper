@@ -43,11 +43,23 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="Objective:" Foreground="#666" Margin="0,0,8,0"/>
                             <TextBlock x:Name="ObjectiveDescriptionText" Text="-" Foreground="#9A8866"
-                                       TextTrimming="CharacterEllipsis" MaxWidth="600"/>
+                                       TextTrimming="CharacterEllipsis" MaxWidth="400"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                            <TextBlock Text="Current Points:" Foreground="#666" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="PointsCountText" Text="0" Foreground="#70A800"/>
+                            <!-- Point Type Toggle -->
+                            <Border x:Name="PointTypeToggleContainer" CornerRadius="4" Background="#333" Margin="0,0,16,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="BtnLocationMode" Content="Area" Padding="12,4"
+                                            Background="#70A800" Foreground="White" BorderThickness="0"
+                                            Click="PointTypeToggle_Click" Tag="Location"/>
+                                    <Button x:Name="BtnOptionalMode" Content="OR Locations" Padding="12,4"
+                                            Background="#444" Foreground="#888" BorderThickness="0"
+                                            Click="PointTypeToggle_Click" Tag="Optional"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="Points:" Foreground="#666" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="PointsCountText" Text="0" Foreground="#70A800" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="OptionalPointsCountText" Text=" / 0 OR" Foreground="#FF5722" VerticalAlignment="Center" Margin="4,0,0,0"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
