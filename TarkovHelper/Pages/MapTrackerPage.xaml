@@ -49,18 +49,24 @@
 
                 <!-- 버튼들 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="16,0">
-                    <CheckBox x:Name="ChkShowQuestMarkers" Content="Quest Markers"
-                              Foreground="{StaticResource TextPrimaryBrush}"
-                              VerticalAlignment="Center" Margin="0,0,16,0"
-                              IsChecked="True"
-                              Checked="ChkShowQuestMarkers_Changed"
-                              Unchecked="ChkShowQuestMarkers_Changed"/>
                     <CheckBox x:Name="ChkShowExtractMarkers" Content="Extracts"
                               Foreground="{StaticResource TextPrimaryBrush}"
                               VerticalAlignment="Center" Margin="0,0,16,0"
                               IsChecked="True"
                               Checked="ChkShowExtractMarkers_Changed"
                               Unchecked="ChkShowExtractMarkers_Changed"/>
+                    <CheckBox x:Name="ChkShowQuestMarkers" Content="Quest Markers"
+                              Foreground="{StaticResource TextPrimaryBrush}"
+                              VerticalAlignment="Center" Margin="0,0,16,0"
+                              IsChecked="True"
+                              Checked="ChkShowQuestMarkers_Changed"
+                              Unchecked="ChkShowQuestMarkers_Changed"/>
+                    <CheckBox x:Name="ChkShowTransitMarkers" Content="Transit"
+                              Foreground="{StaticResource TextPrimaryBrush}"
+                              VerticalAlignment="Center" Margin="0,0,16,0"
+                              IsChecked="True"
+                              Checked="ChkShowTransitMarkers_Changed"
+                              Unchecked="ChkShowTransitMarkers_Changed"/>
                     <Button x:Name="BtnClearTrail" Content="Clear Trail" Padding="12,6"
                             Margin="0,0,8,0" Click="BtnClearTrail_Click"/>
                     <Button x:Name="BtnFullScreen" Content="Full Screen" Padding="12,6"
@@ -407,6 +413,9 @@
 
                             <!-- 탈출구 마커 컨테이너 -->
                             <Canvas x:Name="ExtractMarkersContainer"/>
+
+                            <!-- 트랜짓 마커 컨테이너 -->
+                            <Canvas x:Name="TransitMarkersContainer"/>
 
                             <!-- 퀘스트 목표 마커 컨테이너 -->
                             <Canvas x:Name="QuestMarkersContainer"/>

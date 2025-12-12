@@ -667,6 +667,12 @@ public partial class MainWindow : Window
         window.Show();
     }
 
+    private void OpenMapTransfer_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new MapTransferWindow { Owner = this };
+        window.Show();
+    }
+
     private async void CacheTarkovDevData_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.StatusMessage = "Checking tarkov.dev cache status...";
