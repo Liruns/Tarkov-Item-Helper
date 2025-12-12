@@ -20,12 +20,306 @@ namespace TarkovDBEditor.Services
         private readonly HttpClient _httpClient;
         private const string GraphQLEndpoint = "https://api.tarkov.dev/graphql";
 
-        public TarkovDevDataService()
+        private readonly string _cacheDir;
+        private readonly string _itemsCachePath;
+        private readonly string _questsCachePath;
+
+        public TarkovDevDataService(string? basePath = null)
         {
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "TarkovDBEditor/1.0");
             _httpClient.Timeout = TimeSpan.FromMinutes(5);
+
+            basePath ??= Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wiki_data");
+            _cacheDir = Path.Combine(basePath, "cache");
+            _itemsCachePath = Path.Combine(_cacheDir, "tarkov_dev_items.json");
+            _questsCachePath = Path.Combine(_cacheDir, "tarkov_dev_quests.json");
+
+            Directory.CreateDirectory(_cacheDir);
         }
+
+        #region Cache Management
+
+        /// <summary>
+        /// 캐시된 아이템 데이터가 있는지 확인
+        /// </summary>
+        public bool HasCachedItems()
+        {
+            return File.Exists(_itemsCachePath);
+        }
+
+        /// <summary>
+        /// 캐시된 퀘스트 데이터가 있는지 확인
+        /// </summary>
+        public bool HasCachedQuests()
+        {
+            return File.Exists(_questsCachePath);
+        }
+
+        /// <summary>
+        /// 캐시 정보 가져오기 (캐시 날짜, 아이템 수, 퀘스트 수)
+        /// </summary>
+        public TarkovDevCacheInfo GetCacheInfo()
+        {
+            var info = new TarkovDevCacheInfo();
+
+            if (File.Exists(_itemsCachePath))
+            {
+                try
+                {
+                    var fileInfo = new FileInfo(_itemsCachePath);
+                    info.ItemsCachedAt = fileInfo.LastWriteTime;
+
+                    var json = File.ReadAllText(_itemsCachePath);
+                    var cache = JsonSerializer.Deserialize<TarkovDevItemsCache>(json);
+                    info.ItemsCount = cache?.Items?.Count ?? 0;
+                }
+                catch { }
+            }
+
+            if (File.Exists(_questsCachePath))
+            {
+                try
+                {
+                    var fileInfo = new FileInfo(_questsCachePath);
+                    info.QuestsCachedAt = fileInfo.LastWriteTime;
+
+                    var json = File.ReadAllText(_questsCachePath);
+                    var cache = JsonSerializer.Deserialize<TarkovDevQuestsCache>(json);
+                    info.QuestsCount = cache?.Quests?.Count ?? 0;
+                }
+                catch { }
+            }
+
+            return info;
+        }
+
+        /// <summary>
+        /// 캐시된 아이템 데이터 로드
+        /// </summary>
+        public async Task<Dictionary<string, TarkovDevMultiLangItem>?> LoadCachedItemsAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (!File.Exists(_itemsCachePath))
+                return null;
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(_itemsCachePath, cancellationToken);
+                var cache = JsonSerializer.Deserialize<TarkovDevItemsCache>(json);
+                return cache?.Items;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 캐시된 퀘스트 데이터 로드
+        /// </summary>
+        public async Task<Dictionary<string, TarkovDevQuestCacheItem>?> LoadCachedQuestsAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (!File.Exists(_questsCachePath))
+                return null;
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(_questsCachePath, cancellationToken);
+                var cache = JsonSerializer.Deserialize<TarkovDevQuestsCache>(json);
+                return cache?.Quests;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 아이템 데이터 캐시에 저장
+        /// </summary>
+        public async Task SaveItemsCacheAsync(
+            Dictionary<string, TarkovDevMultiLangItem> items,
+            CancellationToken cancellationToken = default)
+        {
+            var cache = new TarkovDevItemsCache
+            {
+                CachedAt = DateTime.UtcNow,
+                Items = items
+            };
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(cache, options);
+            await File.WriteAllTextAsync(_itemsCachePath, json, cancellationToken);
+        }
+
+        /// <summary>
+        /// 퀘스트 데이터 캐시에 저장
+        /// </summary>
+        public async Task SaveQuestsCacheAsync(
+            Dictionary<string, TarkovDevQuestCacheItem> quests,
+            CancellationToken cancellationToken = default)
+        {
+            var cache = new TarkovDevQuestsCache
+            {
+                CachedAt = DateTime.UtcNow,
+                Quests = quests
+            };
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(cache, options);
+            await File.WriteAllTextAsync(_questsCachePath, json, cancellationToken);
+        }
+
+        /// <summary>
+        /// tarkov.dev에서 모든 데이터를 다운로드하고 캐시에 저장
+        /// </summary>
+        public async Task<TarkovDevCacheResult> CacheAllDataAsync(
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new TarkovDevCacheResult();
+
+            try
+            {
+                // 아이템 데이터 다운로드 및 캐시
+                progress?.Invoke("Downloading items from tarkov.dev...");
+                var items = await FetchAllLanguagesAsync(progress, cancellationToken);
+                await SaveItemsCacheAsync(items, cancellationToken);
+                result.ItemsCount = items.Count;
+                result.ItemsSuccess = true;
+                progress?.Invoke($"Cached {items.Count} items from tarkov.dev");
+            }
+            catch (Exception ex)
+            {
+                result.ItemsError = ex.Message;
+                progress?.Invoke($"Failed to cache items: {ex.Message}");
+            }
+
+            try
+            {
+                // 퀘스트 데이터 다운로드 및 캐시
+                progress?.Invoke("Downloading quests from tarkov.dev...");
+                var quests = await FetchAllQuestsAsync(progress, cancellationToken);
+                await SaveQuestsCacheAsync(quests, cancellationToken);
+                result.QuestsCount = quests.Count;
+                result.QuestsSuccess = true;
+                progress?.Invoke($"Cached {quests.Count} quests from tarkov.dev");
+            }
+            catch (Exception ex)
+            {
+                result.QuestsError = ex.Message;
+                progress?.Invoke($"Failed to cache quests: {ex.Message}");
+            }
+
+            result.CachedAt = DateTime.Now;
+            return result;
+        }
+
+        /// <summary>
+        /// tarkov.dev에서 퀘스트 다국어 데이터 가져오기
+        /// </summary>
+        public async Task<Dictionary<string, TarkovDevQuestCacheItem>> FetchAllQuestsAsync(
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            progress?.Invoke("Fetching quests from tarkov.dev API...");
+
+            var query = @"
+            {
+                tasks(lang: en) {
+                    id
+                    tarkovDataId
+                    name
+                    normalizedName
+                    wikiLink
+                    trader { name }
+                }
+                ko: tasks(lang: ko) { id name }
+                ja: tasks(lang: ja) { id name }
+            }";
+
+            var requestBody = JsonSerializer.Serialize(new { query });
+            var content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(GraphQLEndpoint, content, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+
+            var result = new Dictionary<string, TarkovDevQuestCacheItem>(StringComparer.OrdinalIgnoreCase);
+
+            if (!doc.RootElement.TryGetProperty("data", out var data))
+                return result;
+
+            // 한국어, 일본어 맵 생성
+            var koNames = new Dictionary<string, string>();
+            var jaNames = new Dictionary<string, string>();
+
+            if (data.TryGetProperty("ko", out var koTasks))
+            {
+                foreach (var task in koTasks.EnumerateArray())
+                {
+                    var id = task.GetProperty("id").GetString();
+                    var name = task.GetProperty("name").GetString();
+                    if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                        koNames[id] = name;
+                }
+            }
+
+            if (data.TryGetProperty("ja", out var jaTasks))
+            {
+                foreach (var task in jaTasks.EnumerateArray())
+                {
+                    var id = task.GetProperty("id").GetString();
+                    var name = task.GetProperty("name").GetString();
+                    if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                        jaNames[id] = name;
+                }
+            }
+
+            // 영어 기준으로 병합
+            if (data.TryGetProperty("tasks", out var tasks))
+            {
+                foreach (var task in tasks.EnumerateArray())
+                {
+                    var id = task.GetProperty("id").GetString();
+                    var name = task.GetProperty("name").GetString();
+                    var normalizedName = task.TryGetProperty("normalizedName", out var nn) ? nn.GetString() : null;
+                    var wikiLink = task.TryGetProperty("wikiLink", out var wl) ? wl.GetString() : null;
+                    var tarkovDataId = task.TryGetProperty("tarkovDataId", out var tdid) && tdid.ValueKind == JsonValueKind.Number ? tdid.GetInt32() : (int?)null;
+                    var trader = task.TryGetProperty("trader", out var tr) && tr.ValueKind == JsonValueKind.Object && tr.TryGetProperty("name", out var tn) ? tn.GetString() : null;
+
+                    if (string.IsNullOrEmpty(id))
+                        continue;
+
+                    var quest = new TarkovDevQuestCacheItem
+                    {
+                        Id = id,
+                        TarkovDataId = tarkovDataId,
+                        NameEN = name ?? "",
+                        NormalizedName = normalizedName,
+                        NameKO = koNames.TryGetValue(id, out var ko) ? ko : name ?? "",
+                        NameJA = jaNames.TryGetValue(id, out var ja) ? ja : name ?? "",
+                        Trader = trader,
+                        WikiLink = wikiLink
+                    };
+
+                    // wikiLink가 있으면 키로 사용
+                    if (!string.IsNullOrEmpty(wikiLink))
+                    {
+                        result[wikiLink] = quest;
+                    }
+                }
+            }
+
+            progress?.Invoke($"Fetched {result.Count} quests from tarkov.dev");
+            return result;
+        }
+
+        #endregion
 
         /// <summary>
         /// wikiLink URL을 정규화합니다 (URL 인코딩 차이 해결)
@@ -525,6 +819,92 @@ namespace TarkovDBEditor.Services
 
         [JsonPropertyName("items")]
         public List<DevOnlyItem> Items { get; set; } = new();
+    }
+
+    #endregion
+
+    #region Cache Models
+
+    /// <summary>
+    /// tarkov.dev 캐시 정보
+    /// </summary>
+    public class TarkovDevCacheInfo
+    {
+        public DateTime? ItemsCachedAt { get; set; }
+        public int ItemsCount { get; set; }
+        public DateTime? QuestsCachedAt { get; set; }
+        public int QuestsCount { get; set; }
+
+        public bool HasItemsCache => ItemsCachedAt.HasValue;
+        public bool HasQuestsCache => QuestsCachedAt.HasValue;
+    }
+
+    /// <summary>
+    /// tarkov.dev 캐시 결과
+    /// </summary>
+    public class TarkovDevCacheResult
+    {
+        public DateTime CachedAt { get; set; }
+        public bool ItemsSuccess { get; set; }
+        public int ItemsCount { get; set; }
+        public string? ItemsError { get; set; }
+        public bool QuestsSuccess { get; set; }
+        public int QuestsCount { get; set; }
+        public string? QuestsError { get; set; }
+    }
+
+    /// <summary>
+    /// tarkov.dev 아이템 캐시 파일
+    /// </summary>
+    public class TarkovDevItemsCache
+    {
+        [JsonPropertyName("cachedAt")]
+        public DateTime CachedAt { get; set; }
+
+        [JsonPropertyName("items")]
+        public Dictionary<string, TarkovDevMultiLangItem> Items { get; set; } = new();
+    }
+
+    /// <summary>
+    /// tarkov.dev 퀘스트 캐시 파일
+    /// </summary>
+    public class TarkovDevQuestsCache
+    {
+        [JsonPropertyName("cachedAt")]
+        public DateTime CachedAt { get; set; }
+
+        [JsonPropertyName("quests")]
+        public Dictionary<string, TarkovDevQuestCacheItem> Quests { get; set; } = new();
+    }
+
+    /// <summary>
+    /// tarkov.dev 퀘스트 캐시 아이템
+    /// </summary>
+    public class TarkovDevQuestCacheItem
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = "";
+
+        [JsonPropertyName("tarkovDataId")]
+        public int? TarkovDataId { get; set; }
+
+        [JsonPropertyName("nameEN")]
+        public string NameEN { get; set; } = "";
+
+        [JsonPropertyName("normalizedName")]
+        public string? NormalizedName { get; set; }
+
+        [JsonPropertyName("nameKO")]
+        public string NameKO { get; set; } = "";
+
+        [JsonPropertyName("nameJA")]
+        public string NameJA { get; set; } = "";
+
+        [JsonPropertyName("trader")]
+        public string? Trader { get; set; }
+
+        [JsonPropertyName("wikiLink")]
+        public string? WikiLink { get; set; }
     }
 
     #endregion

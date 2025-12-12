@@ -540,6 +540,220 @@ namespace TarkovDBEditor.Services
         }
 
         /// <summary>
+        /// PageContent에서 "Related Quest Items" wikitable을 파싱하여 필요 아이템 목록 반환
+        /// TarkovHelper의 WikiQuestParser.ParseRequiredItems 로직을 참고
+        /// </summary>
+        public static List<ParsedRequiredItem> ExtractRequiredItems(string content)
+        {
+            var items = new List<ParsedRequiredItem>();
+            if (string.IsNullOrEmpty(content))
+                return items;
+
+            // "Related Quest Items" 테이블 찾기
+            // {|class="wikitable" 또는 {| class="wikitable" 형태 모두 매칭
+            var tableMatch = Regex.Match(content,
+                @"\{\|\s*class\s*=\s*""?wikitable[^""]*""?.*?Related\s+Quest\s+Items.*?\|\}",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            if (!tableMatch.Success)
+                return items;
+
+            var tableContent = tableMatch.Value;
+
+            // 행 분리 "|-"
+            var rows = Regex.Split(tableContent, @"\|-");
+
+            // rowspan 처리를 위한 컬럼 값 저장
+            string? currentNotes = null;
+            int notesRowSpan = 0;
+
+            int sortOrder = 0;
+            foreach (var row in rows)
+            {
+                // 헤더 행 건너뛰기
+                if (row.Contains("!") && (row.Contains("Icon") || row.Contains("Name") || row.Contains("Quantity")))
+                    continue;
+
+                // rowspan 확인 (Notes 컬럼)
+                var rowspanMatch = Regex.Match(row, @"rowspan\s*=\s*""?(\d+)""?", RegexOptions.IgnoreCase);
+                if (rowspanMatch.Success)
+                {
+                    notesRowSpan = int.Parse(rowspanMatch.Groups[1].Value);
+                    // Notes 추출
+                    var notesMatch = Regex.Match(row, @"rowspan[^|]*\|\s*([^|]+?)(?:\||\}\})");
+                    if (notesMatch.Success)
+                    {
+                        currentNotes = notesMatch.Groups[1].Value.Trim();
+                    }
+                }
+
+                var item = ParseTableRow(row, notesRowSpan > 0 ? currentNotes : null);
+                if (item != null)
+                {
+                    item.SortOrder = sortOrder++;
+                    items.Add(item);
+                }
+
+                // rowspan 카운트다운
+                if (notesRowSpan > 0)
+                {
+                    notesRowSpan--;
+                    if (notesRowSpan == 0)
+                    {
+                        currentNotes = null;
+                    }
+                }
+            }
+
+            return items;
+        }
+
+        /// <summary>
+        /// wikitable 행을 파싱하여 ParsedRequiredItem 반환
+        /// </summary>
+        private static ParsedRequiredItem? ParseTableRow(string row, string? effectiveNotes = null)
+        {
+            // 헤더 행(!)이 포함된 경우 스킵
+            if (row.Contains("!Icon") || row.Contains("!Item") || row.Contains("! Icon") || row.Contains("! Item"))
+                return null;
+
+            // | 또는 || 또는 줄바꿈+| 로 셀 분리
+            // Wiki 테이블 형식: 줄바꿈 후 |로 시작하는 셀들
+            var cells = Regex.Split(row, @"\|\||\n\|")
+                .Select(c => c.Trim())
+                .Where(c => !string.IsNullOrEmpty(c) && !c.StartsWith("{|") && !c.StartsWith("|}") && !c.StartsWith("!"))
+                .ToList();
+
+            if (cells.Count < 2)
+                return null;
+
+            string? itemId = null;
+            string? itemName = null;
+            int amount = 1;
+            string requirement = "Required";
+            bool foundInRaid = false;
+            int? dogtagMinLevel = null;
+
+            int columnIndex = 0;
+            foreach (var cell in cells)
+            {
+                // rowspan 같은 속성 건너뛰기
+                if (cell.StartsWith("rowspan") || cell.StartsWith("colspan") || cell.StartsWith("style"))
+                    continue;
+
+                // 아이콘 컬럼 건너뛰기 (이미지)
+                if (columnIndex == 0 && (cell.Contains("[[File:") || cell.Contains("[[Image:")))
+                {
+                    columnIndex++;
+                    continue;
+                }
+
+                // Column 1: Name - {{itemId}} 템플릿 또는 [[Item Name]]
+                if (columnIndex == 0 || columnIndex == 1)
+                {
+                    // {{itemId}} 템플릿 (24자 hex)
+                    var templateMatch = Regex.Match(cell, @"\{\{([a-f0-9]{24})\}\}");
+                    if (templateMatch.Success)
+                    {
+                        itemId = templateMatch.Groups[1].Value;
+                        columnIndex = 2;
+                        continue;
+                    }
+
+                    // [[Item Name]] 또는 [[Item Name|Display]] 형식
+                    var linkMatch = Regex.Match(cell, @"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]");
+                    if (linkMatch.Success)
+                    {
+                        var linkName = linkMatch.Groups[1].Value.Trim();
+                        var displayName = linkMatch.Groups[2].Success ? linkMatch.Groups[2].Value.Trim() : null;
+
+                        // [[Dogtag|BEAR Dogtag]] 같은 케이스
+                        if (displayName != null && linkName.Equals("Dogtag", StringComparison.OrdinalIgnoreCase))
+                        {
+                            itemName = displayName;
+                        }
+                        else
+                        {
+                            itemName = linkName;
+                        }
+                        columnIndex = 2;
+                        continue;
+                    }
+
+                    columnIndex++;
+                    continue;
+                }
+
+                // Column 2: Quantity
+                if (columnIndex == 2)
+                {
+                    if (int.TryParse(cell.Trim(), out var parsedAmount))
+                    {
+                        amount = parsedAmount;
+                    }
+                    columnIndex++;
+                    continue;
+                }
+
+                // Column 3: Requirements (Handover item, Required, Optional)
+                if (columnIndex == 3)
+                {
+                    if (cell.Contains("Handover", StringComparison.OrdinalIgnoreCase))
+                        requirement = "Handover";
+                    else if (cell.Contains("Required", StringComparison.OrdinalIgnoreCase))
+                        requirement = "Required";
+                    else if (cell.Contains("Optional", StringComparison.OrdinalIgnoreCase))
+                        requirement = "Optional";
+                    columnIndex++;
+                    continue;
+                }
+
+                // Column 4: Found in Raid (Yes/No)
+                if (columnIndex == 4)
+                {
+                    foundInRaid = cell.Contains("Yes", StringComparison.OrdinalIgnoreCase) &&
+                                  !cell.Contains("N/A", StringComparison.OrdinalIgnoreCase);
+                    columnIndex++;
+                    continue;
+                }
+
+                // Column 5: Notes
+                if (columnIndex == 5)
+                {
+                    effectiveNotes = cell.Trim();
+                    columnIndex++;
+                    continue;
+                }
+
+                columnIndex++;
+            }
+
+            // 아이템 정보가 없으면 null 반환
+            if (string.IsNullOrEmpty(itemId) && string.IsNullOrEmpty(itemName))
+                return null;
+
+            // 도그태그 레벨 파싱 (Notes에서)
+            if (!string.IsNullOrEmpty(effectiveNotes))
+            {
+                var levelMatch = Regex.Match(effectiveNotes, @"level\s+(\d+)\s+or\s+higher", RegexOptions.IgnoreCase);
+                if (levelMatch.Success && int.TryParse(levelMatch.Groups[1].Value, out var minLevel))
+                {
+                    dogtagMinLevel = minLevel;
+                }
+            }
+
+            return new ParsedRequiredItem
+            {
+                ItemId = itemId,
+                ItemName = itemName ?? "",
+                Count = amount > 0 ? amount : 1,
+                RequirementType = requirement,
+                RequiresFIR = foundInRaid,
+                DogtagMinLevel = dogtagMinLevel
+            };
+        }
+
+        /// <summary>
         /// PageContent에서 ==Objectives== 섹션을 파싱하여 목표 목록 반환
         /// </summary>
         public static List<ParsedObjective> ExtractObjectives(string content)
@@ -878,6 +1092,42 @@ namespace TarkovDBEditor.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// PageContent에서 |related 필드를 파싱하여 대체 퀘스트(Other Choices) 목록 반환
+        /// 주의: |related2, |related3 등은 다른 용도이므로 |related만 정확히 매칭해야 함
+        /// </summary>
+        public static List<string> ExtractRelatedQuests(string content)
+        {
+            var relatedQuests = new List<string>();
+            if (string.IsNullOrEmpty(content))
+                return relatedQuests;
+
+            // |related = 만 매칭 (|related2, |related3 등은 제외)
+            // (?!\d) - 숫자가 뒤따르지 않는 경우만 매칭 (negative lookahead)
+            // 다음 필드(|로 시작하는 줄) 또는 템플릿 종료(}})까지의 내용을 가져옴
+            // [ \t]* - 줄바꿈 제외한 공백만 매칭 (= 뒤의 줄바꿈을 남겨둠)
+            var relatedMatch = Regex.Match(content, @"\|related(?!\d)[ \t]*=[ \t]*(.*?)(?=\n\||\n[ \t]*\}\}|\z)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            if (!relatedMatch.Success)
+                return relatedQuests;
+
+            var relatedValue = relatedMatch.Groups[1].Value.Trim();
+            if (string.IsNullOrEmpty(relatedValue))
+                return relatedQuests;
+
+            // [[Quest Name]] 패턴으로 퀘스트 이름 추출
+            var linkMatches = Regex.Matches(relatedValue, @"\[\[([^\]\|#]+)(?:#[^\]\|]*)?(?:\|[^\]]+)?\]\]");
+            foreach (Match match in linkMatches)
+            {
+                var questName = match.Groups[1].Value.Trim();
+                if (!string.IsNullOrEmpty(questName))
+                {
+                    relatedQuests.Add(questName);
+                }
+            }
+
+            return relatedQuests;
         }
 
         /// <summary>
@@ -1507,6 +1757,20 @@ namespace TarkovDBEditor.Services
 
         // 추가 조건
         public string? Conditions { get; set; }  // 추가 조건 (JSON 또는 텍스트)
+    }
+
+    /// <summary>
+    /// 파싱된 퀘스트 필요 아이템 (Related Quest Items 테이블에서 추출)
+    /// </summary>
+    public class ParsedRequiredItem
+    {
+        public int SortOrder { get; set; }
+        public string? ItemId { get; set; }             // Wiki {{itemId}} 템플릿의 24자 hex ID
+        public string ItemName { get; set; } = "";      // Wiki 아이템 이름
+        public int Count { get; set; } = 1;             // 필요 수량
+        public bool RequiresFIR { get; set; }           // Found in Raid 필요 여부
+        public string RequirementType { get; set; } = "Required";  // Handover, Required, Optional
+        public int? DogtagMinLevel { get; set; }        // 도그태그 최소 레벨 (도그태그 아이템만)
     }
 
     #endregion

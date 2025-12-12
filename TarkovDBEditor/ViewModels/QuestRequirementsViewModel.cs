@@ -32,6 +32,8 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
     private ObservableCollection<QuestItem> _filteredQuests = new();
     private ObservableCollection<QuestRequirementItem> _selectedQuestRequirements = new();
     private ObservableCollection<QuestObjectiveItem> _selectedQuestObjectives = new();
+    private ObservableCollection<OptionalQuestItem> _selectedOptionalQuests = new();
+    private ObservableCollection<QuestRequiredItemViewModel> _selectedRequiredItems = new();
     private QuestItem? _selectedQuest;
     private string _searchText = "";
     private QuestFilterMode _filterMode = QuestFilterMode.All;
@@ -54,6 +56,18 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         set { _selectedQuestObjectives = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasNoObjectives)); }
     }
 
+    public ObservableCollection<OptionalQuestItem> SelectedOptionalQuests
+    {
+        get => _selectedOptionalQuests;
+        set { _selectedOptionalQuests = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasNoOptionalQuests)); }
+    }
+
+    public ObservableCollection<QuestRequiredItemViewModel> SelectedRequiredItems
+    {
+        get => _selectedRequiredItems;
+        set { _selectedRequiredItems = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasNoRequiredItems)); }
+    }
+
     public QuestItem? SelectedQuest
     {
         get => _selectedQuest;
@@ -63,8 +77,11 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
             OnPropertyChanged();
             LoadQuestRequirements();
             LoadQuestObjectives();
+            LoadOptionalQuests();
+            LoadRequiredItems();
         }
     }
+
 
     public string SearchText
     {
@@ -92,6 +109,10 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
 
     public bool HasNoObjectives => SelectedQuest != null && SelectedQuestObjectives.Count == 0;
 
+    public bool HasNoOptionalQuests => SelectedQuest != null && SelectedOptionalQuests.Count == 0;
+
+    public bool HasNoRequiredItems => SelectedQuest != null && SelectedRequiredItems.Count == 0;
+
     public async Task LoadDataAsync()
     {
         if (!_db.IsConnected) return;
@@ -102,10 +123,11 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
 
-        // Load all quests with MinLevel and MinScavKarma
+        // Load all quests with MinLevel, MinScavKarma, and Location
         var questSql = @"SELECT Id, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, BsgId,
                          MinLevel, MinLevelApproved, MinLevelApprovedAt,
-                         MinScavKarma, MinScavKarmaApproved, MinScavKarmaApprovedAt
+                         MinScavKarma, MinScavKarmaApproved, MinScavKarmaApprovedAt,
+                         Location
                          FROM Quests ORDER BY Name";
         await using var questCmd = new SqliteCommand(questSql, connection);
         await using var questReader = await questCmd.ExecuteReaderAsync();
@@ -128,7 +150,8 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
                 MinLevelApprovedAt = questReader.IsDBNull(10) ? null : DateTime.Parse(questReader.GetString(10)),
                 MinScavKarma = questReader.IsDBNull(11) ? null : questReader.GetInt32(11),
                 MinScavKarmaApproved = !questReader.IsDBNull(12) && questReader.GetInt64(12) != 0,
-                MinScavKarmaApprovedAt = questReader.IsDBNull(13) ? null : DateTime.Parse(questReader.GetString(13))
+                MinScavKarmaApprovedAt = questReader.IsDBNull(13) ? null : DateTime.Parse(questReader.GetString(13)),
+                Location = questReader.IsDBNull(14) ? null : questReader.GetString(14)
             });
         }
 
@@ -166,6 +189,54 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
             objCounts[questId] = (total, approved);
         }
 
+        // Load optional quest counts per quest (테이블이 존재하는 경우에만)
+        var optCounts = new Dictionary<string, (int Total, int Approved)>();
+        try
+        {
+            var optCountSql = @"
+                SELECT QuestId, COUNT(*) as Total, SUM(CASE WHEN IsApproved = 1 THEN 1 ELSE 0 END) as Approved
+                FROM OptionalQuests
+                GROUP BY QuestId";
+            await using var optCountCmd = new SqliteCommand(optCountSql, connection);
+            await using var optCountReader = await optCountCmd.ExecuteReaderAsync();
+
+            while (await optCountReader.ReadAsync())
+            {
+                var questId = optCountReader.GetString(0);
+                var total = optCountReader.GetInt32(1);
+                var approved = optCountReader.GetInt32(2);
+                optCounts[questId] = (total, approved);
+            }
+        }
+        catch (SqliteException)
+        {
+            // OptionalQuests 테이블이 없으면 무시
+        }
+
+        // Load required items counts per quest (테이블이 존재하는 경우에만)
+        var reqItemCounts = new Dictionary<string, (int Total, int Approved)>();
+        try
+        {
+            var reqItemCountSql = @"
+                SELECT QuestId, COUNT(*) as Total, SUM(CASE WHEN IsApproved = 1 THEN 1 ELSE 0 END) as Approved
+                FROM QuestRequiredItems
+                GROUP BY QuestId";
+            await using var reqItemCountCmd = new SqliteCommand(reqItemCountSql, connection);
+            await using var reqItemCountReader = await reqItemCountCmd.ExecuteReaderAsync();
+
+            while (await reqItemCountReader.ReadAsync())
+            {
+                var questId = reqItemCountReader.GetString(0);
+                var total = reqItemCountReader.GetInt32(1);
+                var approved = reqItemCountReader.GetInt32(2);
+                reqItemCounts[questId] = (total, approved);
+            }
+        }
+        catch (SqliteException)
+        {
+            // QuestRequiredItems 테이블이 없으면 무시
+        }
+
         // Update quest items with counts
         foreach (var quest in quests)
         {
@@ -189,6 +260,28 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
             {
                 quest.QuestObjTotalCount = 0;
                 quest.QuestObjApprovedCount = 0;
+            }
+
+            if (optCounts.TryGetValue(quest.Id, out var optCount))
+            {
+                quest.OptionalQuestTotalCount = optCount.Total;
+                quest.OptionalQuestApprovedCount = optCount.Approved;
+            }
+            else
+            {
+                quest.OptionalQuestTotalCount = 0;
+                quest.OptionalQuestApprovedCount = 0;
+            }
+
+            if (reqItemCounts.TryGetValue(quest.Id, out var reqItemCount))
+            {
+                quest.RequiredItemTotalCount = reqItemCount.Total;
+                quest.RequiredItemApprovedCount = reqItemCount.Approved;
+            }
+            else
+            {
+                quest.RequiredItemTotalCount = 0;
+                quest.RequiredItemApprovedCount = 0;
             }
             _allQuests.Add(quest);
         }
@@ -251,7 +344,7 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         {
             var item = new QuestRequirementItem
             {
-                Id = reader.GetInt64(0),
+                Id = reader.GetString(0),
                 RequiredQuestId = reader.GetString(1),
                 RequirementType = reader.GetString(2),
                 DelayMinutes = reader.IsDBNull(3) ? null : reader.GetInt32(3),
@@ -294,7 +387,7 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         {
             var item = new QuestObjectiveItem
             {
-                Id = reader.GetInt64(0),
+                Id = reader.GetString(0),
                 QuestId = reader.GetString(1),
                 SortOrder = reader.GetInt32(2),
                 ObjectiveType = reader.GetString(3),
@@ -309,7 +402,9 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
                 LocationPointsJson = reader.IsDBNull(12) ? null : reader.GetString(12),
                 Conditions = reader.IsDBNull(13) ? null : reader.GetString(13),
                 IsApproved = !reader.IsDBNull(14) && reader.GetInt64(14) != 0,
-                ApprovedAt = reader.IsDBNull(15) ? null : DateTime.Parse(reader.GetString(15))
+                ApprovedAt = reader.IsDBNull(15) ? null : DateTime.Parse(reader.GetString(15)),
+                // Quest의 Location을 fallback으로 설정 (Quest Item의 경우 MapName이 없을 때 사용)
+                QuestLocation = _selectedQuest?.Location
             };
             SelectedQuestObjectives.Add(item);
         }
@@ -317,9 +412,189 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(HasNoObjectives));
     }
 
-    public async Task UpdateObjectiveApprovalAsync(long objectiveId, bool isApproved)
+    private async void LoadOptionalQuests()
     {
-        if (!_db.IsConnected) return;
+        SelectedOptionalQuests.Clear();
+
+        if (_selectedQuest == null || !_db.IsConnected) return;
+
+        try
+        {
+            var connectionString = $"Data Source={_db.DatabasePath}";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+
+            var sql = @"
+                SELECT o.Id, o.QuestId, o.AlternativeQuestId, o.IsApproved, o.ApprovedAt,
+                       q.Name, q.WikiPageLink, q.Trader
+                FROM OptionalQuests o
+                LEFT JOIN Quests q ON o.AlternativeQuestId = q.Id
+                WHERE o.QuestId = @QuestId
+                ORDER BY q.Name";
+
+            await using var cmd = new SqliteCommand(sql, connection);
+            cmd.Parameters.AddWithValue("@QuestId", _selectedQuest.Id);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var item = new OptionalQuestItem
+                {
+                    Id = reader.GetString(0),
+                    QuestId = reader.GetString(1),
+                    AlternativeQuestId = reader.GetString(2),
+                    IsApproved = !reader.IsDBNull(3) && reader.GetInt64(3) != 0,
+                    ApprovedAt = reader.IsDBNull(4) ? null : DateTime.Parse(reader.GetString(4)),
+                    AlternativeQuestName = reader.IsDBNull(5) ? "(Unknown)" : reader.GetString(5),
+                    AlternativeQuestWikiLink = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    AlternativeQuestTrader = reader.IsDBNull(7) ? null : reader.GetString(7)
+                };
+                SelectedOptionalQuests.Add(item);
+            }
+        }
+        catch (SqliteException)
+        {
+            // OptionalQuests 테이블이 없으면 무시
+        }
+
+        OnPropertyChanged(nameof(HasNoOptionalQuests));
+    }
+
+    private async void LoadRequiredItems()
+    {
+        SelectedRequiredItems.Clear();
+
+        if (_selectedQuest == null || !_db.IsConnected) return;
+
+        try
+        {
+            var connectionString = $"Data Source={_db.DatabasePath}";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+
+            var sql = @"
+                SELECT r.Id, r.QuestId, r.ItemId, r.ItemName, r.Count, r.RequiresFIR,
+                       r.RequirementType, r.SortOrder, r.DogtagMinLevel, r.IsApproved, r.ApprovedAt
+                FROM QuestRequiredItems r
+                WHERE r.QuestId = @QuestId
+                ORDER BY r.SortOrder";
+
+            await using var cmd = new SqliteCommand(sql, connection);
+            cmd.Parameters.AddWithValue("@QuestId", _selectedQuest.Id);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var item = new QuestRequiredItemViewModel
+                {
+                    Id = reader.GetString(0),
+                    QuestId = reader.GetString(1),
+                    ItemId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    ItemName = reader.GetString(3),
+                    Count = reader.GetInt32(4),
+                    RequiresFIR = !reader.IsDBNull(5) && reader.GetInt64(5) != 0,
+                    RequirementType = reader.GetString(6),
+                    SortOrder = reader.GetInt32(7),
+                    DogtagMinLevel = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                    IsApproved = !reader.IsDBNull(9) && reader.GetInt64(9) != 0,
+                    ApprovedAt = reader.IsDBNull(10) ? null : DateTime.Parse(reader.GetString(10))
+                };
+                SelectedRequiredItems.Add(item);
+            }
+        }
+        catch (SqliteException)
+        {
+            // QuestRequiredItems 테이블이 없으면 무시
+        }
+
+        OnPropertyChanged(nameof(HasNoRequiredItems));
+    }
+
+    public async Task UpdateRequiredItemApprovalAsync(string requiredItemId, bool isApproved)
+    {
+        if (!_db.IsConnected)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UpdateRequiredItemApprovalAsync] DB not connected!");
+            return;
+        }
+
+        var connectionString = $"Data Source={_db.DatabasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        var sql = isApproved
+            ? "UPDATE QuestRequiredItems SET IsApproved = 1, ApprovedAt = @ApprovedAt WHERE Id = @Id"
+            : "UPDATE QuestRequiredItems SET IsApproved = 0, ApprovedAt = NULL WHERE Id = @Id";
+
+        await using var cmd = new SqliteCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@Id", requiredItemId);
+        if (isApproved)
+        {
+            cmd.Parameters.AddWithValue("@ApprovedAt", DateTime.UtcNow.ToString("o"));
+        }
+        var rows = await cmd.ExecuteNonQueryAsync();
+        System.Diagnostics.Debug.WriteLine($"[UpdateRequiredItemApprovalAsync] Updated {rows} row(s) for RequiredItemId={requiredItemId}, IsApproved={isApproved}");
+
+        // Update local count
+        if (_selectedQuest != null)
+        {
+            _selectedQuest.RequiredItemApprovedCount = SelectedRequiredItems.Count(r => r.IsApproved);
+
+            // Update in allQuests
+            var questInList = _allQuests.FirstOrDefault(q => q.Id == _selectedQuest.Id);
+            if (questInList != null)
+            {
+                questInList.RequiredItemApprovedCount = _selectedQuest.RequiredItemApprovedCount;
+            }
+        }
+    }
+
+    public async Task UpdateOptionalQuestApprovalAsync(string optionalQuestId, bool isApproved)
+    {
+        if (!_db.IsConnected)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UpdateOptionalQuestApprovalAsync] DB not connected!");
+            return;
+        }
+
+        var connectionString = $"Data Source={_db.DatabasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        var sql = isApproved
+            ? "UPDATE OptionalQuests SET IsApproved = 1, ApprovedAt = @ApprovedAt WHERE Id = @Id"
+            : "UPDATE OptionalQuests SET IsApproved = 0, ApprovedAt = NULL WHERE Id = @Id";
+
+        await using var cmd = new SqliteCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@Id", optionalQuestId);
+        if (isApproved)
+        {
+            cmd.Parameters.AddWithValue("@ApprovedAt", DateTime.UtcNow.ToString("o"));
+        }
+        var rows = await cmd.ExecuteNonQueryAsync();
+        System.Diagnostics.Debug.WriteLine($"[UpdateOptionalQuestApprovalAsync] Updated {rows} row(s) for OptionalQuestId={optionalQuestId}, IsApproved={isApproved}");
+
+        // Update local count
+        if (_selectedQuest != null)
+        {
+            _selectedQuest.OptionalQuestApprovedCount = SelectedOptionalQuests.Count(o => o.IsApproved);
+
+            // Update in allQuests
+            var questInList = _allQuests.FirstOrDefault(q => q.Id == _selectedQuest.Id);
+            if (questInList != null)
+            {
+                questInList.OptionalQuestApprovedCount = _selectedQuest.OptionalQuestApprovedCount;
+            }
+        }
+    }
+
+    public async Task UpdateObjectiveApprovalAsync(string objectiveId, bool isApproved)
+    {
+        if (!_db.IsConnected)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveApprovalAsync] DB not connected!");
+            return;
+        }
 
         var connectionString = $"Data Source={_db.DatabasePath}";
         await using var connection = new SqliteConnection(connectionString);
@@ -335,7 +610,8 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         {
             cmd.Parameters.AddWithValue("@ApprovedAt", DateTime.UtcNow.ToString("o"));
         }
-        await cmd.ExecuteNonQueryAsync();
+        var rows = await cmd.ExecuteNonQueryAsync();
+        System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveApprovalAsync] Updated {rows} row(s) for ObjectiveId={objectiveId}, IsApproved={isApproved}");
 
         // Update local count
         if (_selectedQuest != null)
@@ -351,9 +627,13 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         }
     }
 
-    public async Task UpdateObjectiveLocationPointsAsync(long objectiveId, string? locationPointsJson)
+    public async Task UpdateObjectiveLocationPointsAsync(string objectiveId, string? locationPointsJson)
     {
-        if (!_db.IsConnected) return;
+        if (!_db.IsConnected)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveLocationPointsAsync] DB not connected!");
+            return;
+        }
 
         var connectionString = $"Data Source={_db.DatabasePath}";
         await using var connection = new SqliteConnection(connectionString);
@@ -366,12 +646,17 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@Id", objectiveId);
         cmd.Parameters.AddWithValue("@LocationPoints", (object?)locationPointsJson ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync();
+        var rows = await cmd.ExecuteNonQueryAsync();
+        System.Diagnostics.Debug.WriteLine($"[UpdateObjectiveLocationPointsAsync] Updated {rows} row(s) for ObjectiveId={objectiveId}, LocationPointsJson={(locationPointsJson ?? "null")}");
     }
 
-    public async Task UpdateApprovalAsync(long requirementId, bool isApproved)
+    public async Task UpdateApprovalAsync(string requirementId, bool isApproved)
     {
-        if (!_db.IsConnected) return;
+        if (!_db.IsConnected)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UpdateApprovalAsync] DB not connected!");
+            return;
+        }
 
         var connectionString = $"Data Source={_db.DatabasePath}";
         await using var connection = new SqliteConnection(connectionString);
@@ -387,7 +672,8 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         {
             cmd.Parameters.AddWithValue("@ApprovedAt", DateTime.UtcNow.ToString("o"));
         }
-        await cmd.ExecuteNonQueryAsync();
+        var rows = await cmd.ExecuteNonQueryAsync();
+        System.Diagnostics.Debug.WriteLine($"[UpdateApprovalAsync] Updated {rows} row(s) for RequirementId={requirementId}, IsApproved={isApproved}");
 
         // Update local count
         if (_selectedQuest != null)
@@ -491,6 +777,10 @@ public class QuestItem : INotifyPropertyChanged
     private int _totalRequirements;
     private int _objectiveApprovedCount;
     private int _totalObjectives;
+    private int _optionalQuestApprovedCount;
+    private int _totalOptionalQuests;
+    private int _requiredItemApprovedCount;
+    private int _totalRequiredItems;
     private int? _minLevel;
     private bool _minLevelApproved;
     private int? _minScavKarma;
@@ -503,7 +793,22 @@ public class QuestItem : INotifyPropertyChanged
     public string? NameJA { get; set; }
     public string? WikiPageLink { get; set; }
     public string? Trader { get; set; }
+    public string? Location { get; set; }
     public string? BsgId { get; set; }
+
+    public string TraderAndLocation
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(Trader) && string.IsNullOrEmpty(Location))
+                return "";
+            if (string.IsNullOrEmpty(Location))
+                return Trader ?? "";
+            if (string.IsNullOrEmpty(Trader))
+                return $"[{Location}]";
+            return $"{Trader} [{Location}]";
+        }
+    }
 
     public int? MinLevel
     {
@@ -540,7 +845,7 @@ public class QuestItem : INotifyPropertyChanged
     {
         get
         {
-            var total = _totalRequirements + _totalObjectives;
+            var total = _totalRequirements + _totalObjectives + _totalOptionalQuests + _totalRequiredItems;
             if (HasMinLevel) total++;
             if (HasMinScavKarma) total++;
             return total;
@@ -552,7 +857,7 @@ public class QuestItem : INotifyPropertyChanged
     {
         get
         {
-            var count = _approvedCount + _objectiveApprovedCount;
+            var count = _approvedCount + _objectiveApprovedCount + _optionalQuestApprovedCount + _requiredItemApprovedCount;
             if (HasMinLevel && MinLevelApproved) count++;
             if (HasMinScavKarma && MinScavKarmaApproved) count++;
             return count;
@@ -586,6 +891,32 @@ public class QuestItem : INotifyPropertyChanged
         set { _totalObjectives = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalRequirements)); OnPropertyChanged(nameof(ApprovalStatus)); }
     }
 
+    // Optional Quests (Other Choices) 승인 수
+    public int OptionalQuestApprovedCount
+    {
+        get => _optionalQuestApprovedCount;
+        set { _optionalQuestApprovedCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(ApprovedCount)); OnPropertyChanged(nameof(ApprovalStatus)); }
+    }
+
+    public int OptionalQuestTotalCount
+    {
+        get => _totalOptionalQuests;
+        set { _totalOptionalQuests = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalRequirements)); OnPropertyChanged(nameof(ApprovalStatus)); }
+    }
+
+    // Required Items 승인 수
+    public int RequiredItemApprovedCount
+    {
+        get => _requiredItemApprovedCount;
+        set { _requiredItemApprovedCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(ApprovedCount)); OnPropertyChanged(nameof(ApprovalStatus)); }
+    }
+
+    public int RequiredItemTotalCount
+    {
+        get => _totalRequiredItems;
+        set { _totalRequiredItems = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalRequirements)); OnPropertyChanged(nameof(ApprovalStatus)); }
+    }
+
     public QuestApprovalStatus ApprovalStatus
     {
         get
@@ -606,7 +937,7 @@ public class QuestRequirementItem : INotifyPropertyChanged
 {
     private bool _isApproved;
 
-    public long Id { get; set; }
+    public string Id { get; set; } = "";
     public string RequiredQuestId { get; set; } = "";
     public string RequiredQuestName { get; set; } = "";
     public string? RequiredQuestWikiLink { get; set; }
@@ -645,6 +976,136 @@ public class QuestRequirementItem : INotifyPropertyChanged
         {
             if (!ApprovedAt.HasValue) return "";
             return $"Approved: {ApprovedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm}";
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
+public class OptionalQuestItem : INotifyPropertyChanged
+{
+    private bool _isApproved;
+
+    public string Id { get; set; } = "";
+    public string QuestId { get; set; } = "";
+    public string AlternativeQuestId { get; set; } = "";
+    public string AlternativeQuestName { get; set; } = "";
+    public string? AlternativeQuestWikiLink { get; set; }
+    public string? AlternativeQuestTrader { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public bool IsApproved
+    {
+        get => _isApproved;
+        set { _isApproved = value; OnPropertyChanged(); }
+    }
+
+    public string ApprovedAtDisplay
+    {
+        get
+        {
+            if (!ApprovedAt.HasValue) return "";
+            return $"Approved: {ApprovedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm}";
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
+public class QuestRequiredItemViewModel : INotifyPropertyChanged
+{
+    private bool _isApproved;
+
+    public string Id { get; set; } = "";
+    public string QuestId { get; set; } = "";
+    public string? ItemId { get; set; }
+    public string ItemName { get; set; } = "";
+    public int Count { get; set; } = 1;
+    public bool RequiresFIR { get; set; }
+    public string RequirementType { get; set; } = "Required";
+    public int SortOrder { get; set; }
+    public int? DogtagMinLevel { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public bool IsApproved
+    {
+        get => _isApproved;
+        set { _isApproved = value; OnPropertyChanged(); }
+    }
+
+    public string CountDisplay => $"x{Count}";
+
+    public string TypeDisplay => RequirementType switch
+    {
+        "Handover" => "Hand Over",
+        "Required" => "Required",
+        "Optional" => "Optional",
+        _ => RequirementType
+    };
+
+    public string DogtagLevelDisplay => DogtagMinLevel.HasValue ? $"Lv.{DogtagMinLevel}+" : "";
+
+    public bool HasItem => !string.IsNullOrEmpty(ItemId) || !string.IsNullOrEmpty(ItemName);
+
+    public string ApprovedAtDisplay
+    {
+        get
+        {
+            if (!ApprovedAt.HasValue) return "";
+            return $"Approved: {ApprovedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm}";
+        }
+    }
+
+    // 아이템 아이콘 경로 (wiki_data/icons/{ItemId}.png)
+    public string? ItemIconPath
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(ItemId))
+                return null;
+
+            var basePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wiki_data", "icons");
+            var extensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp" };
+
+            foreach (var ext in extensions)
+            {
+                var path = System.IO.Path.Combine(basePath, $"{ItemId}{ext}");
+                if (System.IO.File.Exists(path))
+                    return path;
+            }
+
+            return null;
+        }
+    }
+
+    // 아이템 아이콘 이미지 (바인딩용)
+    private System.Windows.Media.Imaging.BitmapImage? _itemIcon;
+    public System.Windows.Media.Imaging.BitmapImage? ItemIcon
+    {
+        get
+        {
+            if (_itemIcon == null && !string.IsNullOrEmpty(ItemIconPath))
+            {
+                try
+                {
+                    _itemIcon = new System.Windows.Media.Imaging.BitmapImage();
+                    _itemIcon.BeginInit();
+                    _itemIcon.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    _itemIcon.UriSource = new Uri(ItemIconPath);
+                    _itemIcon.DecodePixelWidth = 64;
+                    _itemIcon.EndInit();
+                    _itemIcon.Freeze();
+                }
+                catch
+                {
+                    _itemIcon = null;
+                }
+            }
+            return _itemIcon;
         }
     }
 

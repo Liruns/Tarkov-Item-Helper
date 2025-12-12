@@ -69,7 +69,92 @@ namespace TarkovDBEditor.Services
         #region Refresh Data
 
         /// <summary>
-        /// Wiki 데이터를 가져와 .db 파일에 Items, Quests 테이블을 생성/업데이트
+        /// 캐시된 Wiki 데이터로 .db 파일의 Quests 테이블을 업데이트 (Wiki 요청 없음)
+        /// Items는 기존 DB에서 로드하여 사용 (Items 테이블은 변경하지 않음)
+        /// </summary>
+        public async Task<RefreshResult> RefreshDataFromCacheAsync(
+            string databasePath,
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new RefreshResult
+            {
+                StartedAt = DateTime.Now,
+                DatabasePath = databasePath
+            };
+
+            var logBuilder = new StringBuilder();
+            logBuilder.AppendLine($"=== RefreshData (from Cache) Started at {result.StartedAt:yyyy-MM-dd HH:mm:ss} ===");
+            logBuilder.AppendLine($"Database: {databasePath}");
+            logBuilder.AppendLine();
+
+            try
+            {
+                // 기존 DB에서 Items 로드 (Items 테이블은 변경하지 않음)
+                progress?.Invoke("Loading items from existing database...");
+                var existingItems = await LoadItemsFromDatabaseAsync(databasePath, cancellationToken);
+                logBuilder.AppendLine($"Items loaded from DB: {existingItems.Count} items");
+
+                // 캐시된 Quests 로드
+                progress?.Invoke("Loading cached quests...");
+                var questsResult = await LoadQuestsFromCacheAsync(existingItems, progress, cancellationToken);
+                logBuilder.AppendLine($"Quests loaded from cache: {questsResult.Quests.Count} quests");
+                logBuilder.AppendLine($"Requirements: {questsResult.Requirements.Count}");
+                logBuilder.AppendLine($"Objectives: {questsResult.Objectives.Count}");
+                logBuilder.AppendLine($"OptionalQuests: {questsResult.OptionalQuests.Count}");
+                logBuilder.AppendLine($"RequiredItems: {questsResult.RequiredItems.Count}");
+
+                // DB 업데이트 (Items는 null로 전달하여 업데이트하지 않음)
+                progress?.Invoke("Updating database (Quests only)...");
+                await UpdateDatabaseAsync(
+                    databasePath,
+                    null, // Items는 업데이트하지 않음
+                    questsResult.Quests,
+                    questsResult.Requirements,
+                    questsResult.Objectives,
+                    questsResult.OptionalQuests,
+                    questsResult.RequiredItems,
+                    logBuilder,
+                    progress,
+                    cancellationToken);
+
+                result.ItemsUpdated = false;
+                result.QuestsUpdated = true;
+                result.ItemsCount = existingItems.Count;
+                result.QuestsCount = questsResult.Quests.Count;
+
+                result.Success = true;
+                result.CompletedAt = DateTime.Now;
+
+                logBuilder.AppendLine();
+                logBuilder.AppendLine($"=== RefreshData (from Cache) Completed at {result.CompletedAt:yyyy-MM-dd HH:mm:ss} ===");
+                logBuilder.AppendLine($"Duration: {(result.CompletedAt - result.StartedAt).TotalSeconds:F1} seconds");
+                logBuilder.AppendLine($"Items: {result.ItemsCount} (not updated, loaded from DB)");
+                logBuilder.AppendLine($"Quests Updated: {result.QuestsUpdated} ({result.QuestsCount} quests)");
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+                result.CompletedAt = DateTime.Now;
+
+                logBuilder.AppendLine();
+                logBuilder.AppendLine($"=== ERROR ===");
+                logBuilder.AppendLine($"Message: {ex.Message}");
+                logBuilder.AppendLine($"StackTrace: {ex.StackTrace}");
+            }
+
+            // 로그 파일 저장
+            var logFileName = $"refresh_cache_{result.StartedAt:yyyyMMdd_HHmmss}.log";
+            var logPath = Path.Combine(_logDir, logFileName);
+            await File.WriteAllTextAsync(logPath, logBuilder.ToString(), cancellationToken);
+            result.LogPath = logPath;
+
+            return result;
+        }
+
+        /// <summary>
+        /// Wiki 데이터를 가져와 .db 파일에 Items, Quests 테이블을 생성/업데이트 (전체 새로고침)
         /// </summary>
         public async Task<RefreshResult> RefreshDataAsync(
             string databasePath,
@@ -136,14 +221,16 @@ namespace TarkovDBEditor.Services
                 logBuilder.AppendLine($"New Revision - Items: {newRevision.ItemsRevision}, Quests: {newRevision.QuestsRevision}");
                 logBuilder.AppendLine($"Items Changed: {itemsChanged}, Quests Changed: {questsChanged}");
 
-                // DB는 항상 초기화 및 업데이트 (Items, Quests, QuestRequirements, QuestObjectives 테이블)
-                progress?.Invoke("Updating database (Items, Quests, QuestRequirements & QuestObjectives tables)...");
+                // DB는 항상 초기화 및 업데이트 (Items, Quests, QuestRequirements, QuestObjectives, OptionalQuests, QuestRequiredItems 테이블)
+                progress?.Invoke("Updating database (Items, Quests, QuestRequirements, QuestObjectives, OptionalQuests & QuestRequiredItems tables)...");
                 await UpdateDatabaseAsync(
                     databasePath,
                     itemsResult.Items,
                     questsResult.Quests,
                     questsResult.Requirements,
                     questsResult.Objectives,
+                    questsResult.OptionalQuests,
+                    questsResult.RequiredItems,
                     logBuilder,
                     progress,
                     cancellationToken);
@@ -246,10 +333,21 @@ namespace TarkovDBEditor.Services
             var downloadResult = await cacheService.DownloadIconsAsync(iconItems, progress, cancellationToken);
             progress?.Invoke($"Icons: {downloadResult.Downloaded} downloaded, {downloadResult.Failed} failed, {downloadResult.AlreadyDownloaded} cached");
 
-            // tarkov.dev 데이터로 enrichment
-            progress?.Invoke("Enriching with tarkov.dev data...");
+            // tarkov.dev 데이터로 enrichment (캐시 우선)
+            progress?.Invoke("Loading tarkov.dev data (from cache)...");
             using var devService = new TarkovDevDataService();
-            var devItems = await devService.FetchAllLanguagesAsync(progress, cancellationToken);
+            var devItems = await devService.LoadCachedItemsAsync(cancellationToken);
+
+            if (devItems == null || devItems.Count == 0)
+            {
+                progress?.Invoke("No cached tarkov.dev items found. Please run 'Debug > Cache Tarkov Dev Data' first.");
+                // 빈 딕셔너리로 대체하여 계속 진행 (매칭 없이)
+                devItems = new Dictionary<string, TarkovDevMultiLangItem>();
+            }
+            else
+            {
+                progress?.Invoke($"Loaded {devItems.Count} items from tarkov.dev cache");
+            }
 
             var enrichedItems = new List<DbItem>();
             foreach (var item in itemList.Items)
@@ -343,13 +441,24 @@ namespace TarkovDBEditor.Services
             // 캐시에서 Trader 정보 가져오기
             var cachedQuests = questService.GetCachedQuests();
 
-            // tarkov.dev 데이터 가져오기
-            progress?.Invoke("Fetching tarkov.dev quest data...");
-            var devQuests = await questService.FetchTarkovDevQuestsAsync(progress, cancellationToken);
+            // tarkov.dev 데이터 가져오기 (캐시 우선)
+            progress?.Invoke("Loading tarkov.dev quest data (from cache)...");
+            using var devService = new TarkovDevDataService();
+            var devQuestsCached = await devService.LoadCachedQuestsAsync(cancellationToken);
+
+            if (devQuestsCached == null || devQuestsCached.Count == 0)
+            {
+                progress?.Invoke("No cached tarkov.dev quests found. Please run 'Debug > Cache Tarkov Dev Data' first.");
+                devQuestsCached = new Dictionary<string, TarkovDevQuestCacheItem>();
+            }
+            else
+            {
+                progress?.Invoke($"Loaded {devQuestsCached.Count} quests from tarkov.dev cache");
+            }
 
             // 퀘스트 매칭 및 DB 데이터 생성
             var dbQuests = new List<DbQuest>();
-            var devQuestsByNormalizedName = devQuests.Values
+            var devQuestsByNormalizedName = devQuestsCached.Values
                 .Where(q => !string.IsNullOrEmpty(q.NormalizedName))
                 .ToDictionary(q => q.NormalizedName!, q => q, StringComparer.OrdinalIgnoreCase);
 
@@ -372,7 +481,7 @@ namespace TarkovDBEditor.Services
                     WikiPageLink = wikiPageLink
                 };
 
-                // 캐시에서 Trader (givenby), MinLevel, MinScavKarma 가져오기
+                // 캐시에서 Trader (givenby), Location, MinLevel, MinScavKarma 가져오기
                 if (cachedQuests.TryGetValue(questName, out var cached))
                 {
                     // 캐시된 Trader가 있으면 사용, 없으면 PageContent에서 직접 파싱
@@ -383,14 +492,20 @@ namespace TarkovDBEditor.Services
                     }
                     dbQuest.Trader = trader;
 
+                    // Location - PageContent에서 파싱
+                    if (!string.IsNullOrEmpty(cached.PageContent))
+                    {
+                        dbQuest.Location = ExtractLocationFromContent(cached.PageContent);
+                    }
+
                     // MinLevel, MinScavKarma - 캐시에 있으면 사용, 없으면 PageContent에서 파싱
                     dbQuest.MinLevel = cached.MinLevel ?? WikiQuestService.ExtractMinLevel(cached.PageContent ?? "");
                     dbQuest.MinScavKarma = cached.MinScavKarma ?? WikiQuestService.ExtractMinScavKarma(cached.PageContent ?? "");
                 }
 
-                // tarkov.dev 매칭
-                TarkovDevQuest? devQuest = null;
-                if (devQuests.TryGetValue(wikiPageLink, out devQuest) ||
+                // tarkov.dev 매칭 (캐시된 데이터 사용)
+                TarkovDevQuestCacheItem? devQuest = null;
+                if (devQuestsCached.TryGetValue(wikiPageLink, out devQuest) ||
                     devQuestsByNormalizedName.TryGetValue(NormalizeQuestName(questName), out devQuest))
                 {
                     dbQuest.BsgId = devQuest.Id;
@@ -489,6 +604,90 @@ namespace TarkovDBEditor.Services
 
             progress?.Invoke($"Parsed {dbObjectives.Count} quest objectives");
 
+            // 대체 퀘스트(Other Choices) 파싱
+            progress?.Invoke("Parsing optional quests (other choices)...");
+            var dbOptionalQuests = new List<DbOptionalQuest>();
+
+            foreach (var questName in questPages)
+            {
+                if (!questNameToId.TryGetValue(questName, out var questId))
+                    continue;
+
+                if (!cachedQuests.TryGetValue(questName, out var cached) || string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var relatedQuests = WikiQuestService.ExtractRelatedQuests(cached.PageContent);
+
+                foreach (var relatedQuestName in relatedQuests)
+                {
+                    // 대체 퀘스트 이름으로 ID 찾기
+                    if (!questNameToId.TryGetValue(relatedQuestName, out var alternativeQuestId))
+                    {
+                        // (quest) 접미사 추가해서 다시 시도
+                        if (!questNameToId.TryGetValue($"{relatedQuestName} (quest)", out alternativeQuestId))
+                            continue; // 매칭 실패 - 스킵
+                    }
+
+                    // 자기 자신을 참조하는 경우 스킵
+                    if (questId == alternativeQuestId)
+                        continue;
+
+                    dbOptionalQuests.Add(new DbOptionalQuest
+                    {
+                        QuestId = questId,
+                        AlternativeQuestId = alternativeQuestId
+                    });
+                }
+            }
+
+            progress?.Invoke($"Parsed {dbOptionalQuests.Count} optional quests");
+
+            // 퀘스트 필요 아이템(Required Items) 파싱
+            progress?.Invoke("Parsing quest required items...");
+            var dbRequiredItems = new List<DbQuestRequiredItem>();
+
+            foreach (var questName in questPages)
+            {
+                if (!questNameToId.TryGetValue(questName, out var questId))
+                    continue;
+
+                if (!cachedQuests.TryGetValue(questName, out var cached) || string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var parsedItems = WikiQuestService.ExtractRequiredItems(cached.PageContent);
+
+                foreach (var item in parsedItems)
+                {
+                    // ItemName으로 ItemId 매핑
+                    string? itemId = null;
+                    if (!string.IsNullOrEmpty(item.ItemId))
+                    {
+                        // Wiki {{itemId}} 템플릿의 24자 hex ID -> Items 테이블의 BsgId로 찾기
+                        // TODO: BsgId -> Id 매핑 필요 시 추가
+                    }
+                    if (string.IsNullOrEmpty(itemId) && !string.IsNullOrEmpty(item.ItemName))
+                    {
+                        itemNameToId.TryGetValue(item.ItemName, out itemId);
+                    }
+
+                    var dbItem = new DbQuestRequiredItem
+                    {
+                        QuestId = questId,
+                        ItemId = itemId,
+                        ItemName = item.ItemName,
+                        Count = item.Count,
+                        RequiresFIR = item.RequiresFIR,
+                        RequirementType = item.RequirementType,
+                        SortOrder = item.SortOrder,
+                        DogtagMinLevel = item.DogtagMinLevel
+                    };
+                    dbItem.Id = dbItem.ComputeId(); // ID 생성
+                    dbRequiredItems.Add(dbItem);
+                }
+            }
+
+            progress?.Invoke($"Parsed {dbRequiredItems.Count} quest required items");
+
             // 리비전 생성
             var revision = $"{dbQuests.Count}_{DateTime.UtcNow:yyyyMMddHH}";
 
@@ -497,8 +696,319 @@ namespace TarkovDBEditor.Services
                 Quests = dbQuests,
                 Requirements = dbRequirements,
                 Objectives = dbObjectives,
+                OptionalQuests = dbOptionalQuests,
+                RequiredItems = dbRequiredItems,
                 Revision = revision
             };
+        }
+
+        /// <summary>
+        /// 기존 DB에서 Items 데이터 로드 (아이템 이름 → ID 매핑용)
+        /// </summary>
+        private async Task<List<DbItem>> LoadItemsFromDatabaseAsync(
+            string databasePath,
+            CancellationToken cancellationToken = default)
+        {
+            var items = new List<DbItem>();
+
+            if (!File.Exists(databasePath))
+            {
+                return items;
+            }
+
+            var connectionString = $"Data Source={databasePath}";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            // Items 테이블 존재 여부 확인
+            await using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Items'";
+            var tableExists = await checkCmd.ExecuteScalarAsync(cancellationToken);
+            if (tableExists == null)
+            {
+                return items;
+            }
+
+            // Items 로드
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT Id, BsgId, Name, NameEN, NameKO, NameJA,
+                       ShortNameEN, ShortNameKO, ShortNameJA,
+                       WikiPageLink, IconUrl, Category, Categories
+                FROM Items";
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new DbItem
+                {
+                    Id = reader.GetString(0),
+                    BsgId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    Name = reader.GetString(2),
+                    NameEN = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    NameKO = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    NameJA = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    ShortNameEN = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    ShortNameKO = reader.IsDBNull(7) ? null : reader.GetString(7),
+                    ShortNameJA = reader.IsDBNull(8) ? null : reader.GetString(8),
+                    WikiPageLink = reader.IsDBNull(9) ? null : reader.GetString(9),
+                    IconUrl = reader.IsDBNull(10) ? null : reader.GetString(10),
+                    Category = reader.IsDBNull(11) ? null : reader.GetString(11),
+                    Categories = reader.IsDBNull(12) ? null : reader.GetString(12)
+                });
+            }
+
+            return items;
+        }
+
+        /// <summary>
+        /// 캐시된 Quests 데이터 로드 (Wiki 요청 없음)
+        /// </summary>
+        private async Task<QuestsFetchResult> LoadQuestsFromCacheAsync(
+            List<DbItem> items,
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new QuestsFetchResult();
+
+            // WikiQuestService로 캐시된 퀘스트 로드
+            using var questService = new WikiQuestService(_wikiDataDir);
+            await questService.LoadCacheAsync(cancellationToken);
+            var cachedQuests = questService.GetCachedQuests();
+
+            if (cachedQuests.Count == 0)
+            {
+                progress?.Invoke("No cached quests found. Run 'Fetch Wiki Data' first.");
+                return result;
+            }
+
+            progress?.Invoke($"Found {cachedQuests.Count} cached quests");
+
+            // tarkov.dev 캐시에서 퀘스트 기본 정보 가져오기
+            using var devService = new TarkovDevDataService();
+            var devQuestsCached = await devService.LoadCachedQuestsAsync(cancellationToken);
+
+            if (devQuestsCached == null || devQuestsCached.Count == 0)
+            {
+                progress?.Invoke("No cached tarkov.dev quests found. Please run 'Debug > Cache Tarkov Dev Data' first.");
+                devQuestsCached = new Dictionary<string, TarkovDevQuestCacheItem>();
+            }
+            else
+            {
+                progress?.Invoke($"Loaded {devQuestsCached.Count} quests from tarkov.dev cache");
+            }
+
+            // normalizedName 기반 매핑
+            var devQuestsByNormalizedName = devQuestsCached.Values
+                .Where(q => !string.IsNullOrEmpty(q.NormalizedName))
+                .ToDictionary(q => q.NormalizedName!, q => q, StringComparer.OrdinalIgnoreCase);
+
+            // 아이템 이름 → ID 매핑
+            var itemNameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in items)
+            {
+                if (!string.IsNullOrEmpty(item.Name) && !itemNameToId.ContainsKey(item.Name))
+                    itemNameToId[item.Name] = item.Id;
+                if (!string.IsNullOrEmpty(item.NameEN) && !itemNameToId.ContainsKey(item.NameEN))
+                    itemNameToId[item.NameEN] = item.Id;
+            }
+
+            var questNameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            // 퀘스트 변환
+            foreach (var (questName, cached) in cachedQuests)
+            {
+                if (string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var encodedName = Uri.EscapeDataString(questName.Replace(" ", "_"))
+                    .Replace("%28", "(").Replace("%29", ")");
+                var wikiPageLink = $"https://escapefromtarkov.fandom.com/wiki/{encodedName}";
+                var id = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(wikiPageLink));
+
+                var dbQuest = new DbQuest
+                {
+                    Id = id,
+                    Name = questName,
+                    WikiPageLink = wikiPageLink
+                };
+
+                // 캐시에서 Trader, MinLevel, MinScavKarma 가져오기
+                var trader = cached.Trader;
+                if (string.IsNullOrEmpty(trader) && !string.IsNullOrEmpty(cached.PageContent))
+                {
+                    trader = ExtractTraderFromContent(cached.PageContent);
+                }
+                dbQuest.Trader = trader;
+
+                // Location 파싱
+                if (!string.IsNullOrEmpty(cached.PageContent))
+                {
+                    dbQuest.Location = ExtractLocationFromContent(cached.PageContent);
+                }
+
+                // MinLevel, MinScavKarma
+                dbQuest.MinLevel = cached.MinLevel ?? WikiQuestService.ExtractMinLevel(cached.PageContent ?? "");
+                dbQuest.MinScavKarma = cached.MinScavKarma ?? WikiQuestService.ExtractMinScavKarma(cached.PageContent ?? "");
+
+                // tarkov.dev 매칭
+                TarkovDevQuestCacheItem? devQuest = null;
+                if (devQuestsCached.TryGetValue(wikiPageLink, out devQuest) ||
+                    devQuestsByNormalizedName.TryGetValue(NormalizeQuestName(questName), out devQuest))
+                {
+                    dbQuest.BsgId = devQuest.Id;
+                    dbQuest.NameEN = devQuest.NameEN;
+                    dbQuest.NameKO = devQuest.NameKO;
+                    dbQuest.NameJA = devQuest.NameJA;
+                }
+                else
+                {
+                    dbQuest.NameEN = questName;
+                    dbQuest.NameKO = questName;
+                    dbQuest.NameJA = questName;
+                }
+
+                questNameToId[questName] = dbQuest.Id;
+                result.Quests.Add(dbQuest);
+            }
+
+            progress?.Invoke($"Processed {result.Quests.Count} quests");
+
+            // Requirements 파싱 (ExtractPreviousQuests 사용)
+            foreach (var (questName, cached) in cachedQuests)
+            {
+                if (!questNameToId.TryGetValue(questName, out var questId))
+                    continue;
+                if (string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var parsedReqs = WikiQuestService.ExtractPreviousQuests(cached.PageContent);
+                foreach (var req in parsedReqs)
+                {
+                    if (!questNameToId.TryGetValue(req.QuestName, out var requiredQuestId))
+                    {
+                        if (!questNameToId.TryGetValue($"{req.QuestName} (quest)", out requiredQuestId))
+                            continue;
+                    }
+
+                    result.Requirements.Add(new DbQuestRequirement
+                    {
+                        QuestId = questId,
+                        RequiredQuestId = requiredQuestId,
+                        RequirementType = req.RequirementType,
+                        DelayMinutes = req.DelayMinutes,
+                        GroupId = req.GroupId
+                    });
+                }
+            }
+
+            progress?.Invoke($"Parsed {result.Requirements.Count} requirements");
+
+            // Objectives 파싱
+            foreach (var (questName, cached) in cachedQuests)
+            {
+                if (!questNameToId.TryGetValue(questName, out var questId))
+                    continue;
+                if (string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var parsedObjs = WikiQuestService.ExtractObjectives(cached.PageContent);
+                foreach (var obj in parsedObjs)
+                {
+                    string? itemId = null;
+                    if (!string.IsNullOrEmpty(obj.ItemName))
+                    {
+                        itemNameToId.TryGetValue(obj.ItemName, out itemId);
+                    }
+
+                    var dbObj = new DbQuestObjective
+                    {
+                        QuestId = questId,
+                        SortOrder = obj.SortOrder,
+                        ObjectiveType = obj.Type.ToString(),
+                        Description = obj.Description,
+                        TargetType = obj.TargetType,
+                        TargetCount = obj.TargetCount,
+                        ItemId = itemId,
+                        ItemName = obj.ItemName,
+                        RequiresFIR = obj.RequiresFIR,
+                        MapName = obj.MapName,
+                        LocationName = obj.LocationName,
+                        Conditions = obj.Conditions
+                    };
+                    dbObj.Id = dbObj.ComputeId();
+                    result.Objectives.Add(dbObj);
+                }
+            }
+
+            progress?.Invoke($"Parsed {result.Objectives.Count} objectives");
+
+            // OptionalQuests 파싱 (ExtractRelatedQuests 사용)
+            foreach (var (questName, cached) in cachedQuests)
+            {
+                if (!questNameToId.TryGetValue(questName, out var questId))
+                    continue;
+                if (string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var relatedQuests = WikiQuestService.ExtractRelatedQuests(cached.PageContent);
+                foreach (var relatedQuestName in relatedQuests)
+                {
+                    if (!questNameToId.TryGetValue(relatedQuestName, out var altQuestId))
+                    {
+                        if (!questNameToId.TryGetValue($"{relatedQuestName} (quest)", out altQuestId))
+                            continue;
+                    }
+                    if (questId == altQuestId)
+                        continue;
+
+                    result.OptionalQuests.Add(new DbOptionalQuest
+                    {
+                        QuestId = questId,
+                        AlternativeQuestId = altQuestId
+                    });
+                }
+            }
+
+            progress?.Invoke($"Parsed {result.OptionalQuests.Count} optional quests");
+
+            // RequiredItems 파싱
+            foreach (var (questName, cached) in cachedQuests)
+            {
+                if (!questNameToId.TryGetValue(questName, out var questId))
+                    continue;
+                if (string.IsNullOrEmpty(cached.PageContent))
+                    continue;
+
+                var parsedItems = WikiQuestService.ExtractRequiredItems(cached.PageContent);
+                foreach (var item in parsedItems)
+                {
+                    string? itemId = null;
+                    if (!string.IsNullOrEmpty(item.ItemName))
+                    {
+                        itemNameToId.TryGetValue(item.ItemName, out itemId);
+                    }
+
+                    var dbItem = new DbQuestRequiredItem
+                    {
+                        QuestId = questId,
+                        ItemId = itemId,
+                        ItemName = item.ItemName,
+                        Count = item.Count,
+                        RequiresFIR = item.RequiresFIR,
+                        RequirementType = item.RequirementType,
+                        SortOrder = item.SortOrder,
+                        DogtagMinLevel = item.DogtagMinLevel
+                    };
+                    dbItem.Id = dbItem.ComputeId();
+                    result.RequiredItems.Add(dbItem);
+                }
+            }
+
+            progress?.Invoke($"Parsed {result.RequiredItems.Count} required items");
+
+            result.Revision = $"{result.Quests.Count}_{DateTime.UtcNow:yyyyMMddHH}";
+            return result;
         }
 
         /// <summary>
@@ -510,7 +1020,9 @@ namespace TarkovDBEditor.Services
             List<DbQuest>? quests,
             List<DbQuestRequirement>? questRequirements,
             List<DbQuestObjective>? questObjectives,
-            StringBuilder logBuilder,
+            List<DbOptionalQuest>? optionalQuests = null,
+            List<DbQuestRequiredItem>? requiredItems = null,
+            StringBuilder? logBuilder = null,
             Action<string>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -528,56 +1040,84 @@ namespace TarkovDBEditor.Services
                 if (items != null && items.Count > 0)
                 {
                     progress?.Invoke($"Updating Items table ({items.Count} items)...");
-                    logBuilder.AppendLine();
-                    logBuilder.AppendLine($"=== Items Table Update ===");
+                    logBuilder?.AppendLine();
+                    logBuilder?.AppendLine($"=== Items Table Update ===");
 
                     await CreateItemsTableIfNotExistsAsync(connection, transaction);
                     await RegisterItemsSchemaAsync(connection, transaction);
                     var itemStats = await UpsertItemsAsync(connection, transaction, items, logBuilder);
 
-                    logBuilder.AppendLine($"Inserted: {itemStats.Inserted}, Updated: {itemStats.Updated}, Deleted: {itemStats.Deleted}");
+                    logBuilder?.AppendLine($"Inserted: {itemStats.Inserted}, Updated: {itemStats.Updated}, Deleted: {itemStats.Deleted}");
                 }
 
                 // Quests 테이블 업데이트
                 if (quests != null && quests.Count > 0)
                 {
                     progress?.Invoke($"Updating Quests table ({quests.Count} quests)...");
-                    logBuilder.AppendLine();
-                    logBuilder.AppendLine($"=== Quests Table Update ===");
+                    logBuilder?.AppendLine();
+                    logBuilder?.AppendLine($"=== Quests Table Update ===");
 
                     await CreateQuestsTableIfNotExistsAsync(connection, transaction);
                     await RegisterQuestsSchemaAsync(connection, transaction);
                     var questStats = await UpsertQuestsAsync(connection, transaction, quests, logBuilder);
 
-                    logBuilder.AppendLine($"Inserted: {questStats.Inserted}, Updated: {questStats.Updated}, Deleted: {questStats.Deleted}");
+                    logBuilder?.AppendLine($"Inserted: {questStats.Inserted}, Updated: {questStats.Updated}, Deleted: {questStats.Deleted}");
                 }
 
                 // QuestRequirements 테이블 업데이트
                 if (questRequirements != null && questRequirements.Count > 0)
                 {
                     progress?.Invoke($"Updating QuestRequirements table ({questRequirements.Count} requirements)...");
-                    logBuilder.AppendLine();
-                    logBuilder.AppendLine($"=== QuestRequirements Table Update ===");
+                    logBuilder?.AppendLine();
+                    logBuilder?.AppendLine($"=== QuestRequirements Table Update ===");
 
                     await CreateQuestRequirementsTableIfNotExistsAsync(connection, transaction);
                     await RegisterQuestRequirementsSchemaAsync(connection, transaction);
                     var reqStats = await UpsertQuestRequirementsAsync(connection, transaction, questRequirements, logBuilder);
 
-                    logBuilder.AppendLine($"Inserted: {reqStats.Inserted}, Updated: {reqStats.Updated}, Deleted: {reqStats.Deleted}");
+                    logBuilder?.AppendLine($"Inserted: {reqStats.Inserted}, Updated: {reqStats.Updated}, Deleted: {reqStats.Deleted}");
                 }
 
                 // QuestObjectives 테이블 업데이트
                 if (questObjectives != null && questObjectives.Count > 0)
                 {
                     progress?.Invoke($"Updating QuestObjectives table ({questObjectives.Count} objectives)...");
-                    logBuilder.AppendLine();
-                    logBuilder.AppendLine($"=== QuestObjectives Table Update ===");
+                    logBuilder?.AppendLine();
+                    logBuilder?.AppendLine($"=== QuestObjectives Table Update ===");
 
                     await CreateQuestObjectivesTableIfNotExistsAsync(connection, transaction);
                     await RegisterQuestObjectivesSchemaAsync(connection, transaction);
                     var objStats = await UpsertQuestObjectivesAsync(connection, transaction, questObjectives, logBuilder);
 
-                    logBuilder.AppendLine($"Inserted: {objStats.Inserted}, Updated: {objStats.Updated}, Deleted: {objStats.Deleted}");
+                    logBuilder?.AppendLine($"Inserted: {objStats.Inserted}, Updated: {objStats.Updated}, Deleted: {objStats.Deleted}");
+                }
+
+                // OptionalQuests 테이블 업데이트 (빈 리스트일 때도 기존 데이터 삭제를 위해 호출)
+                if (optionalQuests != null)
+                {
+                    progress?.Invoke($"Updating OptionalQuests table ({optionalQuests.Count} optional quests)...");
+                    logBuilder?.AppendLine();
+                    logBuilder?.AppendLine($"=== OptionalQuests Table Update ===");
+
+                    await CreateOptionalQuestsTableIfNotExistsAsync(connection, transaction);
+                    await RegisterOptionalQuestsSchemaAsync(connection, transaction);
+                    var optStats = await UpsertOptionalQuestsAsync(connection, transaction, optionalQuests, logBuilder);
+
+                    logBuilder?.AppendLine($"Inserted: {optStats.Inserted}, Updated: {optStats.Updated}, Deleted: {optStats.Deleted}");
+                }
+
+                // QuestRequiredItems 테이블 업데이트
+                if (requiredItems != null)
+                {
+                    progress?.Invoke($"Updating QuestRequiredItems table ({requiredItems.Count} required items)...");
+                    logBuilder?.AppendLine();
+                    logBuilder?.AppendLine($"=== QuestRequiredItems Table Update ===");
+
+                    await CreateQuestRequiredItemsTableIfNotExistsAsync(connection, transaction);
+                    await RegisterQuestRequiredItemsSchemaAsync(connection, transaction);
+                    var itemStats = await UpsertQuestRequiredItemsAsync(connection, transaction, requiredItems, logBuilder);
+
+                    logBuilder?.AppendLine($"Inserted: {itemStats.Inserted}, Updated: {itemStats.Updated}, Deleted: {itemStats.Deleted}");
                 }
 
                 transaction.Commit();
@@ -641,7 +1181,10 @@ namespace TarkovDBEditor.Services
                 new() { Name = "NameJA", DisplayName = "Name (JA)", Type = ColumnType.Text, SortOrder = 5 },
                 new() { Name = "WikiPageLink", DisplayName = "Wiki Link", Type = ColumnType.Text, SortOrder = 6 },
                 new() { Name = "Trader", DisplayName = "Trader", Type = ColumnType.Text, SortOrder = 7 },
-                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 8 }
+                new() { Name = "Location", DisplayName = "Location", Type = ColumnType.Text, SortOrder = 8 },
+                new() { Name = "MinLevel", DisplayName = "Min Level", Type = ColumnType.Integer, SortOrder = 9 },
+                new() { Name = "MinScavKarma", DisplayName = "Min Scav Karma", Type = ColumnType.Integer, SortOrder = 10 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 11 }
             };
 
             var schemaJson = JsonSerializer.Serialize(columns);
@@ -717,6 +1260,7 @@ namespace TarkovDBEditor.Services
                     NameJA TEXT,
                     WikiPageLink TEXT,
                     Trader TEXT,
+                    Location TEXT,
                     MinLevel INTEGER,
                     MinLevelApproved INTEGER NOT NULL DEFAULT 0,
                     MinLevelApprovedAt TEXT,
@@ -737,7 +1281,8 @@ namespace TarkovDBEditor.Services
                 "ALTER TABLE Quests ADD COLUMN MinLevelApprovedAt TEXT",
                 "ALTER TABLE Quests ADD COLUMN MinScavKarma INTEGER",
                 "ALTER TABLE Quests ADD COLUMN MinScavKarmaApproved INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE Quests ADD COLUMN MinScavKarmaApprovedAt TEXT"
+                "ALTER TABLE Quests ADD COLUMN MinScavKarmaApprovedAt TEXT",
+                "ALTER TABLE Quests ADD COLUMN Location TEXT"
             };
 
             foreach (var alterSql in newColumns)
@@ -932,11 +1477,345 @@ namespace TarkovDBEditor.Services
             await UpsertSchemaMetaAsync(connection, transaction, "QuestObjectives", "Quest Objectives", schemaJson);
         }
 
+        private async Task CreateOptionalQuestsTableIfNotExistsAsync(SqliteConnection connection, SqliteTransaction transaction)
+        {
+            var sql = @"
+                CREATE TABLE IF NOT EXISTS OptionalQuests (
+                    Id TEXT PRIMARY KEY,
+                    QuestId TEXT NOT NULL,
+                    AlternativeQuestId TEXT NOT NULL,
+                    ContentHash TEXT,
+                    IsApproved INTEGER NOT NULL DEFAULT 0,
+                    ApprovedAt TEXT,
+                    UpdatedAt TEXT,
+                    FOREIGN KEY (QuestId) REFERENCES Quests(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (AlternativeQuestId) REFERENCES Quests(Id) ON DELETE CASCADE
+                )";
+
+            using var cmd = new SqliteCommand(sql, connection, transaction);
+            await cmd.ExecuteNonQueryAsync();
+
+            // 인덱스 생성
+            var indexSql = @"
+                CREATE INDEX IF NOT EXISTS idx_optquest_questid ON OptionalQuests(QuestId);
+                CREATE INDEX IF NOT EXISTS idx_optquest_altid ON OptionalQuests(AlternativeQuestId)";
+            using var indexCmd = new SqliteCommand(indexSql, connection, transaction);
+            await indexCmd.ExecuteNonQueryAsync();
+        }
+
+        private async Task RegisterOptionalQuestsSchemaAsync(SqliteConnection connection, SqliteTransaction transaction)
+        {
+            var columns = new List<ColumnSchema>
+            {
+                new() { Name = "Id", DisplayName = "ID", Type = ColumnType.Text, IsPrimaryKey = true, SortOrder = 0 },
+                new() { Name = "QuestId", DisplayName = "Quest ID", Type = ColumnType.Text, IsRequired = true, ForeignKeyTable = "Quests", ForeignKeyColumn = "Id", SortOrder = 1 },
+                new() { Name = "AlternativeQuestId", DisplayName = "Alternative Quest ID", Type = ColumnType.Text, IsRequired = true, ForeignKeyTable = "Quests", ForeignKeyColumn = "Id", SortOrder = 2 },
+                new() { Name = "ContentHash", DisplayName = "Content Hash", Type = ColumnType.Text, SortOrder = 3 },
+                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, IsRequired = true, SortOrder = 4 },
+                new() { Name = "ApprovedAt", DisplayName = "Approved At", Type = ColumnType.DateTime, SortOrder = 5 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 6 }
+            };
+
+            var schemaJson = JsonSerializer.Serialize(columns);
+            await UpsertSchemaMetaAsync(connection, transaction, "OptionalQuests", "Optional Quests", schemaJson);
+        }
+
+        private async Task CreateQuestRequiredItemsTableIfNotExistsAsync(SqliteConnection connection, SqliteTransaction transaction)
+        {
+            var sql = @"
+                CREATE TABLE IF NOT EXISTS QuestRequiredItems (
+                    Id TEXT PRIMARY KEY,
+                    QuestId TEXT NOT NULL,
+                    ItemId TEXT,
+                    ItemName TEXT NOT NULL,
+                    Count INTEGER NOT NULL DEFAULT 1,
+                    RequiresFIR INTEGER NOT NULL DEFAULT 0,
+                    RequirementType TEXT NOT NULL DEFAULT 'Required',
+                    SortOrder INTEGER NOT NULL DEFAULT 0,
+                    DogtagMinLevel INTEGER,
+                    ContentHash TEXT,
+                    IsApproved INTEGER NOT NULL DEFAULT 0,
+                    ApprovedAt TEXT,
+                    UpdatedAt TEXT,
+                    FOREIGN KEY (QuestId) REFERENCES Quests(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (ItemId) REFERENCES Items(Id) ON DELETE SET NULL
+                )";
+
+            using var cmd = new SqliteCommand(sql, connection, transaction);
+            await cmd.ExecuteNonQueryAsync();
+
+            // 인덱스 생성
+            var indexSql = @"
+                CREATE INDEX IF NOT EXISTS idx_questreqitem_questid ON QuestRequiredItems(QuestId);
+                CREATE INDEX IF NOT EXISTS idx_questreqitem_itemid ON QuestRequiredItems(ItemId)";
+            using var indexCmd = new SqliteCommand(indexSql, connection, transaction);
+            await indexCmd.ExecuteNonQueryAsync();
+        }
+
+        private async Task RegisterQuestRequiredItemsSchemaAsync(SqliteConnection connection, SqliteTransaction transaction)
+        {
+            var columns = new List<ColumnSchema>
+            {
+                new() { Name = "Id", DisplayName = "ID", Type = ColumnType.Text, IsPrimaryKey = true, SortOrder = 0 },
+                new() { Name = "QuestId", DisplayName = "Quest ID", Type = ColumnType.Text, IsRequired = true, ForeignKeyTable = "Quests", ForeignKeyColumn = "Id", SortOrder = 1 },
+                new() { Name = "ItemId", DisplayName = "Item ID", Type = ColumnType.Text, ForeignKeyTable = "Items", ForeignKeyColumn = "Id", SortOrder = 2 },
+                new() { Name = "ItemName", DisplayName = "Item Name", Type = ColumnType.Text, IsRequired = true, SortOrder = 3 },
+                new() { Name = "Count", DisplayName = "Count", Type = ColumnType.Integer, IsRequired = true, SortOrder = 4 },
+                new() { Name = "RequiresFIR", DisplayName = "FIR", Type = ColumnType.Boolean, IsRequired = true, SortOrder = 5 },
+                new() { Name = "RequirementType", DisplayName = "Type", Type = ColumnType.Text, IsRequired = true, SortOrder = 6 },
+                new() { Name = "SortOrder", DisplayName = "Order", Type = ColumnType.Integer, IsRequired = true, SortOrder = 7 },
+                new() { Name = "DogtagMinLevel", DisplayName = "Dogtag Level", Type = ColumnType.Integer, SortOrder = 8 },
+                new() { Name = "ContentHash", DisplayName = "Content Hash", Type = ColumnType.Text, SortOrder = 9 },
+                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, IsRequired = true, SortOrder = 10 },
+                new() { Name = "ApprovedAt", DisplayName = "Approved At", Type = ColumnType.DateTime, SortOrder = 11 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 12 }
+            };
+
+            var schemaJson = JsonSerializer.Serialize(columns);
+            await UpsertSchemaMetaAsync(connection, transaction, "QuestRequiredItems", "Quest Required Items", schemaJson);
+        }
+
+        private async Task<UpsertStats> UpsertQuestRequiredItemsAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            List<DbQuestRequiredItem> requiredItems,
+            StringBuilder? logBuilder)
+        {
+            var stats = new UpsertStats();
+            var now = DateTime.UtcNow.ToString("o");
+
+            // 기존 데이터 로드 (Id 기준으로 승인 상태 유지)
+            var existingData = new Dictionary<string, (bool IsApproved, string? ApprovedAt, string? ContentHash)>();
+            var existingIds = new HashSet<string>();
+            var selectSql = "SELECT Id, IsApproved, ApprovedAt, ContentHash FROM QuestRequiredItems";
+            using (var selectCmd = new SqliteCommand(selectSql, connection, transaction))
+            using (var reader = await selectCmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var id = reader.GetString(0);
+                    var isApproved = !reader.IsDBNull(1) && reader.GetInt64(1) != 0;
+                    var approvedAt = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    var contentHash = reader.IsDBNull(3) ? null : reader.GetString(3);
+                    existingIds.Add(id);
+                    existingData[id] = (isApproved, approvedAt, contentHash);
+                }
+            }
+
+            // 새로 가져온 required item ID 집합
+            var newIds = new HashSet<string>();
+            foreach (var item in requiredItems)
+            {
+                item.Id = item.ComputeId();
+                newIds.Add(item.Id);
+            }
+
+            // DB에 있지만 새 목록에 없는 항목 삭제
+            var idsToDelete = existingIds.Except(newIds).ToList();
+            foreach (var idToDelete in idsToDelete)
+            {
+                using var deleteCmd = new SqliteCommand("DELETE FROM QuestRequiredItems WHERE Id = @Id", connection, transaction);
+                deleteCmd.Parameters.AddWithValue("@Id", idToDelete);
+                await deleteCmd.ExecuteNonQueryAsync();
+                stats.Deleted++;
+            }
+
+            // Upsert (기존 승인 상태 유지, 변경 시 승인 해제)
+            foreach (var item in requiredItems)
+            {
+                var newHash = item.ComputeContentHash();
+                bool exists = existingIds.Contains(item.Id);
+
+                bool isApproved = false;
+                string? approvedAt = null;
+
+                // 기존 승인 상태 확인
+                if (exists && existingData.TryGetValue(item.Id, out var existing))
+                {
+                    // 해시가 같으면 승인 상태 유지, 다르면 승인 해제
+                    if (existing.ContentHash == newHash && existing.IsApproved)
+                    {
+                        isApproved = true;
+                        approvedAt = existing.ApprovedAt;
+                        stats.Unchanged++;
+                    }
+                    else if (existing.IsApproved)
+                    {
+                        logBuilder?.AppendLine($"  [CHANGED] {item.Id} - approval reset due to content change");
+                    }
+                }
+
+                if (!exists)
+                {
+                    // INSERT
+                    var insertSql = @"
+                        INSERT INTO QuestRequiredItems (Id, QuestId, ItemId, ItemName, Count, RequiresFIR, RequirementType, SortOrder, DogtagMinLevel, ContentHash, IsApproved, ApprovedAt, UpdatedAt)
+                        VALUES (@Id, @QuestId, @ItemId, @ItemName, @Count, @RequiresFIR, @RequirementType, @SortOrder, @DogtagMinLevel, @ContentHash, @IsApproved, @ApprovedAt, @UpdatedAt)";
+
+                    using var insertCmd = new SqliteCommand(insertSql, connection, transaction);
+                    AddRequiredItemParameters(insertCmd, item, newHash, isApproved, approvedAt, now);
+                    await insertCmd.ExecuteNonQueryAsync();
+                    stats.Inserted++;
+                }
+                else
+                {
+                    // UPDATE
+                    var updateSql = @"
+                        UPDATE QuestRequiredItems SET
+                            QuestId = @QuestId, ItemId = @ItemId, ItemName = @ItemName, Count = @Count,
+                            RequiresFIR = @RequiresFIR, RequirementType = @RequirementType, SortOrder = @SortOrder,
+                            DogtagMinLevel = @DogtagMinLevel, ContentHash = @ContentHash,
+                            IsApproved = @IsApproved, ApprovedAt = @ApprovedAt, UpdatedAt = @UpdatedAt
+                        WHERE Id = @Id";
+
+                    using var updateCmd = new SqliteCommand(updateSql, connection, transaction);
+                    AddRequiredItemParameters(updateCmd, item, newHash, isApproved, approvedAt, now);
+                    await updateCmd.ExecuteNonQueryAsync();
+                    stats.Updated++;
+                }
+            }
+
+            logBuilder?.AppendLine($"  RequiredItems: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted, {stats.Unchanged} approvals preserved");
+            return stats;
+        }
+
+        private void AddRequiredItemParameters(SqliteCommand cmd, DbQuestRequiredItem item, string contentHash,
+            bool isApproved, string? approvedAt, string now)
+        {
+            cmd.Parameters.AddWithValue("@Id", item.Id);
+            cmd.Parameters.AddWithValue("@QuestId", item.QuestId);
+            cmd.Parameters.AddWithValue("@ItemId", (object?)item.ItemId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ItemName", item.ItemName);
+            cmd.Parameters.AddWithValue("@Count", item.Count);
+            cmd.Parameters.AddWithValue("@RequiresFIR", item.RequiresFIR ? 1 : 0);
+            cmd.Parameters.AddWithValue("@RequirementType", item.RequirementType);
+            cmd.Parameters.AddWithValue("@SortOrder", item.SortOrder);
+            cmd.Parameters.AddWithValue("@DogtagMinLevel", (object?)item.DogtagMinLevel ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ContentHash", contentHash);
+            cmd.Parameters.AddWithValue("@IsApproved", isApproved ? 1 : 0);
+            cmd.Parameters.AddWithValue("@ApprovedAt", (object?)approvedAt ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UpdatedAt", now);
+        }
+
+        private async Task<UpsertStats> UpsertOptionalQuestsAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            List<DbOptionalQuest> optionalQuests,
+            StringBuilder? logBuilder)
+        {
+            var stats = new UpsertStats();
+            var now = DateTime.UtcNow.ToString("o");
+
+            // 기존 데이터 로드 (Id 기준으로 승인 상태 유지)
+            var existingData = new Dictionary<string, (bool IsApproved, string? ApprovedAt, string? ContentHash)>();
+            var existingIds = new HashSet<string>();
+            var selectSql = "SELECT Id, IsApproved, ApprovedAt, ContentHash FROM OptionalQuests";
+            using (var selectCmd = new SqliteCommand(selectSql, connection, transaction))
+            using (var reader = await selectCmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    var id = reader.GetString(0);
+                    var isApproved = !reader.IsDBNull(1) && reader.GetInt64(1) != 0;
+                    var approvedAt = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    var contentHash = reader.IsDBNull(3) ? null : reader.GetString(3);
+                    existingIds.Add(id);
+                    existingData[id] = (isApproved, approvedAt, contentHash);
+                }
+            }
+
+            // 새로 가져온 optional quest ID 집합
+            var newIds = new HashSet<string>();
+            foreach (var opt in optionalQuests)
+            {
+                opt.Id = opt.ComputeId();
+                newIds.Add(opt.Id);
+            }
+
+            // DB에 있지만 새 목록에 없는 항목 삭제
+            var idsToDelete = existingIds.Except(newIds).ToList();
+            foreach (var idToDelete in idsToDelete)
+            {
+                using var deleteCmd = new SqliteCommand("DELETE FROM OptionalQuests WHERE Id = @Id", connection, transaction);
+                deleteCmd.Parameters.AddWithValue("@Id", idToDelete);
+                await deleteCmd.ExecuteNonQueryAsync();
+                stats.Deleted++;
+            }
+
+            // Upsert (기존 승인 상태 유지, 변경 시 승인 해제)
+            foreach (var opt in optionalQuests)
+            {
+                var newHash = opt.ComputeContentHash();
+                bool exists = existingIds.Contains(opt.Id);
+
+                bool isApproved = false;
+                string? approvedAt = null;
+
+                // 기존 승인 상태 확인
+                if (exists && existingData.TryGetValue(opt.Id, out var existing))
+                {
+                    // 해시가 같으면 승인 상태 유지, 다르면 승인 해제
+                    if (existing.ContentHash == newHash && existing.IsApproved)
+                    {
+                        isApproved = true;
+                        approvedAt = existing.ApprovedAt;
+                        stats.Unchanged++;
+                    }
+                    else if (existing.IsApproved)
+                    {
+                        logBuilder?.AppendLine($"  [CHANGED] {opt.Id} - approval reset due to content change");
+                    }
+                }
+
+                if (!exists)
+                {
+                    // INSERT
+                    var insertSql = @"
+                        INSERT INTO OptionalQuests (Id, QuestId, AlternativeQuestId, ContentHash, IsApproved, ApprovedAt, UpdatedAt)
+                        VALUES (@Id, @QuestId, @AlternativeQuestId, @ContentHash, @IsApproved, @ApprovedAt, @UpdatedAt)";
+
+                    using var insertCmd = new SqliteCommand(insertSql, connection, transaction);
+                    insertCmd.Parameters.AddWithValue("@Id", opt.Id);
+                    insertCmd.Parameters.AddWithValue("@QuestId", opt.QuestId);
+                    insertCmd.Parameters.AddWithValue("@AlternativeQuestId", opt.AlternativeQuestId);
+                    insertCmd.Parameters.AddWithValue("@ContentHash", newHash);
+                    insertCmd.Parameters.AddWithValue("@IsApproved", isApproved ? 1 : 0);
+                    insertCmd.Parameters.AddWithValue("@ApprovedAt", (object?)approvedAt ?? DBNull.Value);
+                    insertCmd.Parameters.AddWithValue("@UpdatedAt", now);
+                    await insertCmd.ExecuteNonQueryAsync();
+                    stats.Inserted++;
+                }
+                else
+                {
+                    // UPDATE
+                    var updateSql = @"
+                        UPDATE OptionalQuests SET
+                            QuestId = @QuestId, AlternativeQuestId = @AlternativeQuestId, ContentHash = @ContentHash,
+                            IsApproved = @IsApproved, ApprovedAt = @ApprovedAt, UpdatedAt = @UpdatedAt
+                        WHERE Id = @Id";
+
+                    using var updateCmd = new SqliteCommand(updateSql, connection, transaction);
+                    updateCmd.Parameters.AddWithValue("@Id", opt.Id);
+                    updateCmd.Parameters.AddWithValue("@QuestId", opt.QuestId);
+                    updateCmd.Parameters.AddWithValue("@AlternativeQuestId", opt.AlternativeQuestId);
+                    updateCmd.Parameters.AddWithValue("@ContentHash", newHash);
+                    updateCmd.Parameters.AddWithValue("@IsApproved", isApproved ? 1 : 0);
+                    updateCmd.Parameters.AddWithValue("@ApprovedAt", (object?)approvedAt ?? DBNull.Value);
+                    updateCmd.Parameters.AddWithValue("@UpdatedAt", now);
+                    await updateCmd.ExecuteNonQueryAsync();
+                    stats.Updated++;
+                }
+            }
+
+            logBuilder?.AppendLine($"  OptionalQuests: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted, {stats.Unchanged} approvals preserved");
+            return stats;
+        }
+
         private async Task<UpsertStats> UpsertQuestObjectivesAsync(
             SqliteConnection connection,
             SqliteTransaction transaction,
             List<DbQuestObjective> objectives,
-            StringBuilder logBuilder)
+            StringBuilder? logBuilder)
         {
             var stats = new UpsertStats();
             var now = DateTime.UtcNow.ToString("o");
@@ -1000,7 +1879,7 @@ namespace TarkovDBEditor.Services
                     }
                     else if (existing.IsApproved)
                     {
-                        logBuilder.AppendLine($"  [CHANGED] {obj.Id} - approval reset due to content change");
+                        logBuilder?.AppendLine($"  [CHANGED] {obj.Id} - approval reset due to content change");
                     }
 
                     // 좌표 정보는 항상 유지 (사용자가 입력한 값)
@@ -1046,7 +1925,7 @@ namespace TarkovDBEditor.Services
                 }
             }
 
-            logBuilder.AppendLine($"  Objectives: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted, {stats.Unchanged} approvals preserved");
+            logBuilder?.AppendLine($"  Objectives: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted, {stats.Unchanged} approvals preserved");
             return stats;
         }
 
@@ -1077,7 +1956,7 @@ namespace TarkovDBEditor.Services
             SqliteConnection connection,
             SqliteTransaction transaction,
             List<DbItem> items,
-            StringBuilder logBuilder)
+            StringBuilder? logBuilder)
         {
             var stats = new UpsertStats();
             var now = DateTime.UtcNow.ToString("o");
@@ -1108,7 +1987,7 @@ namespace TarkovDBEditor.Services
                     deleteCmd.Parameters.AddWithValue("@Id", idToDelete);
                     await deleteCmd.ExecuteNonQueryAsync();
                     stats.Deleted++;
-                    logBuilder.AppendLine($"  [DELETE] Id: {idToDelete}");
+                    logBuilder?.AppendLine($"  [DELETE] Id: {idToDelete}");
                 }
             }
 
@@ -1170,7 +2049,7 @@ namespace TarkovDBEditor.Services
             SqliteConnection connection,
             SqliteTransaction transaction,
             List<DbQuest> quests,
-            StringBuilder logBuilder)
+            StringBuilder? logBuilder)
         {
             var stats = new UpsertStats();
             var now = DateTime.UtcNow.ToString("o");
@@ -1201,7 +2080,7 @@ namespace TarkovDBEditor.Services
                     deleteCmd.Parameters.AddWithValue("@Id", idToDelete);
                     await deleteCmd.ExecuteNonQueryAsync();
                     stats.Deleted++;
-                    logBuilder.AppendLine($"  [DELETE] Id: {idToDelete}");
+                    logBuilder?.AppendLine($"  [DELETE] Id: {idToDelete}");
                 }
             }
 
@@ -1212,14 +2091,14 @@ namespace TarkovDBEditor.Services
                 if (!exists)
                 {
                     var insertSql = @"
-                        INSERT INTO Quests (Id, BsgId, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, MinLevel, MinScavKarma, UpdatedAt)
-                        VALUES (@Id, @BsgId, @Name, @NameEN, @NameKO, @NameJA, @WikiPageLink, @Trader, @MinLevel, @MinScavKarma, @UpdatedAt)";
+                        INSERT INTO Quests (Id, BsgId, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, Location, MinLevel, MinScavKarma, UpdatedAt)
+                        VALUES (@Id, @BsgId, @Name, @NameEN, @NameKO, @NameJA, @WikiPageLink, @Trader, @Location, @MinLevel, @MinScavKarma, @UpdatedAt)";
 
                     using var insertCmd = new SqliteCommand(insertSql, connection, transaction);
                     AddQuestParameters(insertCmd, quest, now);
                     await insertCmd.ExecuteNonQueryAsync();
                     stats.Inserted++;
-                    logBuilder.AppendLine($"  [INSERT] {quest.Name}");
+                    logBuilder?.AppendLine($"  [INSERT] {quest.Name}");
                 }
                 else
                 {
@@ -1227,7 +2106,7 @@ namespace TarkovDBEditor.Services
                     var updateSql = @"
                         UPDATE Quests SET
                             BsgId = @BsgId, Name = @Name, NameEN = @NameEN, NameKO = @NameKO, NameJA = @NameJA,
-                            WikiPageLink = @WikiPageLink, Trader = @Trader, MinLevel = @MinLevel, MinScavKarma = @MinScavKarma, UpdatedAt = @UpdatedAt
+                            WikiPageLink = @WikiPageLink, Trader = @Trader, Location = @Location, MinLevel = @MinLevel, MinScavKarma = @MinScavKarma, UpdatedAt = @UpdatedAt
                         WHERE Id = @Id";
 
                     using var updateCmd = new SqliteCommand(updateSql, connection, transaction);
@@ -1250,6 +2129,7 @@ namespace TarkovDBEditor.Services
             cmd.Parameters.AddWithValue("@NameJA", (object?)quest.NameJA ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@WikiPageLink", (object?)quest.WikiPageLink ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Trader", (object?)quest.Trader ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Location", (object?)quest.Location ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@MinLevel", (object?)quest.MinLevel ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@MinScavKarma", (object?)quest.MinScavKarma ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UpdatedAt", now);
@@ -1259,7 +2139,7 @@ namespace TarkovDBEditor.Services
             SqliteConnection connection,
             SqliteTransaction transaction,
             List<DbQuestRequirement> requirements,
-            StringBuilder logBuilder)
+            StringBuilder? logBuilder)
         {
             var stats = new UpsertStats();
             var now = DateTime.UtcNow.ToString("o");
@@ -1322,7 +2202,7 @@ namespace TarkovDBEditor.Services
                     else if (existing.IsApproved)
                     {
                         // 승인되어 있었지만 내용이 변경됨
-                        logBuilder.AppendLine($"  [CHANGED] {req.Id} - approval reset due to content change");
+                        logBuilder?.AppendLine($"  [CHANGED] {req.Id} - approval reset due to content change");
                     }
                 }
 
@@ -1355,7 +2235,7 @@ namespace TarkovDBEditor.Services
                 }
             }
 
-            logBuilder.AppendLine($"  Requirements: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted, {stats.Unchanged} approvals preserved");
+            logBuilder?.AppendLine($"  Requirements: {stats.Inserted} inserted, {stats.Updated} updated, {stats.Deleted} deleted, {stats.Unchanged} approvals preserved");
             return stats;
         }
 
@@ -1429,6 +2309,47 @@ namespace TarkovDBEditor.Services
                 var trader = match.Groups[1].Value.Trim();
                 if (!string.IsNullOrEmpty(trader))
                     return trader;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// PageContent에서 Location 파싱 - 캐시 데이터에서 항상 실행
+        /// </summary>
+        private static string? ExtractLocationFromContent(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return null;
+
+            // |location = [[Woods]] 또는 |location = [[Customs]], [[Woods]] 형식
+            var match = System.Text.RegularExpressions.Regex.Match(
+                content, @"\|location\s*=\s*(.+?)(?=\n\||\n\}|\}\})",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+
+            if (match.Success)
+            {
+                var locationValue = match.Groups[1].Value.Trim();
+
+                // [[Location]] 형식에서 이름만 추출 (여러 개일 수 있음)
+                var locations = new List<string>();
+                var linkMatches = System.Text.RegularExpressions.Regex.Matches(
+                    locationValue, @"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]");
+
+                foreach (System.Text.RegularExpressions.Match linkMatch in linkMatches)
+                {
+                    var loc = linkMatch.Groups[1].Value.Trim();
+                    if (!string.IsNullOrEmpty(loc))
+                        locations.Add(loc);
+                }
+
+                if (locations.Count > 0)
+                    return string.Join(", ", locations);
+
+                // 링크 없이 직접 텍스트만 있는 경우
+                locationValue = System.Text.RegularExpressions.Regex.Replace(locationValue, @"\[\[|\]\]", "").Trim();
+                if (!string.IsNullOrEmpty(locationValue))
+                    return locationValue;
             }
 
             return null;
@@ -1526,6 +2447,8 @@ namespace TarkovDBEditor.Services
         public List<DbQuest> Quests { get; set; } = new();
         public List<DbQuestRequirement> Requirements { get; set; } = new();
         public List<DbQuestObjective> Objectives { get; set; } = new();
+        public List<DbOptionalQuest> OptionalQuests { get; set; } = new();
+        public List<DbQuestRequiredItem> RequiredItems { get; set; } = new();
         public string Revision { get; set; } = "";
     }
 
@@ -1556,6 +2479,7 @@ namespace TarkovDBEditor.Services
         public string? NameJA { get; set; }
         public string? WikiPageLink { get; set; }
         public string? Trader { get; set; }
+        public string? Location { get; set; }
         public int? MinLevel { get; set; }
         public int? MinScavKarma { get; set; }
     }
@@ -1600,6 +2524,42 @@ namespace TarkovDBEditor.Services
         public string ComputeContentHash()
         {
             var data = $"{QuestId}|{RequiredQuestId}|{RequirementType}|{DelayMinutes}|{GroupId}";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+            return Convert.ToBase64String(hash).Substring(0, 16);
+        }
+    }
+
+    /// <summary>
+    /// 선택적 퀘스트 (Other Choices) 데이터 모델
+    /// 같은 아이템을 제출해 완료할 수 있는 대체 퀘스트들
+    /// </summary>
+    public class DbOptionalQuest
+    {
+        public string Id { get; set; } = ""; // Hash-based ID (QuestId + AlternativeQuestId)
+        public string QuestId { get; set; } = "";           // 현재 퀘스트 ID
+        public string AlternativeQuestId { get; set; } = ""; // 대체 퀘스트 ID
+        public string? ContentHash { get; set; }            // 변경 감지용 해시
+        public bool IsApproved { get; set; }                // 사용자 승인 여부
+        public DateTime? ApprovedAt { get; set; }           // 승인 시간
+
+        /// <summary>
+        /// 고유 ID 생성 (QuestId + AlternativeQuestId 기반 해시)
+        /// </summary>
+        public string ComputeId()
+        {
+            var data = $"OPT|{QuestId}|{AlternativeQuestId}";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+            return Convert.ToBase64String(hash).Substring(0, 22).Replace("/", "_").Replace("+", "-");
+        }
+
+        /// <summary>
+        /// 현재 데이터의 해시 생성 (변경 감지용)
+        /// </summary>
+        public string ComputeContentHash()
+        {
+            var data = $"{QuestId}|{AlternativeQuestId}";
             using var sha = System.Security.Cryptography.SHA256.Create();
             var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
             return Convert.ToBase64String(hash).Substring(0, 16);
@@ -1659,6 +2619,48 @@ namespace TarkovDBEditor.Services
         public string ComputeContentHash()
         {
             var data = $"{QuestId}|{SortOrder}|{ObjectiveType}|{Description}|{TargetType}|{TargetCount}|{ItemName}|{RequiresFIR}|{MapName}|{LocationName}|{Conditions}";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+            return Convert.ToBase64String(hash).Substring(0, 16);
+        }
+    }
+
+    /// <summary>
+    /// 퀘스트 필요 아이템 데이터 모델 (Related Quest Items 테이블에서 파싱)
+    /// </summary>
+    public class DbQuestRequiredItem
+    {
+        public string Id { get; set; } = ""; // Hash-based ID
+        public string QuestId { get; set; } = "";
+        public string? ItemId { get; set; }      // FK: Items.Id (매칭된 경우)
+        public string ItemName { get; set; } = ""; // Wiki 아이템 이름
+        public int Count { get; set; } = 1;      // 필요 수량
+        public bool RequiresFIR { get; set; }    // Found in Raid 필요 여부
+        public string RequirementType { get; set; } = "Required"; // Handover, Required, Optional
+        public int SortOrder { get; set; }       // 정렬 순서
+        public int? DogtagMinLevel { get; set; } // 도그태그 최소 레벨
+        public string? ContentHash { get; set; } // 변경 감지용 해시
+        public bool IsApproved { get; set; }     // 사용자 승인 여부
+        public DateTime? ApprovedAt { get; set; } // 승인 시간
+
+        /// <summary>
+        /// 고유 ID 생성 (QuestId + ItemName + RequirementType + RequiresFIR + SortOrder 기반 해시)
+        /// SortOrder를 포함하여 같은 퀘스트에서 같은 아이템이 여러 번 나와도 고유 ID 보장
+        /// </summary>
+        public string ComputeId()
+        {
+            var data = $"ITEM|{QuestId}|{ItemName}|{RequirementType}|{RequiresFIR}|{SortOrder}";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+            return Convert.ToBase64String(hash).Substring(0, 22).Replace("/", "_").Replace("+", "-");
+        }
+
+        /// <summary>
+        /// 현재 데이터의 해시 생성 (변경 감지용)
+        /// </summary>
+        public string ComputeContentHash()
+        {
+            var data = $"{QuestId}|{ItemName}|{Count}|{RequiresFIR}|{RequirementType}|{DogtagMinLevel}";
             using var sha = System.Security.Cryptography.SHA256.Create();
             var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
             return Convert.ToBase64String(hash).Substring(0, 16);

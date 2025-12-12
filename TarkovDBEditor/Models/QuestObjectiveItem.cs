@@ -43,16 +43,30 @@ namespace TarkovDBEditor.Models
             set { _z = value; OnPropertyChanged(); }
         }
 
+        private string? _floorId;
+        /// <summary>
+        /// 이 포인트가 속한 층의 ID (예: "main", "basement", "level2")
+        /// null이면 단일 층 맵이거나 층 정보가 없는 레거시 데이터
+        /// </summary>
+        public string? FloorId
+        {
+            get => _floorId;
+            set { _floorId = value; OnPropertyChanged(); OnPropertyChanged(nameof(Display)); }
+        }
+
         [JsonIgnore]
-        public string Display => $"({X:F1}, {Y:F1}, {Z:F1})";
+        public string Display => FloorId != null
+            ? $"({X:F1}, {Y:F1}, {Z:F1}) [{FloorId}]"
+            : $"({X:F1}, {Y:F1}, {Z:F1})";
 
         public LocationPoint() { }
 
-        public LocationPoint(double x, double y, double z = 0)
+        public LocationPoint(double x, double y, double z = 0, string? floorId = null)
         {
             X = x;
             Y = y;
             Z = z;
+            FloorId = floorId;
         }
     }
 
@@ -69,7 +83,7 @@ namespace TarkovDBEditor.Models
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
-        public long Id { get; set; }
+        public string Id { get; set; } = "";
         public string QuestId { get; set; } = "";
 
         private int _sortOrder;
@@ -135,7 +149,7 @@ namespace TarkovDBEditor.Models
         public string? MapName
         {
             get => _mapName;
-            set { _mapName = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasLocation)); }
+            set { _mapName = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasLocation)); OnPropertyChanged(nameof(EffectiveMapName)); }
         }
 
         private string? _locationName;
@@ -144,6 +158,23 @@ namespace TarkovDBEditor.Models
             get => _locationName;
             set { _locationName = value; OnPropertyChanged(); }
         }
+
+        // 퀘스트의 Location (Fallback용 - Quest Item의 경우 Quest Location을 맵으로 사용)
+        private string? _questLocation;
+        /// <summary>
+        /// 퀘스트 자체의 Location. Quest Item(예: Lab Journal)의 경우
+        /// MapName이 없어도 QuestLocation을 맵으로 사용하여 위치 포인트를 찍을 수 있습니다.
+        /// </summary>
+        public string? QuestLocation
+        {
+            get => _questLocation;
+            set { _questLocation = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasLocation)); OnPropertyChanged(nameof(EffectiveMapName)); }
+        }
+
+        /// <summary>
+        /// 실제 사용할 맵 이름 (MapName이 있으면 MapName, 없으면 QuestLocation)
+        /// </summary>
+        public string? EffectiveMapName => !string.IsNullOrEmpty(MapName) ? MapName : QuestLocation;
 
         // 좌표 집합 (다각형 영역 정의)
         private ObservableCollection<LocationPoint> _locationPoints = new();
@@ -237,7 +268,10 @@ namespace TarkovDBEditor.Models
 
         public bool HasItem => !string.IsNullOrEmpty(ItemId) || !string.IsNullOrEmpty(ItemName);
 
-        public bool HasLocation => !string.IsNullOrEmpty(MapName);
+        /// <summary>
+        /// 맵 위치가 있는지 여부. MapName이 있거나 QuestLocation이 있으면 true
+        /// </summary>
+        public bool HasLocation => !string.IsNullOrEmpty(EffectiveMapName);
 
         public bool HasCoordinates => LocationPoints.Count > 0;
 

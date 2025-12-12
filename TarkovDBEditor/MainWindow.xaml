@@ -45,12 +45,15 @@
                 <MenuItem Header="Export Wiki Item Categories..." Click="ExportWikiItemCategories_Click"/>
                 <MenuItem Header="Export Wiki Quests..." Click="ExportWikiQuests_Click"/>
                 <Separator/>
-                <MenuItem Header="Refresh Data..." Click="RefreshData_Click"/>
+                <MenuItem Header="Cache Tarkov Dev Data..." Click="CacheTarkovDevData_Click"/>
+                <MenuItem Header="Fetch Wiki Data..." Click="FetchWikiData_Click" ToolTip="Fetch fresh data from Wiki (slow, requires internet)"/>
+                <MenuItem Header="Refresh Data (from Cache)" Click="RefreshDataFromCache_Click" ToolTip="Update DB using cached Wiki data (fast, no internet required)"/>
                 <Separator/>
                 <MenuItem Header="Map Editor..." Click="TestMap_Click"/>
             </MenuItem>
             <MenuItem Header="Tools">
                 <MenuItem Header="Quest Requirements Validator..." Click="OpenQuestRequirementsValidator_Click"/>
+                <MenuItem Header="Map Preview..." Click="OpenMapPreview_Click"/>
             </MenuItem>
         </Menu>
 

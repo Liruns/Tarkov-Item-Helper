@@ -105,7 +105,9 @@ public partial class QuestRequirementsView : Window
     {
         if (sender is CheckBox cb && cb.DataContext is QuestRequirementItem req)
         {
-            await _viewModel.UpdateApprovalAsync(req.Id, req.IsApproved);
+            var isApproved = cb.IsChecked ?? false;
+            req.IsApproved = isApproved; // Update model immediately
+            await _viewModel.UpdateApprovalAsync(req.Id, isApproved);
             UpdateProgressText();
         }
     }
@@ -113,8 +115,10 @@ public partial class QuestRequirementsView : Window
     private async void MinLevelCheckbox_Changed(object sender, RoutedEventArgs e)
     {
         if (_viewModel.SelectedQuest == null) return;
+        if (sender is not CheckBox cb) return;
 
-        var isApproved = _viewModel.SelectedQuest.MinLevelApproved;
+        var isApproved = cb.IsChecked ?? false;
+        _viewModel.SelectedQuest.MinLevelApproved = isApproved; // Update model immediately
         await _viewModel.UpdateMinLevelApprovalAsync(_viewModel.SelectedQuest.Id, isApproved);
         UpdateProgressText();
         StatusText.Text = isApproved
@@ -125,8 +129,10 @@ public partial class QuestRequirementsView : Window
     private async void MinScavKarmaCheckbox_Changed(object sender, RoutedEventArgs e)
     {
         if (_viewModel.SelectedQuest == null) return;
+        if (sender is not CheckBox cb) return;
 
-        var isApproved = _viewModel.SelectedQuest.MinScavKarmaApproved;
+        var isApproved = cb.IsChecked ?? false;
+        _viewModel.SelectedQuest.MinScavKarmaApproved = isApproved; // Update model immediately
         await _viewModel.UpdateMinScavKarmaApprovalAsync(_viewModel.SelectedQuest.Id, isApproved);
         UpdateProgressText();
         StatusText.Text = isApproved
@@ -161,6 +167,37 @@ public partial class QuestRequirementsView : Window
                 await _viewModel.UpdateApprovalAsync(req.Id, true);
             }
         }
+
+        // Approve quest objectives
+        foreach (var obj in _viewModel.SelectedQuestObjectives)
+        {
+            if (!obj.IsApproved)
+            {
+                obj.IsApproved = true;
+                await _viewModel.UpdateObjectiveApprovalAsync(obj.Id, true);
+            }
+        }
+
+        // Approve optional quests (other choices)
+        foreach (var opt in _viewModel.SelectedOptionalQuests)
+        {
+            if (!opt.IsApproved)
+            {
+                opt.IsApproved = true;
+                await _viewModel.UpdateOptionalQuestApprovalAsync(opt.Id, true);
+            }
+        }
+
+        // Approve required items
+        foreach (var item in _viewModel.SelectedRequiredItems)
+        {
+            if (!item.IsApproved)
+            {
+                item.IsApproved = true;
+                await _viewModel.UpdateRequiredItemApprovalAsync(item.Id, true);
+            }
+        }
+
         UpdateProgressText();
         StatusText.Text = $"Approved all requirements for {_viewModel.SelectedQuest.Name}";
     }
@@ -192,6 +229,37 @@ public partial class QuestRequirementsView : Window
                 await _viewModel.UpdateApprovalAsync(req.Id, false);
             }
         }
+
+        // Unapprove quest objectives
+        foreach (var obj in _viewModel.SelectedQuestObjectives)
+        {
+            if (obj.IsApproved)
+            {
+                obj.IsApproved = false;
+                await _viewModel.UpdateObjectiveApprovalAsync(obj.Id, false);
+            }
+        }
+
+        // Unapprove optional quests (other choices)
+        foreach (var opt in _viewModel.SelectedOptionalQuests)
+        {
+            if (opt.IsApproved)
+            {
+                opt.IsApproved = false;
+                await _viewModel.UpdateOptionalQuestApprovalAsync(opt.Id, false);
+            }
+        }
+
+        // Unapprove required items
+        foreach (var item in _viewModel.SelectedRequiredItems)
+        {
+            if (item.IsApproved)
+            {
+                item.IsApproved = false;
+                await _viewModel.UpdateRequiredItemApprovalAsync(item.Id, false);
+            }
+        }
+
         UpdateProgressText();
         StatusText.Text = $"Unapproved all requirements for {_viewModel.SelectedQuest.Name}";
     }
@@ -200,8 +268,11 @@ public partial class QuestRequirementsView : Window
     {
         if (sender is CheckBox cb && cb.DataContext is QuestObjectiveItem obj)
         {
-            await _viewModel.UpdateObjectiveApprovalAsync(obj.Id, obj.IsApproved);
-            StatusText.Text = obj.IsApproved
+            var isApproved = cb.IsChecked ?? false;
+            obj.IsApproved = isApproved; // Update model immediately
+            await _viewModel.UpdateObjectiveApprovalAsync(obj.Id, isApproved);
+            UpdateProgressText();
+            StatusText.Text = isApproved
                 ? $"Approved objective: {obj.Description.Substring(0, Math.Min(50, obj.Description.Length))}..."
                 : $"Unapproved objective";
         }
@@ -217,10 +288,10 @@ public partial class QuestRequirementsView : Window
         if (ObjectivesList.SelectedItem is not QuestObjectiveItem selectedObj)
             return;
 
-        // Check if the objective has a map
-        if (string.IsNullOrEmpty(selectedObj.MapName))
+        // Check if the objective has an effective map (MapName or QuestLocation)
+        if (string.IsNullOrEmpty(selectedObj.EffectiveMapName))
         {
-            MessageBox.Show("This objective does not have a map location specified.",
+            MessageBox.Show("This objective does not have a map location specified.\nThe quest also doesn't have a location set.",
                 "No Map", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -310,5 +381,44 @@ public partial class QuestRequirementsView : Window
             ? selectedObj.Description.Substring(0, 50) + "..."
             : selectedObj.Description;
         StatusText.Text = $"Location points saved ({selectedObj.LocationPoints.Count} points) for: {desc}";
+    }
+
+    private async void OptionalQuestApprovalCheckbox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox cb && cb.DataContext is OptionalQuestItem opt)
+        {
+            var isApproved = cb.IsChecked ?? false;
+            opt.IsApproved = isApproved; // Update model immediately
+            await _viewModel.UpdateOptionalQuestApprovalAsync(opt.Id, isApproved);
+            UpdateProgressText();
+            StatusText.Text = isApproved
+                ? $"Approved alternative quest: {opt.AlternativeQuestName}"
+                : $"Unapproved alternative quest: {opt.AlternativeQuestName}";
+        }
+    }
+
+    private void OpenAlternativeQuestWiki_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is OptionalQuestItem opt)
+        {
+            if (!string.IsNullOrEmpty(opt.AlternativeQuestWikiLink))
+            {
+                OpenUrl(opt.AlternativeQuestWikiLink);
+            }
+        }
+    }
+
+    private async void RequiredItemApprovalCheckbox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox cb && cb.DataContext is QuestRequiredItemViewModel item)
+        {
+            var isApproved = cb.IsChecked ?? false;
+            item.IsApproved = isApproved; // Update model immediately
+            await _viewModel.UpdateRequiredItemApprovalAsync(item.Id, isApproved);
+            UpdateProgressText();
+            StatusText.Text = isApproved
+                ? $"Approved required item: {item.ItemName}"
+                : $"Unapproved required item: {item.ItemName}";
+        }
     }
 }

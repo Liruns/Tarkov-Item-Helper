@@ -34,7 +34,12 @@
       "imageWidth": 4000,
       "imageHeight": 3900,
       "aliases": ["interchange", "INTERCHANGE"],
-      "calibratedTransform": [-4.3629135184885035, -0.46787647488898804, 0.01740221516511105, 4.08171562795115, 2309.0213766878187, 1987.6213844573472]
+      "calibratedTransform": [-4.3629135184885035, -0.46787647488898804, 0.01740221516511105, 4.08171562795115, 2309.0213766878187, 1987.6213844573472],
+      "floors": [
+        {"layerId": "main", "displayName": "Ground Floor", "order": 0, "isDefault": true},
+        {"layerId": "level2", "displayName": "Level 2", "order": 1, "isDefault": false},
+        {"layerId": "level3", "displayName": "Level 3", "order": 2, "isDefault": false}
+      ]
     },
     {
       "key": "Reserve",
@@ -43,7 +48,14 @@
       "imageWidth": 3200,
       "imageHeight": 3000,
       "aliases": ["reserve", "RESERVE", "RezervBase"],
-      "calibratedTransform": [-4.659551818591078, 1.4968674164044333, 1.4130686420734615, 6.194225988393516, 1605.6973392433374, 1531.5214718745203]
+      "calibratedTransform": [-4.659551818591078, 1.4968674164044333, 1.4130686420734615, 6.194225988393516, 1605.6973392433374, 1531.5214718745203],
+      "floors": [
+        {"layerId": "bunker", "displayName": "Bunker", "order": -1, "isDefault": false},
+        {"layerId": "main", "displayName": "Ground Floor", "order": 0, "isDefault": true},
+        {"layerId": "level2", "displayName": "Level 2", "order": 1, "isDefault": false},
+        {"layerId": "level3", "displayName": "Level 3", "order": 2, "isDefault": false},
+        {"layerId": "level4", "displayName": "Level 4", "order": 3, "isDefault": false}
+      ]
     },
     {
       "key": "Lighthouse",
@@ -70,7 +82,13 @@
       "imageWidth": 3600,
       "imageHeight": 3600,
       "aliases": ["factory", "FACTORY", "factory4_day", "factory4_night", "Night Factory"],
-      "calibratedTransform": [0.2798878415258037, -21.627674282585662, -22.72576612862695, 0.024192513858156503, 1780.53763466516, 1900.045614685979]
+      "calibratedTransform": [0.2798878415258037, -21.627674282585662, -22.72576612862695, 0.024192513858156503, 1780.53763466516, 1900.045614685979],
+      "floors": [
+        {"layerId": "basement", "displayName": "Basement", "order": -1, "isDefault": false},
+        {"layerId": "main", "displayName": "Ground Floor", "order": 0, "isDefault": true},
+        {"layerId": "level2", "displayName": "Level 2", "order": 1, "isDefault": false},
+        {"layerId": "level3", "displayName": "Level 3", "order": 2, "isDefault": false}
+      ]
     },
     {
       "key": "GroundZero",
@@ -88,7 +106,12 @@
       "imageWidth": 5500,
       "imageHeight": 4200,
       "aliases": ["labs", "LABS", "laboratory", "the-lab", "The Lab"],
-      "calibratedTransform": [-0.06475489648812036, 15.461642379397855, 18.704109904840276, 0.31533351406309695, 7946.959753722009, 5877.909736136232]
+      "calibratedTransform": [-0.06475489648812036, 15.461642379397855, 18.704109904840276, 0.31533351406309695, 7946.959753722009, 5877.909736136232],
+      "floors": [
+        {"layerId": "basement", "displayName": "Basement", "order": -1, "isDefault": false},
+        {"layerId": "main", "displayName": "Main Floor", "order": 0, "isDefault": true},
+        {"layerId": "level2", "displayName": "Level 2", "order": 1, "isDefault": false}
+      ]
     },
     {
       "key": "Labyrinth",

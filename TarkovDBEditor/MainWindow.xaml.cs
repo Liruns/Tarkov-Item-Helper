@@ -331,7 +331,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RefreshData_Click(object sender, RoutedEventArgs e)
+    private async void FetchWikiData_Click(object sender, RoutedEventArgs e)
     {
         // 데이터베이스가 연결되어 있는지 확인
         if (!DatabaseService.Instance.IsConnected)
@@ -344,7 +344,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        ViewModel.StatusMessage = "Refreshing data from Wiki...";
+        ViewModel.StatusMessage = "Fetching fresh data from Wiki (this may take a while)...";
         IsEnabled = false;
 
         try
@@ -360,7 +360,7 @@ public partial class MainWindow : Window
                 ViewModel.LoadTables();
 
                 var message = new System.Text.StringBuilder();
-                message.AppendLine("Data refresh completed successfully!");
+                message.AppendLine("Wiki data fetch completed successfully!");
                 message.AppendLine();
                 message.AppendLine($"Duration: {(result.CompletedAt - result.StartedAt).TotalSeconds:F1} seconds");
                 message.AppendLine();
@@ -375,6 +375,77 @@ public partial class MainWindow : Window
                 else
                     message.AppendLine("Quests: No changes detected");
 
+                message.AppendLine();
+                message.AppendLine($"Log saved to: {result.LogPath}");
+
+                ViewModel.StatusMessage = $"Fetch complete: {result.ItemsCount} items, {result.QuestsCount} quests";
+
+                MessageBox.Show(
+                    message.ToString(),
+                    "Fetch Wiki Data Complete",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            else
+            {
+                ViewModel.StatusMessage = $"Fetch failed: {result.ErrorMessage}";
+                MessageBox.Show(
+                    $"Fetch failed:\n{result.ErrorMessage}\n\nLog saved to: {result.LogPath}",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = $"Fetch failed: {ex.Message}";
+            MessageBox.Show(
+                $"Fetch failed:\n{ex.Message}",
+                "Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsEnabled = true;
+        }
+    }
+
+    private async void RefreshDataFromCache_Click(object sender, RoutedEventArgs e)
+    {
+        // 데이터베이스가 연결되어 있는지 확인
+        if (!DatabaseService.Instance.IsConnected)
+        {
+            MessageBox.Show(
+                "Please open or create a database first.",
+                "No Database",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        ViewModel.StatusMessage = "Refreshing data from cache...";
+        IsEnabled = false;
+
+        try
+        {
+            using var refreshService = new RefreshDataService();
+            var result = await refreshService.RefreshDataFromCacheAsync(
+                DatabaseService.Instance.DatabasePath,
+                progress => Dispatcher.Invoke(() => ViewModel.StatusMessage = progress));
+
+            if (result.Success)
+            {
+                // 테이블 목록 새로고침
+                ViewModel.LoadTables();
+
+                var message = new System.Text.StringBuilder();
+                message.AppendLine("Data refresh from cache completed successfully!");
+                message.AppendLine();
+                message.AppendLine($"Duration: {(result.CompletedAt - result.StartedAt).TotalSeconds:F1} seconds");
+                message.AppendLine();
+                message.AppendLine($"Items: {result.ItemsCount} items");
+                message.AppendLine($"Quests: {result.QuestsCount} quests");
                 message.AppendLine();
                 message.AppendLine($"Log saved to: {result.LogPath}");
 
@@ -506,5 +577,101 @@ public partial class MainWindow : Window
     {
         var window = new MapEditorWindow { Owner = this };
         window.Show();
+    }
+
+    private void OpenMapPreview_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new MapPreviewWindow { Owner = this };
+        window.Show();
+    }
+
+    private async void CacheTarkovDevData_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.StatusMessage = "Checking tarkov.dev cache status...";
+
+        using var devService = new TarkovDevDataService();
+        var cacheInfo = devService.GetCacheInfo();
+
+        // 캐시 상태 표시
+        var cacheStatus = new System.Text.StringBuilder();
+        cacheStatus.AppendLine("Current tarkov.dev cache status:");
+        cacheStatus.AppendLine();
+
+        if (cacheInfo.HasItemsCache)
+            cacheStatus.AppendLine($"Items: {cacheInfo.ItemsCount} items (cached at {cacheInfo.ItemsCachedAt:yyyy-MM-dd HH:mm})");
+        else
+            cacheStatus.AppendLine("Items: No cache");
+
+        if (cacheInfo.HasQuestsCache)
+            cacheStatus.AppendLine($"Quests: {cacheInfo.QuestsCount} quests (cached at {cacheInfo.QuestsCachedAt:yyyy-MM-dd HH:mm})");
+        else
+            cacheStatus.AppendLine("Quests: No cache");
+
+        cacheStatus.AppendLine();
+        cacheStatus.AppendLine("Do you want to download and cache data from tarkov.dev?");
+        cacheStatus.AppendLine("(This will replace existing cache)");
+
+        var result = MessageBox.Show(
+            cacheStatus.ToString(),
+            "Cache Tarkov Dev Data",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes)
+        {
+            ViewModel.StatusMessage = "Cache operation cancelled";
+            return;
+        }
+
+        ViewModel.StatusMessage = "Downloading data from tarkov.dev...";
+        IsEnabled = false;
+
+        try
+        {
+            var cacheResult = await devService.CacheAllDataAsync(
+                progress => Dispatcher.Invoke(() => ViewModel.StatusMessage = progress));
+
+            var message = new System.Text.StringBuilder();
+            message.AppendLine("Tarkov Dev data cache completed!");
+            message.AppendLine();
+
+            if (cacheResult.ItemsSuccess)
+                message.AppendLine($"✓ Items: {cacheResult.ItemsCount} items cached");
+            else
+                message.AppendLine($"✗ Items failed: {cacheResult.ItemsError}");
+
+            if (cacheResult.QuestsSuccess)
+                message.AppendLine($"✓ Quests: {cacheResult.QuestsCount} quests cached");
+            else
+                message.AppendLine($"✗ Quests failed: {cacheResult.QuestsError}");
+
+            message.AppendLine();
+            message.AppendLine($"Cached at: {cacheResult.CachedAt:yyyy-MM-dd HH:mm:ss}");
+            message.AppendLine();
+            message.AppendLine("Cache files saved to:");
+            message.AppendLine("- wiki_data/cache/tarkov_dev_items.json");
+            message.AppendLine("- wiki_data/cache/tarkov_dev_quests.json");
+
+            ViewModel.StatusMessage = $"Cache complete: {cacheResult.ItemsCount} items, {cacheResult.QuestsCount} quests";
+
+            MessageBox.Show(
+                message.ToString(),
+                "Cache Complete",
+                MessageBoxButton.OK,
+                cacheResult.ItemsSuccess && cacheResult.QuestsSuccess ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = $"Cache failed: {ex.Message}";
+            MessageBox.Show(
+                $"Cache failed:\n{ex.Message}",
+                "Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsEnabled = true;
+        }
     }
 }
