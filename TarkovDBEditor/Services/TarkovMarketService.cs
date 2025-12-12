@@ -510,6 +510,256 @@ public static class CoordinateTransformService
 
         return totalError / referencePoints.Count;
     }
+
+    #region Delaunay Triangulation & Barycentric Interpolation
+
+    /// <summary>
+    /// 삼각형 구조체
+    /// </summary>
+    public class Triangle
+    {
+        public int I0, I1, I2; // 참조점 인덱스
+        public double X0, Y0, X1, Y1, X2, Y2; // SVG 좌표
+        public double DbX0, DbZ0, DbX1, DbZ1, DbX2, DbZ2; // DB 좌표
+
+        public Triangle(int i0, int i1, int i2,
+            (double svgX, double svgY, double dbX, double dbZ) p0,
+            (double svgX, double svgY, double dbX, double dbZ) p1,
+            (double svgX, double svgY, double dbX, double dbZ) p2)
+        {
+            I0 = i0; I1 = i1; I2 = i2;
+            X0 = p0.svgX; Y0 = p0.svgY; DbX0 = p0.dbX; DbZ0 = p0.dbZ;
+            X1 = p1.svgX; Y1 = p1.svgY; DbX1 = p1.dbX; DbZ1 = p1.dbZ;
+            X2 = p2.svgX; Y2 = p2.svgY; DbX2 = p2.dbX; DbZ2 = p2.dbZ;
+        }
+    }
+
+    /// <summary>
+    /// Delaunay 삼각분할 생성 (Bowyer-Watson 알고리즘)
+    /// </summary>
+    public static List<Triangle> CreateDelaunayTriangulation(
+        List<(double svgX, double svgY, double dbX, double dbZ)> points)
+    {
+        if (points.Count < 3)
+            return new List<Triangle>();
+
+        // 슈퍼 삼각형 생성 (모든 점을 포함하는 큰 삼각형)
+        double minX = double.MaxValue, minY = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue;
+
+        foreach (var p in points)
+        {
+            minX = Math.Min(minX, p.svgX);
+            minY = Math.Min(minY, p.svgY);
+            maxX = Math.Max(maxX, p.svgX);
+            maxY = Math.Max(maxY, p.svgY);
+        }
+
+        double dx = maxX - minX;
+        double dy = maxY - minY;
+        double deltaMax = Math.Max(dx, dy) * 2;
+
+        // 슈퍼 삼각형 꼭지점 (충분히 크게)
+        var superP0 = (svgX: minX - deltaMax, svgY: minY - deltaMax, dbX: 0.0, dbZ: 0.0);
+        var superP1 = (svgX: minX + dx / 2, svgY: maxY + deltaMax, dbX: 0.0, dbZ: 0.0);
+        var superP2 = (svgX: maxX + deltaMax, svgY: minY - deltaMax, dbX: 0.0, dbZ: 0.0);
+
+        // 작업용 리스트
+        var allPoints = new List<(double svgX, double svgY, double dbX, double dbZ)> { superP0, superP1, superP2 };
+        allPoints.AddRange(points);
+
+        var triangles = new List<(int i0, int i1, int i2)> { (0, 1, 2) };
+
+        // 각 점을 하나씩 추가
+        for (int i = 3; i < allPoints.Count; i++)
+        {
+            var p = allPoints[i];
+            var badTriangles = new List<(int i0, int i1, int i2)>();
+
+            // 현재 점이 외접원 내부에 있는 삼각형 찾기
+            foreach (var tri in triangles)
+            {
+                if (IsPointInCircumcircle(p.svgX, p.svgY,
+                    allPoints[tri.i0].svgX, allPoints[tri.i0].svgY,
+                    allPoints[tri.i1].svgX, allPoints[tri.i1].svgY,
+                    allPoints[tri.i2].svgX, allPoints[tri.i2].svgY))
+                {
+                    badTriangles.Add(tri);
+                }
+            }
+
+            // 다각형 경계 찾기 (bad triangles의 외곽 엣지)
+            var polygon = new List<(int, int)>();
+            foreach (var tri in badTriangles)
+            {
+                var edges = new[] { (tri.i0, tri.i1), (tri.i1, tri.i2), (tri.i2, tri.i0) };
+                foreach (var edge in edges)
+                {
+                    bool isShared = false;
+                    foreach (var otherTri in badTriangles)
+                    {
+                        if (tri.Equals(otherTri)) continue;
+                        var otherEdges = new[] { (otherTri.i0, otherTri.i1), (otherTri.i1, otherTri.i2), (otherTri.i2, otherTri.i0) };
+                        foreach (var otherEdge in otherEdges)
+                        {
+                            if ((edge.Item1 == otherEdge.Item1 && edge.Item2 == otherEdge.Item2) ||
+                                (edge.Item1 == otherEdge.Item2 && edge.Item2 == otherEdge.Item1))
+                            {
+                                isShared = true;
+                                break;
+                            }
+                        }
+                        if (isShared) break;
+                    }
+                    if (!isShared)
+                        polygon.Add(edge);
+                }
+            }
+
+            // Bad triangles 제거
+            foreach (var bad in badTriangles)
+                triangles.Remove(bad);
+
+            // 새 삼각형 생성
+            foreach (var edge in polygon)
+                triangles.Add((edge.Item1, edge.Item2, i));
+        }
+
+        // 슈퍼 삼각형과 연결된 삼각형 제거 (인덱스 0, 1, 2)
+        triangles.RemoveAll(t => t.i0 < 3 || t.i1 < 3 || t.i2 < 3);
+
+        // 결과 삼각형 리스트 생성 (인덱스 조정: -3)
+        var result = new List<Triangle>();
+        foreach (var tri in triangles)
+        {
+            var p0 = points[tri.i0 - 3];
+            var p1 = points[tri.i1 - 3];
+            var p2 = points[tri.i2 - 3];
+            result.Add(new Triangle(tri.i0 - 3, tri.i1 - 3, tri.i2 - 3,
+                (p0.svgX, p0.svgY, p0.dbX, p0.dbZ),
+                (p1.svgX, p1.svgY, p1.dbX, p1.dbZ),
+                (p2.svgX, p2.svgY, p2.dbX, p2.dbZ)));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 점이 외접원 내부에 있는지 확인
+    /// </summary>
+    private static bool IsPointInCircumcircle(double px, double py,
+        double x0, double y0, double x1, double y1, double x2, double y2)
+    {
+        double ax = x0 - px, ay = y0 - py;
+        double bx = x1 - px, by = y1 - py;
+        double cx = x2 - px, cy = y2 - py;
+
+        double det = (ax * ax + ay * ay) * (bx * cy - cx * by)
+                   - (bx * bx + by * by) * (ax * cy - cx * ay)
+                   + (cx * cx + cy * cy) * (ax * by - bx * ay);
+
+        // 반시계 방향이면 양수, 시계 방향이면 음수
+        double orientation = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+        return orientation > 0 ? det > 0 : det < 0;
+    }
+
+    /// <summary>
+    /// 점이 삼각형 내부에 있는지 확인하고 Barycentric 좌표 반환
+    /// </summary>
+    public static (bool isInside, double u, double v, double w) GetBarycentricCoordinates(
+        double px, double py, Triangle tri)
+    {
+        double x0 = tri.X0, y0 = tri.Y0;
+        double x1 = tri.X1, y1 = tri.Y1;
+        double x2 = tri.X2, y2 = tri.Y2;
+
+        double v0x = x2 - x0, v0y = y2 - y0;
+        double v1x = x1 - x0, v1y = y1 - y0;
+        double v2x = px - x0, v2y = py - y0;
+
+        double dot00 = v0x * v0x + v0y * v0y;
+        double dot01 = v0x * v1x + v0y * v1y;
+        double dot02 = v0x * v2x + v0y * v2y;
+        double dot11 = v1x * v1x + v1y * v1y;
+        double dot12 = v1x * v2x + v1y * v2y;
+
+        double invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+        double u = (dot11 * dot02 - dot01 * dot12) * invDenom; // weight for p2
+        double v = (dot00 * dot12 - dot01 * dot02) * invDenom; // weight for p1
+        double w = 1.0 - u - v; // weight for p0
+
+        // 내부 판정 (약간의 여유 허용)
+        const double epsilon = -0.0001;
+        bool isInside = u >= epsilon && v >= epsilon && w >= epsilon;
+
+        return (isInside, w, v, u); // (p0 weight, p1 weight, p2 weight)
+    }
+
+    /// <summary>
+    /// Barycentric 좌표로 DB 좌표 보간
+    /// </summary>
+    public static (double dbX, double dbZ) InterpolateWithBarycentric(
+        double u, double v, double w, Triangle tri)
+    {
+        double dbX = u * tri.DbX0 + v * tri.DbX1 + w * tri.DbX2;
+        double dbZ = u * tri.DbZ0 + v * tri.DbZ1 + w * tri.DbZ2;
+        return (dbX, dbZ);
+    }
+
+    /// <summary>
+    /// IDW (Inverse Distance Weighting) 보간
+    /// 삼각형 외부의 점에 대한 폴백
+    /// </summary>
+    public static (double dbX, double dbZ) InterpolateWithIDW(
+        double svgX, double svgY,
+        List<(double svgX, double svgY, double dbX, double dbZ)> referencePoints,
+        double power = 2.0)
+    {
+        double sumWeightX = 0, sumWeightZ = 0, sumWeights = 0;
+
+        foreach (var p in referencePoints)
+        {
+            double dx = svgX - p.svgX;
+            double dy = svgY - p.svgY;
+            double dist = Math.Sqrt(dx * dx + dy * dy);
+
+            if (dist < 0.0001) // 거의 같은 위치
+            {
+                return (p.dbX, p.dbZ);
+            }
+
+            double weight = 1.0 / Math.Pow(dist, power);
+            sumWeightX += weight * p.dbX;
+            sumWeightZ += weight * p.dbZ;
+            sumWeights += weight;
+        }
+
+        return (sumWeightX / sumWeights, sumWeightZ / sumWeights);
+    }
+
+    /// <summary>
+    /// Delaunay + Barycentric + IDW 통합 보간
+    /// </summary>
+    public static (double dbX, double dbZ) InterpolatePoint(
+        double svgX, double svgY,
+        List<Triangle> triangles,
+        List<(double svgX, double svgY, double dbX, double dbZ)> referencePoints)
+    {
+        // 1. 속한 삼각형 찾기
+        foreach (var tri in triangles)
+        {
+            var (isInside, u, v, w) = GetBarycentricCoordinates(svgX, svgY, tri);
+            if (isInside)
+            {
+                return InterpolateWithBarycentric(u, v, w, tri);
+            }
+        }
+
+        // 2. 삼각형 외부면 IDW 폴백
+        return InterpolateWithIDW(svgX, svgY, referencePoints);
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -519,6 +769,7 @@ public static class MarkerMatchingService
 {
     /// <summary>
     /// DB 마커와 API 마커 자동 매칭
+    /// 같은 이름/타입의 마커가 여러 개 있을 때 거리 기반으로 매칭
     /// </summary>
     public static List<MarkerMatchResult> AutoMatch(
         List<MapMarker> dbMarkers,
@@ -526,44 +777,214 @@ public static class MarkerMatchingService
     {
         var results = new List<MarkerMatchResult>();
         var usedApiMarkers = new HashSet<string>();
+        var usedDbMarkers = new HashSet<string>();
 
-        foreach (var dbMarker in dbMarkers)
+        // 1단계: 고유하게 매칭되는 마커들 먼저 처리 (1:1 매칭)
+        var uniqueMatches = FindUniqueMatches(dbMarkers, apiMarkers);
+        foreach (var match in uniqueMatches)
         {
-            // 같은 타입의 API 마커 찾기 (Geometry가 있는 것만)
-            var candidates = apiMarkers
-                .Where(api => !usedApiMarkers.Contains(api.Uid) &&
-                             api.Geometry != null &&
-                             api.MappedMarkerType == dbMarker.MarkerType)
+            results.Add(match);
+            usedApiMarkers.Add(match.ApiMarker.Uid);
+            usedDbMarkers.Add(match.DbMarker.Id);
+        }
+
+        // 고유 매칭이 3개 이상이면 임시 Transform 계산
+        double[]? tempTransform = null;
+        if (uniqueMatches.Count >= 3)
+        {
+            var refPoints = uniqueMatches
+                .Where(m => m.ApiMarker.Geometry != null)
+                .Select(m => (m.DbMarker.X, m.DbMarker.Z, m.ApiMarker.Geometry!.X, m.ApiMarker.Geometry!.Y))
                 .ToList();
 
-            if (candidates.Count == 0)
+            if (refPoints.Count >= 3)
+            {
+                tempTransform = CoordinateTransformService.CalculateAffineTransform(refPoints);
+            }
+        }
+
+        // 2단계: 중복 마커 처리 (같은 타입+유사한 이름의 마커가 여러 개인 경우)
+        var remainingDbMarkers = dbMarkers.Where(m => !usedDbMarkers.Contains(m.Id)).ToList();
+        var remainingApiMarkers = apiMarkers.Where(m => !usedApiMarkers.Contains(m.Uid) && m.Geometry != null).ToList();
+
+        // 타입별로 그룹화
+        var dbByType = remainingDbMarkers.GroupBy(m => m.MarkerType).ToDictionary(g => g.Key, g => g.ToList());
+        var apiByType = remainingApiMarkers.GroupBy(m => m.MappedMarkerType).Where(g => g.Key.HasValue).ToDictionary(g => g.Key!.Value, g => g.ToList());
+
+        foreach (var (markerType, dbGroup) in dbByType)
+        {
+            if (!apiByType.TryGetValue(markerType, out var apiGroup))
             {
                 continue;
             }
 
-            // 이름 유사도로 최적 매칭 찾기
-            var bestMatch = candidates
-                .Select(api => new
-                {
-                    ApiMarker = api,
-                    Similarity = CalculateNameSimilarity(dbMarker.Name, api.Name)
-                })
-                .OrderByDescending(x => x.Similarity)
-                .FirstOrDefault();
-
-            if (bestMatch != null && bestMatch.Similarity > 0.3) // 30% 이상 유사도
+            // 이름 유사도가 높은 쌍들을 찾기
+            var potentialPairs = new List<(MapMarker db, TarkovMarketMarker api, double similarity)>();
+            foreach (var db in dbGroup)
             {
-                results.Add(new MarkerMatchResult
+                foreach (var api in apiGroup)
                 {
-                    DbMarker = dbMarker,
-                    ApiMarker = bestMatch.ApiMarker,
-                    NameSimilarity = bestMatch.Similarity,
-                    IsReferencePoint = false,
-                    IsManualMatch = false
-                });
+                    if (usedApiMarkers.Contains(api.Uid)) continue;
 
-                usedApiMarkers.Add(bestMatch.ApiMarker.Uid);
+                    var similarity = CalculateNameSimilarity(db.Name, api.Name);
+                    if (similarity > 0.3)
+                    {
+                        potentialPairs.Add((db, api, similarity));
+                    }
+                }
             }
+
+            if (potentialPairs.Count == 0) continue;
+
+            // Transform이 있으면 거리 기반 매칭 사용
+            if (tempTransform != null)
+            {
+                // 거리 기반 최적 매칭 (그리디 알고리즘)
+                var distanceMatches = MatchByDistance(potentialPairs, tempTransform, usedApiMarkers, usedDbMarkers);
+                foreach (var match in distanceMatches)
+                {
+                    results.Add(match);
+                    usedApiMarkers.Add(match.ApiMarker.Uid);
+                    usedDbMarkers.Add(match.DbMarker.Id);
+                }
+            }
+            else
+            {
+                // Transform이 없으면 이름 유사도 기반 (기존 로직)
+                var orderedPairs = potentialPairs.OrderByDescending(p => p.similarity).ToList();
+                foreach (var (db, api, similarity) in orderedPairs)
+                {
+                    if (usedApiMarkers.Contains(api.Uid) || usedDbMarkers.Contains(db.Id)) continue;
+
+                    results.Add(new MarkerMatchResult
+                    {
+                        DbMarker = db,
+                        ApiMarker = api,
+                        NameSimilarity = similarity,
+                        IsReferencePoint = false,
+                        IsManualMatch = false
+                    });
+                    usedApiMarkers.Add(api.Uid);
+                    usedDbMarkers.Add(db.Id);
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// 고유하게 매칭되는 마커 찾기 (같은 타입에서 이름이 유일하게 매칭되는 경우)
+    /// </summary>
+    private static List<MarkerMatchResult> FindUniqueMatches(
+        List<MapMarker> dbMarkers,
+        List<TarkovMarketMarker> apiMarkers)
+    {
+        var results = new List<MarkerMatchResult>();
+        var usedApiMarkers = new HashSet<string>();
+
+        // 타입별로 그룹화
+        var dbByType = dbMarkers.GroupBy(m => m.MarkerType).ToDictionary(g => g.Key, g => g.ToList());
+        var apiByType = apiMarkers.Where(m => m.Geometry != null && m.MappedMarkerType.HasValue)
+            .GroupBy(m => m.MappedMarkerType!.Value).ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var (markerType, dbGroup) in dbByType)
+        {
+            if (!apiByType.TryGetValue(markerType, out var apiGroup))
+            {
+                continue;
+            }
+
+            foreach (var dbMarker in dbGroup)
+            {
+                // 이 DB 마커와 유사한 API 마커들
+                var similarApiMarkers = apiGroup
+                    .Where(api => !usedApiMarkers.Contains(api.Uid))
+                    .Select(api => new { Api = api, Similarity = CalculateNameSimilarity(dbMarker.Name, api.Name) })
+                    .Where(x => x.Similarity > 0.5) // 50% 이상 유사도
+                    .OrderByDescending(x => x.Similarity)
+                    .ToList();
+
+                // 유일하게 매칭되는 경우만 (1개의 후보만 있거나, 최고 유사도가 확연히 높은 경우)
+                if (similarApiMarkers.Count == 1)
+                {
+                    results.Add(new MarkerMatchResult
+                    {
+                        DbMarker = dbMarker,
+                        ApiMarker = similarApiMarkers[0].Api,
+                        NameSimilarity = similarApiMarkers[0].Similarity,
+                        IsReferencePoint = false,
+                        IsManualMatch = false
+                    });
+                    usedApiMarkers.Add(similarApiMarkers[0].Api.Uid);
+                }
+                else if (similarApiMarkers.Count > 1 &&
+                         similarApiMarkers[0].Similarity > 0.9 &&
+                         similarApiMarkers[0].Similarity - similarApiMarkers[1].Similarity > 0.2)
+                {
+                    // 첫 번째가 90% 이상이고 두 번째보다 20% 이상 높으면 고유 매칭으로 처리
+                    results.Add(new MarkerMatchResult
+                    {
+                        DbMarker = dbMarker,
+                        ApiMarker = similarApiMarkers[0].Api,
+                        NameSimilarity = similarApiMarkers[0].Similarity,
+                        IsReferencePoint = false,
+                        IsManualMatch = false
+                    });
+                    usedApiMarkers.Add(similarApiMarkers[0].Api.Uid);
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Transform을 사용한 거리 기반 매칭
+    /// </summary>
+    private static List<MarkerMatchResult> MatchByDistance(
+        List<(MapMarker db, TarkovMarketMarker api, double similarity)> potentialPairs,
+        double[] transform,
+        HashSet<string> usedApiMarkers,
+        HashSet<string> usedDbMarkers)
+    {
+        var results = new List<MarkerMatchResult>();
+
+        // 각 쌍에 대해 거리 계산
+        var pairsWithDistance = potentialPairs
+            .Where(p => !usedApiMarkers.Contains(p.api.Uid) && !usedDbMarkers.Contains(p.db.Id))
+            .Select(p =>
+            {
+                var (gameX, gameZ) = CoordinateTransformService.TransformSvgToGame(
+                    p.api.Geometry!.X, p.api.Geometry!.Y, transform);
+                var dx = gameX - p.db.X;
+                var dz = gameZ - p.db.Z;
+                var distance = Math.Sqrt(dx * dx + dz * dz);
+                return (p.db, p.api, p.similarity, distance);
+            })
+            .OrderBy(p => p.distance) // 거리순 정렬
+            .ToList();
+
+        // 그리디하게 가장 가까운 쌍부터 매칭
+        var localUsedApi = new HashSet<string>(usedApiMarkers);
+        var localUsedDb = new HashSet<string>(usedDbMarkers);
+
+        foreach (var (db, api, similarity, distance) in pairsWithDistance)
+        {
+            if (localUsedApi.Contains(api.Uid) || localUsedDb.Contains(db.Id)) continue;
+
+            results.Add(new MarkerMatchResult
+            {
+                DbMarker = db,
+                ApiMarker = api,
+                NameSimilarity = similarity,
+                DistanceError = distance,
+                IsReferencePoint = false,
+                IsManualMatch = false
+            });
+
+            localUsedApi.Add(api.Uid);
+            localUsedDb.Add(db.Id);
         }
 
         return results;
