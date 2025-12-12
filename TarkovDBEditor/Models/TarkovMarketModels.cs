@@ -313,3 +313,57 @@ public class MapSvgTransformList
             string.Equals(t.MapKey, mapKey, StringComparison.OrdinalIgnoreCase));
     }
 }
+
+/// <summary>
+/// Tarkov Market API 퀘스트 응답
+/// </summary>
+public class TarkovMarketQuestsResponse
+{
+    [JsonPropertyName("quests")]
+    public string Quests { get; set; } = "";
+}
+
+/// <summary>
+/// Tarkov Market API 퀘스트 데이터
+/// </summary>
+public class TarkovMarketQuest
+{
+    [JsonPropertyName("uid")]
+    public string Uid { get; set; } = "";
+
+    [JsonPropertyName("bsgId")]
+    public string? BsgId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("desc")]
+    public string? Desc { get; set; }
+
+    [JsonPropertyName("trader")]
+    public string? Trader { get; set; }
+
+    [JsonPropertyName("map")]
+    public string? Map { get; set; }
+
+    [JsonPropertyName("enObjectives")]
+    public List<string>? EnObjectives { get; set; }
+
+    [JsonPropertyName("name_l10n")]
+    public Dictionary<string, string>? NameL10n { get; set; }
+
+    [JsonPropertyName("desc_l10n")]
+    public Dictionary<string, string>? DescL10n { get; set; }
+
+    /// <summary>
+    /// EN 퀘스트명 (name_l10n.en 또는 name)
+    /// </summary>
+    [JsonIgnore]
+    public string NameEn => NameL10n?.GetValueOrDefault("en") ?? Name;
+
+    /// <summary>
+    /// KO 퀘스트명
+    /// </summary>
+    [JsonIgnore]
+    public string? NameKo => NameL10n?.GetValueOrDefault("ko");
+}

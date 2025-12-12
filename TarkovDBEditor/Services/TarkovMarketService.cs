@@ -14,6 +14,10 @@ public class TarkovMarketService : IDisposable
 {
     private readonly HttpClient _httpClient;
     private const string MarkersApiBase = "https://tarkov-market.com/api/be/markers/list";
+    private const string QuestsApiBase = "https://tarkov-market.com/api/be/quests/list";
+
+    // 캐시된 퀘스트 목록 (앱 실행 중 유지)
+    private List<TarkovMarketQuest>? _cachedQuests;
 
     private readonly string _cacheDir;
 
@@ -131,6 +135,98 @@ public class TarkovMarketService : IDisposable
     }
 
     /// <summary>
+    /// 퀘스트 데이터 가져오기 (마커의 questUid와 매칭용)
+    /// </summary>
+    public async Task<List<TarkovMarketQuest>> FetchQuestsAsync(
+        bool useCache = true,
+        CancellationToken cancellationToken = default)
+    {
+        // 메모리 캐시 확인
+        if (useCache && _cachedQuests != null)
+        {
+            return _cachedQuests;
+        }
+
+        // 파일 캐시 확인
+        var cacheFile = Path.Combine(_cacheDir, "quests.json");
+        if (useCache && File.Exists(cacheFile))
+        {
+            var cacheAge = DateTime.Now - File.GetLastWriteTime(cacheFile);
+            if (cacheAge.TotalHours < 24) // 24시간 캐시
+            {
+                try
+                {
+                    var cachedJson = await File.ReadAllTextAsync(cacheFile, cancellationToken);
+                    var cachedQuests = JsonSerializer.Deserialize<List<TarkovMarketQuest>>(cachedJson);
+                    if (cachedQuests != null)
+                    {
+                        _cachedQuests = cachedQuests;
+                        return cachedQuests;
+                    }
+                }
+                catch
+                {
+                    // 캐시 읽기 실패 시 API 호출
+                }
+            }
+        }
+
+        // API 호출
+        System.Diagnostics.Debug.WriteLine($"[FetchQuests] Calling API: {QuestsApiBase}");
+
+        var response = await _httpClient.GetAsync(QuestsApiBase, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        System.Diagnostics.Debug.WriteLine($"[FetchQuests] Response length: {json.Length}");
+
+        var apiResponse = JsonSerializer.Deserialize<TarkovMarketQuestsResponse>(json);
+
+        if (apiResponse == null || string.IsNullOrEmpty(apiResponse.Quests))
+        {
+            System.Diagnostics.Debug.WriteLine("[FetchQuests] Quests field is empty");
+            return new List<TarkovMarketQuest>();
+        }
+
+        // 난독화 디코딩
+        var quests = DecodeQuests(apiResponse.Quests);
+        if (quests == null)
+        {
+            System.Diagnostics.Debug.WriteLine("[FetchQuests] DecodeQuests returned null");
+            return new List<TarkovMarketQuest>();
+        }
+
+        // 메모리 캐시
+        _cachedQuests = quests;
+
+        // 파일 캐시 저장
+        try
+        {
+            var cacheJson = JsonSerializer.Serialize(quests, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(cacheFile, cacheJson, cancellationToken);
+        }
+        catch
+        {
+            // 캐시 저장 실패는 무시
+        }
+
+        return quests;
+    }
+
+    /// <summary>
+    /// questUid로 퀘스트 찾기
+    /// </summary>
+    public TarkovMarketQuest? FindQuestByUid(string? questUid)
+    {
+        if (string.IsNullOrEmpty(questUid) || _cachedQuests == null)
+        {
+            return null;
+        }
+
+        return _cachedQuests.FirstOrDefault(q => q.Uid == questUid);
+    }
+
+    /// <summary>
     /// 난독화된 마커 데이터 디코딩
     /// 알고리즘: index 5~9 (5글자) 제거 → Base64 디코드 → URL 디코드 → JSON 파싱
     /// </summary>
@@ -176,17 +272,68 @@ public class TarkovMarketService : IDisposable
     }
 
     /// <summary>
+    /// 난독화된 퀘스트 데이터 디코딩
+    /// 알고리즘: index 5~9 (5글자) 제거 → Base64 디코드 → URL 디코드 → JSON 파싱
+    /// </summary>
+    public static List<TarkovMarketQuest>? DecodeQuests(string encoded)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(encoded) || encoded.Length < 11)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DecodeQuests] Invalid input: length={encoded?.Length ?? 0}");
+                return null;
+            }
+
+            // 1. index 5~9 (5글자) 제거
+            var processed = encoded.Substring(0, 5) + encoded.Substring(10);
+
+            // 2. Base64 디코드
+            var bytes = Convert.FromBase64String(processed);
+            var urlEncoded = Encoding.UTF8.GetString(bytes);
+
+            // 3. URL 디코드
+            var json = Uri.UnescapeDataString(urlEncoded);
+            System.Diagnostics.Debug.WriteLine($"[DecodeQuests] JSON length: {json.Length}");
+
+            // 4. JSON 파싱
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString
+            };
+            var result = JsonSerializer.Deserialize<List<TarkovMarketQuest>>(json, options);
+            System.Diagnostics.Debug.WriteLine($"[DecodeQuests] Parsed {result?.Count ?? 0} quests");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DecodeQuests] Error: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// 캐시 삭제
     /// </summary>
     public void ClearCache()
     {
         try
         {
+            _cachedQuests = null; // 메모리 캐시 삭제
+
             if (Directory.Exists(_cacheDir))
             {
                 foreach (var file in Directory.GetFiles(_cacheDir, "markers_*.json"))
                 {
                     File.Delete(file);
+                }
+
+                // 퀘스트 캐시 삭제
+                var questCacheFile = Path.Combine(_cacheDir, "quests.json");
+                if (File.Exists(questCacheFile))
+                {
+                    File.Delete(questCacheFile);
                 }
             }
         }

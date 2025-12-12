@@ -342,7 +342,7 @@ public partial class MapTransferWindow : Window
         if (_currentMapConfig == null) return;
 
         BtnFetchApi.IsEnabled = false;
-        StatusText.Text = $"Fetching markers from Tarkov Market API...";
+        StatusText.Text = $"Fetching markers and quests from Tarkov Market API...";
 
         try
         {
@@ -350,14 +350,21 @@ public partial class MapTransferWindow : Window
             _matchResults.Clear();
             _selectedApiMarkers.Clear();
 
-            var markers = await _marketService.FetchMarkersAsync(_currentMapConfig.Key, useCache: false);
+            // 마커와 퀘스트 병렬 로드
+            var markersTask = _marketService.FetchMarkersAsync(_currentMapConfig.Key, useCache: false);
+            var questsTask = _marketService.FetchQuestsAsync(useCache: true);
+
+            await Task.WhenAll(markersTask, questsTask);
+
+            var markers = await markersTask;
+            var quests = await questsTask;
 
             // Geometry가 있는 마커만 필터링
             var validMarkers = markers.Where(m => m.Geometry != null).ToList();
             _apiMarkers.AddRange(validMarkers);
 
             var skippedCount = markers.Count - validMarkers.Count;
-            var statusMsg = $"Fetched {validMarkers.Count} markers from API";
+            var statusMsg = $"Fetched {validMarkers.Count} markers, {quests.Count} quests";
             if (skippedCount > 0)
             {
                 statusMsg += $" (skipped {skippedCount} without geometry)";
@@ -372,6 +379,10 @@ public partial class MapTransferWindow : Window
             {
                 System.Diagnostics.Debug.WriteLine($"[FetchApi] Categories: {string.Join(", ", categories)}");
             }
+
+            // 퀘스트 연결된 마커 수 표시
+            var questLinkedCount = validMarkers.Count(m => !string.IsNullOrEmpty(m.QuestUid));
+            System.Diagnostics.Debug.WriteLine($"[FetchApi] Markers with questUid: {questLinkedCount}");
 
             UpdateCounts();
             UpdateButtonStates();
@@ -600,65 +611,71 @@ public partial class MapTransferWindow : Window
     {
         if (_currentMapConfig == null || _selectedApiMarkers.Count == 0) return;
 
+        // 좌표가 있는 마커만 필터링 (MarkerType 제한 없음 - ApiMarkers는 참조용)
         var markersToImport = _apiMarkers
             .Where(m => _selectedApiMarkers.Contains(m.Uid) &&
-                       m.GameX.HasValue && m.GameZ.HasValue &&
-                       m.MappedMarkerType.HasValue)
+                       m.GameX.HasValue && m.GameZ.HasValue)
             .ToList();
 
         if (markersToImport.Count == 0)
         {
-            MessageBox.Show("No valid markers to import. Make sure transform is applied and markers have valid types.",
+            MessageBox.Show("No valid markers to import. Make sure transform is applied.",
                 "Nothing to Import", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var result = MessageBox.Show(
-            $"Import {markersToImport.Count} markers to database?\n\nMarkers without valid MarkerType (like Quests, Loot) will be skipped.",
+            $"Import {markersToImport.Count} markers to ApiMarkers table (reference data)?\n\nThese markers will be used as reference in Quest Validator and Map Preview.",
             "Confirm Import",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
 
         if (result != MessageBoxResult.Yes) return;
 
-        int imported = 0;
-        int skipped = 0;
-
-        foreach (var apiMarker in markersToImport)
+        try
         {
-            try
+            // ApiMarker 목록 생성
+            var apiMarkersToSave = markersToImport.Select(m =>
             {
-                var dbMarker = new MapMarker
+                // 퀘스트 정보 가져오기
+                var quest = _marketService.FindQuestByUid(m.QuestUid);
+
+                return new ApiMarker
                 {
                     Id = Guid.NewGuid().ToString(),
-                    Name = apiMarker.Name,
-                    MarkerType = apiMarker.MappedMarkerType!.Value,
+                    TarkovMarketUid = m.Uid,
+                    Name = m.Name,
+                    NameKo = m.NameL10n?.GetValueOrDefault("ko"),
+                    Category = m.Category,
+                    SubCategory = m.SubCategory,
                     MapKey = _currentMapConfig.Key,
-                    X = apiMarker.GameX!.Value,
+                    X = m.GameX!.Value,
                     Y = 0,
-                    Z = apiMarker.GameZ!.Value,
-                    FloorId = apiMarker.FloorId
+                    Z = m.GameZ!.Value,
+                    FloorId = m.FloorId,
+                    QuestBsgId = quest?.BsgId,
+                    QuestNameEn = quest?.NameEn,
+                    ObjectiveDescription = m.Name, // 마커명을 objective description으로 사용
+                    ImportedAt = DateTime.UtcNow
                 };
+            }).ToList();
 
-                await MapMarkerService.Instance.SaveMarkerAsync(dbMarker);
-                imported++;
-            }
-            catch
-            {
-                skipped++;
-            }
+            // ApiMarkerService로 저장
+            await ApiMarkerService.Instance.SaveMarkersAsync(apiMarkersToSave);
+
+            _selectedApiMarkers.Clear();
+            UpdateCounts();
+            RedrawAll();
+
+            StatusText.Text = $"Saved {apiMarkersToSave.Count} markers to ApiMarkers table";
+            MessageBox.Show($"Successfully saved {apiMarkersToSave.Count} reference markers.\n\nThese can be viewed in Quest Validator and Map Preview.",
+                "Import Complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
-
-        // DB 마커 다시 로드
-        await LoadDbMarkersAsync();
-
-        _selectedApiMarkers.Clear();
-        UpdateCounts();
-        RedrawAll();
-
-        StatusText.Text = $"Imported {imported} markers. Skipped: {skipped}";
-        MessageBox.Show($"Successfully imported {imported} markers.\nSkipped: {skipped}",
-            "Import Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Error saving markers: {ex.Message}";
+            MessageBox.Show($"Failed to save markers:\n\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     #endregion
