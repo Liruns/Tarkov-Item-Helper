@@ -549,16 +549,22 @@ namespace TarkovDBEditor.Services
             if (string.IsNullOrEmpty(content))
                 return items;
 
-            // "Related Quest Items" 테이블 찾기
-            // {|class="wikitable" 또는 {| class="wikitable" 형태 모두 매칭
-            var tableMatch = Regex.Match(content,
-                @"\{\|\s*class\s*=\s*""?wikitable[^""]*""?.*?Related\s+Quest\s+Items.*?\|\}",
-                RegexOptions.IgnoreCase | RegexOptions.Singleline);
-
-            if (!tableMatch.Success)
+            // "Related Quest Items" 텍스트 위치 찾기
+            var relatedIndex = content.IndexOf("Related Quest Items", StringComparison.OrdinalIgnoreCase);
+            if (relatedIndex < 0)
                 return items;
 
-            var tableContent = tableMatch.Value;
+            // "Related Quest Items" 앞에서 가장 가까운 {| 찾기 (테이블 시작)
+            var tableStartIndex = content.LastIndexOf("{|", relatedIndex, StringComparison.Ordinal);
+            if (tableStartIndex < 0)
+                return items;
+
+            // 해당 테이블의 끝 |} 찾기
+            var tableEndIndex = content.IndexOf("|}", relatedIndex, StringComparison.Ordinal);
+            if (tableEndIndex < 0)
+                return items;
+
+            var tableContent = content.Substring(tableStartIndex, tableEndIndex - tableStartIndex + 2);
 
             // 행 분리 "|-"
             var rows = Regex.Split(tableContent, @"\|-");
@@ -570,8 +576,9 @@ namespace TarkovDBEditor.Services
             int sortOrder = 0;
             foreach (var row in rows)
             {
-                // 헤더 행 건너뛰기
-                if (row.Contains("!") && (row.Contains("Icon") || row.Contains("Name") || row.Contains("Quantity")))
+                // 헤더 행 건너뛰기 - 실제 헤더 셀 형식(!Icon, !Name 등)만 체크
+                // 데이터 행에서 파일명(VodkaIcon.png 등)이나 FIR 컬럼(!<font...)을 잘못 필터링하지 않도록 함
+                if (Regex.IsMatch(row, @"!\s*Icon|!\s*Item|!\s*Name|!\s*Amount|!\s*Quantity", RegexOptions.IgnoreCase))
                     continue;
 
                 // rowspan 확인 (Notes 컬럼)
@@ -617,11 +624,12 @@ namespace TarkovDBEditor.Services
             if (row.Contains("!Icon") || row.Contains("!Item") || row.Contains("! Icon") || row.Contains("! Item"))
                 return null;
 
-            // | 또는 || 또는 줄바꿈+| 로 셀 분리
-            // Wiki 테이블 형식: 줄바꿈 후 |로 시작하는 셀들
-            var cells = Regex.Split(row, @"\|\||\n\|")
+            // | 또는 || 또는 줄바꿈+| 또는 줄바꿈+! 로 셀 분리
+            // Wiki 테이블 형식: 줄바꿈 후 | 또는 ! 로 시작하는 셀들
+            // ! 는 헤더 스타일 셀이지만 FIR 컬럼 등에서 데이터로 사용됨
+            var cells = Regex.Split(row, @"\|\||\n\||\n!")
                 .Select(c => c.Trim())
-                .Where(c => !string.IsNullOrEmpty(c) && !c.StartsWith("{|") && !c.StartsWith("|}") && !c.StartsWith("!"))
+                .Where(c => !string.IsNullOrEmpty(c) && !c.StartsWith("{|") && !c.StartsWith("|}"))
                 .ToList();
 
             if (cells.Count < 2)
