@@ -1,0 +1,992 @@
+using System.IO;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using Microsoft.Data.Sqlite;
+using TarkovDBEditor.Models;
+using TarkovDBEditor.Services;
+using Point = System.Windows.Point;
+using Size = System.Windows.Size;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using Brushes = System.Windows.Media.Brushes;
+using Image = System.Windows.Controls.Image;
+using Color = System.Windows.Media.Color;
+using Cursors = System.Windows.Input.Cursors;
+
+namespace TarkovDBEditor.Views;
+
+/// <summary>
+/// Map Preview Window - 읽기 전용으로 Marker와 Quest Objectives 표시
+/// </summary>
+public partial class MapPreviewWindow : Window
+{
+    // Zoom settings
+    private double _zoomLevel = 1.0;
+    private const double MinZoom = 0.1;
+    private const double MaxZoom = 12.0;
+    private static readonly double[] ZoomPresets = { 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0 };
+
+    // Drag state
+    private bool _isDragging;
+    private Point _dragStartPoint;
+    private double _dragStartTranslateX;
+    private double _dragStartTranslateY;
+
+    // Map configuration
+    private MapConfigList? _mapConfigs;
+    private MapConfig? _currentMapConfig;
+
+    // Floor management
+    private string? _currentFloorId;
+    private List<MapFloorConfig>? _sortedFloors;
+
+    // Data
+    private readonly List<MapMarker> _mapMarkers = new();
+    private readonly List<QuestObjectiveItem> _questObjectives = new();
+
+    // Icon cache
+    private static readonly Dictionary<MapMarkerType, BitmapImage?> _iconCache = new();
+
+    public MapPreviewWindow()
+    {
+        InitializeComponent();
+        LoadMapConfigs();
+        Loaded += MapPreviewWindow_Loaded;
+        PreviewKeyDown += MapPreviewWindow_KeyDown;
+    }
+
+    private async void MapPreviewWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        await LoadDataAsync();
+
+        if (MapSelector.Items.Count > 0)
+        {
+            MapSelector.SelectedIndex = 0;
+        }
+    }
+
+    private void LoadMapConfigs()
+    {
+        try
+        {
+            var configPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Data", "map_configs.json");
+            if (File.Exists(configPath))
+            {
+                var json = File.ReadAllText(configPath);
+                _mapConfigs = JsonSerializer.Deserialize<MapConfigList>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                if (_mapConfigs != null)
+                {
+                    foreach (var map in _mapConfigs.Maps)
+                    {
+                        MapSelector.Items.Add(map);
+                    }
+                }
+            }
+            else
+            {
+                StatusText.Text = "Warning: map_configs.json not found";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Error loading map configs: {ex.Message}";
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        // Load markers
+        await LoadMarkersAsync();
+
+        // Load quest objectives
+        await LoadQuestObjectivesAsync();
+    }
+
+    private async Task LoadMarkersAsync()
+    {
+        _mapMarkers.Clear();
+
+        try
+        {
+            var markers = await MapMarkerService.Instance.LoadAllMarkersAsync();
+            foreach (var marker in markers)
+            {
+                _mapMarkers.Add(marker);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Error loading markers: {ex.Message}";
+        }
+    }
+
+    private async Task LoadQuestObjectivesAsync()
+    {
+        _questObjectives.Clear();
+
+        if (!DatabaseService.Instance.IsConnected) return;
+
+        try
+        {
+            var connectionString = $"Data Source={DatabaseService.Instance.DatabasePath}";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+
+            // Check if QuestObjectives table exists
+            var checkSql = "SELECT name FROM sqlite_master WHERE type='table' AND name='QuestObjectives'";
+            await using var checkCmd = new SqliteCommand(checkSql, connection);
+            var result = await checkCmd.ExecuteScalarAsync();
+            if (result == null) return;
+
+            // Load objectives with location points
+            var sql = @"
+                SELECT o.Id, o.QuestId, o.Description, o.MapName, o.LocationPoints, q.Location as QuestLocation
+                FROM QuestObjectives o
+                LEFT JOIN Quests q ON o.QuestId = q.Id
+                WHERE o.LocationPoints IS NOT NULL AND o.LocationPoints != ''";
+
+            await using var cmd = new SqliteCommand(sql, connection);
+            await using var reader = await cmd.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                var objective = new QuestObjectiveItem
+                {
+                    Id = reader.GetString(0),
+                    QuestId = reader.GetString(1),
+                    Description = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                    MapName = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    QuestLocation = reader.IsDBNull(5) ? null : reader.GetString(5)
+                };
+
+                var locationJson = reader.IsDBNull(4) ? null : reader.GetString(4);
+                objective.LocationPointsJson = locationJson;
+
+                if (objective.HasCoordinates)
+                {
+                    _questObjectives.Add(objective);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Error loading objectives: {ex.Message}";
+        }
+    }
+
+    private void MapSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (MapSelector.SelectedItem is MapConfig config)
+        {
+            _currentMapConfig = config;
+            UpdateFloorSelector(config);
+            LoadMap(config);
+            UpdateCounts();
+            RedrawAll();
+        }
+    }
+
+    #region Floor Management
+
+    private void UpdateFloorSelector(MapConfig config)
+    {
+        FloorSelector.Items.Clear();
+        _currentFloorId = null;
+        _sortedFloors = null;
+
+        var floors = config.Floors;
+        if (floors == null || floors.Count == 0)
+        {
+            TxtFloorLabel.Visibility = Visibility.Collapsed;
+            FloorSelector.Visibility = Visibility.Collapsed;
+            TxtFloorHotkeys.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        TxtFloorLabel.Visibility = Visibility.Visible;
+        FloorSelector.Visibility = Visibility.Visible;
+        TxtFloorHotkeys.Visibility = Visibility.Visible;
+
+        _sortedFloors = floors.OrderBy(f => f.Order).ToList();
+
+        int defaultIndex = 0;
+        for (int i = 0; i < _sortedFloors.Count; i++)
+        {
+            var floor = _sortedFloors[i];
+            FloorSelector.Items.Add(new ComboBoxItem
+            {
+                Content = floor.DisplayName,
+                Tag = floor.LayerId
+            });
+
+            if (floor.IsDefault)
+            {
+                defaultIndex = i;
+            }
+        }
+
+        if (FloorSelector.Items.Count > 0)
+        {
+            FloorSelector.SelectedIndex = defaultIndex;
+            _currentFloorId = _sortedFloors[defaultIndex].LayerId;
+        }
+    }
+
+    private void FloorSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (FloorSelector.SelectedItem is ComboBoxItem floorItem && floorItem.Tag is string floorId)
+        {
+            if (_currentFloorId != floorId)
+            {
+                _currentFloorId = floorId;
+
+                if (_currentMapConfig != null)
+                {
+                    LoadMap(_currentMapConfig, resetView: false);
+                    RedrawAll();
+                }
+            }
+        }
+    }
+
+    private void MapPreviewWindow_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (_sortedFloors == null || _sortedFloors.Count == 0)
+            return;
+
+        int floorIndex = -1;
+
+        switch (e.Key)
+        {
+            case Key.NumPad0:
+                floorIndex = 0;
+                break;
+            case Key.NumPad1:
+                floorIndex = 1;
+                break;
+            case Key.NumPad2:
+                floorIndex = 2;
+                break;
+            case Key.NumPad3:
+                floorIndex = 3;
+                break;
+            case Key.NumPad4:
+                floorIndex = 4;
+                break;
+            case Key.NumPad5:
+                floorIndex = 5;
+                break;
+        }
+
+        if (floorIndex >= 0 && floorIndex < _sortedFloors.Count)
+        {
+            FloorSelector.SelectedIndex = floorIndex;
+            e.Handled = true;
+        }
+    }
+
+    #endregion
+
+    private void LoadMap(MapConfig config, bool resetView = true)
+    {
+        try
+        {
+            var svgPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Maps", config.SvgFileName);
+
+            if (!File.Exists(svgPath))
+            {
+                MessageBox.Show($"Map file not found: {svgPath}", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // Floor filtering
+            IEnumerable<string>? visibleFloors = null;
+            IEnumerable<string>? allFloors = null;
+            string? backgroundFloorId = null;
+            double backgroundOpacity = 0.3;
+
+            if (config.Floors != null && config.Floors.Count > 0 && !string.IsNullOrEmpty(_currentFloorId))
+            {
+                allFloors = config.Floors.Select(f => f.LayerId);
+                visibleFloors = new[] { _currentFloorId };
+
+                var defaultFloor = config.Floors.FirstOrDefault(f => f.IsDefault);
+                var currentFloor = config.Floors.FirstOrDefault(f =>
+                    string.Equals(f.LayerId, _currentFloorId, StringComparison.OrdinalIgnoreCase));
+
+                if (defaultFloor != null && !string.Equals(_currentFloorId, defaultFloor.LayerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    backgroundFloorId = defaultFloor.LayerId;
+
+                    if (currentFloor != null && currentFloor.Order < 0)
+                    {
+                        backgroundOpacity = 0.15;
+                    }
+                }
+            }
+
+            if (visibleFloors != null)
+            {
+                var preprocessor = new SvgStylePreprocessor();
+                var processedSvg = preprocessor.ProcessSvgFile(svgPath, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity);
+
+                var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"map_preview_{Guid.NewGuid()}.svg");
+                File.WriteAllText(tempPath, processedSvg);
+                MapSvg.Source = new Uri(tempPath, UriKind.Absolute);
+            }
+            else
+            {
+                MapSvg.Source = new Uri(svgPath, UriKind.Absolute);
+            }
+
+            MapSvg.Width = config.ImageWidth;
+            MapSvg.Height = config.ImageHeight;
+
+            MapCanvas.Width = config.ImageWidth;
+            MapCanvas.Height = config.ImageHeight;
+            Canvas.SetLeft(MapSvg, 0);
+            Canvas.SetTop(MapSvg, 0);
+
+            if (resetView)
+            {
+                SetZoom(1.0);
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    CenterMapInView();
+                    RedrawAll();
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+            else
+            {
+                RedrawAll();
+            }
+
+            var floorInfo = !string.IsNullOrEmpty(_currentFloorId) ? $" [{_currentFloorId}]" : "";
+            StatusText.Text = $"Loaded: {config.DisplayName}{floorInfo}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to load map: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void UpdateCounts()
+    {
+        if (_currentMapConfig == null)
+        {
+            MarkerCountText.Text = "0";
+            ObjectiveCountText.Text = "0";
+            return;
+        }
+
+        var markerCount = _mapMarkers.Count(m => m.MapKey == _currentMapConfig.Key);
+        var objectiveCount = _questObjectives.Count(o => _currentMapConfig.MatchesMapName(o.EffectiveMapName));
+
+        MarkerCountText.Text = markerCount.ToString();
+        ObjectiveCountText.Text = objectiveCount.ToString();
+    }
+
+    private void RedrawAll()
+    {
+        // Skip if controls are not yet initialized
+        if (!IsLoaded) return;
+
+        if (ChkShowMarkers?.IsChecked == true)
+        {
+            RedrawMarkers();
+        }
+        else
+        {
+            MarkersCanvas?.Children.Clear();
+        }
+
+        if (ChkShowObjectives?.IsChecked == true)
+        {
+            RedrawObjectives();
+        }
+        else
+        {
+            ObjectivesCanvas?.Children.Clear();
+        }
+    }
+
+    private void LayerVisibility_Changed(object sender, RoutedEventArgs e)
+    {
+        RedrawAll();
+    }
+
+    #region Draw Markers
+
+    private BitmapImage? GetMarkerIcon(MapMarkerType markerType)
+    {
+        if (_iconCache.TryGetValue(markerType, out var cachedIcon))
+        {
+            return cachedIcon;
+        }
+
+        try
+        {
+            var iconFileName = MapMarker.GetIconFileName(markerType);
+            var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Icons", iconFileName);
+
+            if (File.Exists(iconPath))
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(iconPath, UriKind.Absolute);
+                bitmap.DecodePixelWidth = 64;
+                bitmap.EndInit();
+                bitmap.Freeze();
+                _iconCache[markerType] = bitmap;
+                return bitmap;
+            }
+        }
+        catch
+        {
+            // Ignore icon loading errors
+        }
+
+        _iconCache[markerType] = null;
+        return null;
+    }
+
+    private void RedrawMarkers()
+    {
+        if(MarkersCanvas == null) return;
+        MarkersCanvas.Children.Clear();
+
+        if (_currentMapConfig == null) return;
+
+        var inverseScale = 1.0 / _zoomLevel;
+        var hasFloors = _sortedFloors != null && _sortedFloors.Count > 0;
+
+        var markersForMap = _mapMarkers.Where(m => m.MapKey == _currentMapConfig.Key).ToList();
+
+        foreach (var marker in markersForMap)
+        {
+            var (sx, sy) = _currentMapConfig.GameToScreen(marker.X, marker.Z);
+
+            // Determine opacity based on floor
+            double opacity = 1.0;
+            if (hasFloors && _currentFloorId != null && marker.FloorId != null)
+            {
+                opacity = string.Equals(marker.FloorId, _currentFloorId, StringComparison.OrdinalIgnoreCase) ? 1.0 : 0.3;
+            }
+
+            var (r, g, b) = MapMarker.GetMarkerColor(marker.MarkerType);
+            var markerColor = Color.FromArgb((byte)(opacity * 255), r, g, b);
+
+            var markerSize = 48 * inverseScale;
+            var iconImage = GetMarkerIcon(marker.MarkerType);
+
+            if (iconImage != null)
+            {
+                var image = new Image
+                {
+                    Source = iconImage,
+                    Width = markerSize,
+                    Height = markerSize,
+                    Opacity = opacity
+                };
+
+                Canvas.SetLeft(image, sx - markerSize / 2);
+                Canvas.SetTop(image, sy - markerSize / 2);
+                MarkersCanvas.Children.Add(image);
+            }
+            else
+            {
+                // Fallback to colored circle
+                var circle = new Ellipse
+                {
+                    Width = markerSize,
+                    Height = markerSize,
+                    Fill = new SolidColorBrush(markerColor),
+                    Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 255, 255, 255)),
+                    StrokeThickness = 3 * inverseScale
+                };
+
+                Canvas.SetLeft(circle, sx - markerSize / 2);
+                Canvas.SetTop(circle, sy - markerSize / 2);
+                MarkersCanvas.Children.Add(circle);
+
+                // Icon text
+                var iconText = marker.MarkerType switch
+                {
+                    MapMarkerType.PmcSpawn => "P",
+                    MapMarkerType.ScavSpawn => "S",
+                    MapMarkerType.PmcExtraction => "E",
+                    MapMarkerType.ScavExtraction => "E",
+                    MapMarkerType.SharedExtraction => "E",
+                    MapMarkerType.Transit => "T",
+                    MapMarkerType.BossSpawn => "B",
+                    MapMarkerType.RaiderSpawn => "R",
+                    MapMarkerType.Lever => "L",
+                    MapMarkerType.Keys => "K",
+                    _ => "?"
+                };
+
+                var icon = new TextBlock
+                {
+                    Text = iconText,
+                    Foreground = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 255, 255, 255)),
+                    FontSize = 24 * inverseScale,
+                    FontWeight = FontWeights.Bold,
+                    TextAlignment = TextAlignment.Center
+                };
+
+                icon.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                Canvas.SetLeft(icon, sx - icon.DesiredSize.Width / 2);
+                Canvas.SetTop(icon, sy - icon.DesiredSize.Height / 2);
+                MarkersCanvas.Children.Add(icon);
+            }
+
+            // Name label
+            var nameLabel = new TextBlock
+            {
+                Text = marker.Name,
+                Foreground = new SolidColorBrush(markerColor),
+                FontSize = 28 * inverseScale,
+                FontWeight = FontWeights.SemiBold
+            };
+
+            Canvas.SetLeft(nameLabel, sx + markerSize / 2 + 8 * inverseScale);
+            Canvas.SetTop(nameLabel, sy - 14 * inverseScale);
+            MarkersCanvas.Children.Add(nameLabel);
+
+            // Floor label (if different floor)
+            if (hasFloors && marker.FloorId != null && opacity < 1.0)
+            {
+                var floorDisplayName = _sortedFloors?
+                    .FirstOrDefault(f => string.Equals(f.LayerId, marker.FloorId, StringComparison.OrdinalIgnoreCase))
+                    ?.DisplayName ?? marker.FloorId;
+
+                var floorLabel = new TextBlock
+                {
+                    Text = $"[{floorDisplayName}]",
+                    Foreground = new SolidColorBrush(Color.FromArgb((byte)(opacity * 200), 154, 136, 102)),
+                    FontSize = 20 * inverseScale,
+                    FontStyle = FontStyles.Italic
+                };
+
+                Canvas.SetLeft(floorLabel, sx + markerSize / 2 + 8 * inverseScale);
+                Canvas.SetTop(floorLabel, sy + 16 * inverseScale);
+                MarkersCanvas.Children.Add(floorLabel);
+            }
+        }
+    }
+
+    #endregion
+
+    #region Draw Objectives
+
+    private void RedrawObjectives()
+    {
+        if (ObjectivesCanvas == null) return;
+        ObjectivesCanvas.Children.Clear();
+
+        if (_currentMapConfig == null) return;
+
+        var inverseScale = 1.0 / _zoomLevel;
+        var hasFloors = _sortedFloors != null && _sortedFloors.Count > 0;
+
+        var objectivesForMap = _questObjectives
+            .Where(o => _currentMapConfig.MatchesMapName(o.EffectiveMapName))
+            .ToList();
+
+        System.Diagnostics.Debug.WriteLine($"[RedrawObjectives] CurrentMap: Key={_currentMapConfig.Key}, Transform={string.Join(",", _currentMapConfig.CalibratedTransform ?? Array.Empty<double>())}");
+        System.Diagnostics.Debug.WriteLine($"[RedrawObjectives] Found {objectivesForMap.Count} objectives for this map");
+
+        foreach (var objective in objectivesForMap)
+        {
+            if (objective.LocationPoints.Count == 0) continue;
+
+            System.Diagnostics.Debug.WriteLine($"[RedrawObjectives] Objective: {objective.Id}, EffectiveMapName={objective.EffectiveMapName}, Points={objective.LocationPoints.Count}");
+            foreach (var pt in objective.LocationPoints)
+            {
+                var (sx, sy) = _currentMapConfig.GameToScreen(pt.X, pt.Z);
+                System.Diagnostics.Debug.WriteLine($"  Point: Game({pt.X:F2}, {pt.Z:F2}) -> Screen({sx:F2}, {sy:F2}), Floor={pt.FloorId}");
+            }
+
+            // Get points for the current floor
+            var currentFloorPoints = objective.LocationPoints
+                .Where(p => !hasFloors || _currentFloorId == null ||
+                           p.FloorId == null ||
+                           string.Equals(p.FloorId, _currentFloorId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            // Get points on other floors (for faded polygon drawing)
+            var otherFloorPoints = hasFloors && _currentFloorId != null
+                ? objective.LocationPoints
+                    .Where(p => p.FloorId != null &&
+                               !string.Equals(p.FloorId, _currentFloorId, StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+                : new List<LocationPoint>();
+
+            // Objective color (amber/yellow)
+            var objectiveColor = Color.FromRgb(255, 193, 7); // FFC107
+            var fadedObjectiveColor = Color.FromArgb(80, 255, 193, 7);
+
+            // Draw faded polygon for other floors if 3+ points exist there
+            if (otherFloorPoints.Count >= 3)
+            {
+                var fadedPolygon = new Polygon
+                {
+                    Fill = new SolidColorBrush(Color.FromArgb(20, 255, 193, 7)),
+                    Stroke = new SolidColorBrush(fadedObjectiveColor),
+                    StrokeThickness = 2 * inverseScale,
+                    StrokeDashArray = new DoubleCollection { 4, 2 }
+                };
+
+                foreach (var point in otherFloorPoints)
+                {
+                    var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+                    fadedPolygon.Points.Add(new Point(sx, sy));
+                }
+
+                ObjectivesCanvas.Children.Add(fadedPolygon);
+
+                // Add floor label at centroid
+                var centroidX = otherFloorPoints.Average(p => p.X);
+                var centroidZ = otherFloorPoints.Average(p => p.Z);
+                var (labelX, labelY) = _currentMapConfig.GameToScreen(centroidX, centroidZ);
+
+                var otherFloorId = otherFloorPoints.First().FloorId;
+                var floorDisplayName = _sortedFloors?
+                    .FirstOrDefault(f => string.Equals(f.LayerId, otherFloorId, StringComparison.OrdinalIgnoreCase))
+                    ?.DisplayName ?? otherFloorId;
+
+                var floorLabel = new TextBlock
+                {
+                    Text = $"[{floorDisplayName}]",
+                    Foreground = new SolidColorBrush(Color.FromArgb(120, 255, 193, 7)),
+                    FontSize = 20 * inverseScale,
+                    FontWeight = FontWeights.SemiBold,
+                    FontStyle = FontStyles.Italic
+                };
+
+                floorLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                Canvas.SetLeft(floorLabel, labelX - floorLabel.DesiredSize.Width / 2);
+                Canvas.SetTop(floorLabel, labelY - floorLabel.DesiredSize.Height / 2);
+                ObjectivesCanvas.Children.Add(floorLabel);
+            }
+            // Draw faded line for other floors if 2 points
+            else if (otherFloorPoints.Count == 2)
+            {
+                var (sx1, sy1) = _currentMapConfig.GameToScreen(otherFloorPoints[0].X, otherFloorPoints[0].Z);
+                var (sx2, sy2) = _currentMapConfig.GameToScreen(otherFloorPoints[1].X, otherFloorPoints[1].Z);
+
+                var fadedLine = new Line
+                {
+                    X1 = sx1, Y1 = sy1,
+                    X2 = sx2, Y2 = sy2,
+                    Stroke = new SolidColorBrush(fadedObjectiveColor),
+                    StrokeThickness = 2 * inverseScale,
+                    StrokeDashArray = new DoubleCollection { 4, 2 }
+                };
+
+                ObjectivesCanvas.Children.Add(fadedLine);
+            }
+
+            // Draw polygon if 3+ points on current floor
+            if (currentFloorPoints.Count >= 3)
+            {
+                var polygon = new Polygon
+                {
+                    Fill = new SolidColorBrush(Color.FromArgb(60, 255, 193, 7)),
+                    Stroke = new SolidColorBrush(objectiveColor),
+                    StrokeThickness = 2 * inverseScale,
+                    StrokeDashArray = new DoubleCollection { 4, 2 }
+                };
+
+                foreach (var point in currentFloorPoints)
+                {
+                    var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+                    polygon.Points.Add(new Point(sx, sy));
+                }
+
+                ObjectivesCanvas.Children.Add(polygon);
+
+                // Add label at centroid
+                var centroidX = currentFloorPoints.Average(p => p.X);
+                var centroidZ = currentFloorPoints.Average(p => p.Z);
+                var (labelX, labelY) = _currentMapConfig.GameToScreen(centroidX, centroidZ);
+
+                AddObjectiveLabel(objective, labelX, labelY, inverseScale, objectiveColor);
+            }
+            // Draw line if 2 points on current floor
+            else if (currentFloorPoints.Count == 2)
+            {
+                var (sx1, sy1) = _currentMapConfig.GameToScreen(currentFloorPoints[0].X, currentFloorPoints[0].Z);
+                var (sx2, sy2) = _currentMapConfig.GameToScreen(currentFloorPoints[1].X, currentFloorPoints[1].Z);
+
+                var line = new Line
+                {
+                    X1 = sx1, Y1 = sy1,
+                    X2 = sx2, Y2 = sy2,
+                    Stroke = new SolidColorBrush(objectiveColor),
+                    StrokeThickness = 3 * inverseScale,
+                    StrokeDashArray = new DoubleCollection { 4, 2 }
+                };
+
+                ObjectivesCanvas.Children.Add(line);
+
+                // Add label at midpoint
+                var midX = (sx1 + sx2) / 2;
+                var midY = (sy1 + sy2) / 2;
+                AddObjectiveLabel(objective, midX, midY, inverseScale, objectiveColor);
+            }
+            // Draw single point on current floor
+            else if (currentFloorPoints.Count == 1)
+            {
+                var point = currentFloorPoints[0];
+                var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+                var markerSize = 40 * inverseScale;
+
+                // Diamond shape for objectives
+                var diamond = new Polygon
+                {
+                    Fill = new SolidColorBrush(Color.FromArgb(200, 255, 193, 7)),
+                    Stroke = new SolidColorBrush(Color.FromRgb(255, 255, 255)),
+                    StrokeThickness = 2 * inverseScale,
+                    Points = new PointCollection
+                    {
+                        new Point(sx, sy - markerSize / 2),          // Top
+                        new Point(sx + markerSize / 2, sy),          // Right
+                        new Point(sx, sy + markerSize / 2),          // Bottom
+                        new Point(sx - markerSize / 2, sy)           // Left
+                    }
+                };
+
+                ObjectivesCanvas.Children.Add(diamond);
+
+                // Exclamation mark
+                var exclaim = new TextBlock
+                {
+                    Text = "!",
+                    Foreground = Brushes.Black,
+                    FontSize = 24 * inverseScale,
+                    FontWeight = FontWeights.Bold,
+                    TextAlignment = TextAlignment.Center
+                };
+
+                exclaim.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                Canvas.SetLeft(exclaim, sx - exclaim.DesiredSize.Width / 2);
+                Canvas.SetTop(exclaim, sy - exclaim.DesiredSize.Height / 2);
+                ObjectivesCanvas.Children.Add(exclaim);
+
+                AddObjectiveLabel(objective, sx + markerSize / 2 + 8 * inverseScale, sy, inverseScale, objectiveColor);
+            }
+
+            // Draw faded individual points on other floors (only if less than 3 points on that floor)
+            // This shows single points or endpoints of lines on other floors
+            if (otherFloorPoints.Count > 0 && otherFloorPoints.Count < 3)
+            {
+                foreach (var point in otherFloorPoints)
+                {
+                    var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+                    var fadedSize = 24 * inverseScale;
+
+                    var fadedMarker = new Ellipse
+                    {
+                        Width = fadedSize,
+                        Height = fadedSize,
+                        Fill = new SolidColorBrush(Color.FromArgb(80, 255, 193, 7)),
+                        Stroke = new SolidColorBrush(Color.FromArgb(120, 255, 193, 7)),
+                        StrokeThickness = 1 * inverseScale
+                    };
+
+                    Canvas.SetLeft(fadedMarker, sx - fadedSize / 2);
+                    Canvas.SetTop(fadedMarker, sy - fadedSize / 2);
+                    ObjectivesCanvas.Children.Add(fadedMarker);
+
+                    // Floor label
+                    var floorDisplayName = _sortedFloors?
+                        .FirstOrDefault(f => string.Equals(f.LayerId, point.FloorId, StringComparison.OrdinalIgnoreCase))
+                        ?.DisplayName ?? point.FloorId;
+
+                    var floorLabel = new TextBlock
+                    {
+                        Text = $"[{floorDisplayName}]",
+                        Foreground = new SolidColorBrush(Color.FromArgb(100, 255, 193, 7)),
+                        FontSize = 16 * inverseScale,
+                        FontStyle = FontStyles.Italic
+                    };
+
+                    Canvas.SetLeft(floorLabel, sx + fadedSize / 2 + 4 * inverseScale);
+                    Canvas.SetTop(floorLabel, sy - 8 * inverseScale);
+                    ObjectivesCanvas.Children.Add(floorLabel);
+                }
+            }
+        }
+    }
+
+    private void AddObjectiveLabel(QuestObjectiveItem objective, double x, double y, double inverseScale, Color color)
+    {
+        var description = objective.Description.Length > 50
+            ? objective.Description.Substring(0, 47) + "..."
+            : objective.Description;
+
+        var label = new TextBlock
+        {
+            Text = description,
+            Foreground = new SolidColorBrush(color),
+            FontSize = 22 * inverseScale,
+            FontWeight = FontWeights.Medium,
+            MaxWidth = 300 * inverseScale,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+
+        // Add background for readability
+        var border = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(180, 30, 30, 30)),
+            CornerRadius = new CornerRadius(3 * inverseScale),
+            Padding = new Thickness(4 * inverseScale, 2 * inverseScale, 4 * inverseScale, 2 * inverseScale),
+            Child = label
+        };
+
+        Canvas.SetLeft(border, x);
+        Canvas.SetTop(border, y - 12 * inverseScale);
+        ObjectivesCanvas.Children.Add(border);
+    }
+
+    #endregion
+
+    #region Zoom and Pan
+
+    private void BtnZoomIn_Click(object sender, RoutedEventArgs e)
+    {
+        var nextPreset = ZoomPresets.FirstOrDefault(p => p > _zoomLevel);
+        var newZoom = nextPreset > 0 ? nextPreset : _zoomLevel * 1.25;
+        ZoomToCenter(newZoom);
+    }
+
+    private void BtnZoomOut_Click(object sender, RoutedEventArgs e)
+    {
+        var prevPreset = ZoomPresets.LastOrDefault(p => p < _zoomLevel);
+        var newZoom = prevPreset > 0 ? prevPreset : _zoomLevel * 0.8;
+        ZoomToCenter(newZoom);
+    }
+
+    private void BtnResetView_Click(object sender, RoutedEventArgs e)
+    {
+        SetZoom(1.0);
+        CenterMapInView();
+    }
+
+    private void ZoomToCenter(double newZoom)
+    {
+        var mousePos = new Point(MapViewerGrid.ActualWidth / 2, MapViewerGrid.ActualHeight / 2);
+        ZoomToPoint(newZoom, mousePos);
+    }
+
+    private void ZoomToPoint(double newZoom, Point viewerPoint)
+    {
+        var oldZoom = _zoomLevel;
+        newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
+
+        if (Math.Abs(newZoom - oldZoom) < 0.001) return;
+
+        var canvasX = (viewerPoint.X - MapTranslate.X) / oldZoom;
+        var canvasY = (viewerPoint.Y - MapTranslate.Y) / oldZoom;
+
+        MapTranslate.X = viewerPoint.X - canvasX * newZoom;
+        MapTranslate.Y = viewerPoint.Y - canvasY * newZoom;
+
+        SetZoom(newZoom);
+    }
+
+    private void SetZoom(double zoom)
+    {
+        _zoomLevel = Math.Clamp(zoom, MinZoom, MaxZoom);
+        MapScale.ScaleX = _zoomLevel;
+        MapScale.ScaleY = _zoomLevel;
+
+        var zoomPercent = $"{_zoomLevel * 100:F0}%";
+        ZoomText.Text = zoomPercent;
+
+        RedrawAll();
+    }
+
+    private void CenterMapInView()
+    {
+        var viewerWidth = MapViewerGrid.ActualWidth;
+        var viewerHeight = MapViewerGrid.ActualHeight;
+
+        if (viewerWidth <= 0 || viewerHeight <= 0)
+        {
+            Dispatcher.BeginInvoke(new Action(CenterMapInView), System.Windows.Threading.DispatcherPriority.Loaded);
+            return;
+        }
+
+        var scaledMapWidth = MapCanvas.Width * _zoomLevel;
+        var scaledMapHeight = MapCanvas.Height * _zoomLevel;
+
+        MapTranslate.X = (viewerWidth - scaledMapWidth) / 2;
+        MapTranslate.Y = (viewerHeight - scaledMapHeight) / 2;
+    }
+
+    #endregion
+
+    #region Mouse Events
+
+    private void MapViewer_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _isDragging = true;
+        _dragStartPoint = e.GetPosition(MapViewerGrid);
+        _dragStartTranslateX = MapTranslate.X;
+        _dragStartTranslateY = MapTranslate.Y;
+        MapViewerGrid.CaptureMouse();
+    }
+
+    private void MapViewer_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        _isDragging = false;
+        MapViewerGrid.ReleaseMouseCapture();
+        MapCanvas.Cursor = Cursors.Arrow;
+    }
+
+    private void MapViewer_MouseMove(object sender, MouseEventArgs e)
+    {
+        // Update coordinate display
+        if (_currentMapConfig != null)
+        {
+            var canvasPos = e.GetPosition(MapCanvas);
+            var (gameX, gameZ) = _currentMapConfig.ScreenToGame(canvasPos.X, canvasPos.Y);
+            GameCoordsText.Text = $"X: {gameX:F1}, Z: {gameZ:F1}";
+        }
+
+        if (!_isDragging) return;
+
+        var currentPt = e.GetPosition(MapViewerGrid);
+        var deltaX = currentPt.X - _dragStartPoint.X;
+        var deltaY = currentPt.Y - _dragStartPoint.Y;
+
+        MapTranslate.X = _dragStartTranslateX + deltaX;
+        MapTranslate.Y = _dragStartTranslateY + deltaY;
+        MapCanvas.Cursor = Cursors.ScrollAll;
+    }
+
+    private void MapViewer_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        var mousePos = e.GetPosition(MapViewerGrid);
+        var zoomFactor = e.Delta > 0 ? 1.15 : 0.87;
+        var newZoom = Math.Clamp(_zoomLevel * zoomFactor, MinZoom, MaxZoom);
+
+        ZoomToPoint(newZoom, mousePos);
+        e.Handled = true;
+    }
+
+    #endregion
+}
