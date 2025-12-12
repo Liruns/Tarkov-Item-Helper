@@ -78,11 +78,15 @@
                     <Button x:Name="BtnCalcTransform" Content="재계산" Width="70" Height="28"
                             Click="BtnCalcTransform_Click" Background="#3E3E42" Foreground="White" BorderBrush="#555"
                             Margin="0,0,5,0" IsEnabled="False"
-                            ToolTip="참조점(노란선)을 기준으로 좌표 변환을 다시 계산합니다. 우클릭으로 참조점 해제 가능"/>
+                            ToolTip="참조점(노란선)을 기준으로 좌표 변환을 다시 계산합니다. Ctrl+드래그로 DB마커 위치 수정 후 재계산 가능"/>
                     <Button x:Name="BtnApplyTransform" Content="적용" Width="50" Height="28"
                             Click="BtnApplyTransform_Click" Background="#3E3E42" Foreground="White" BorderBrush="#555"
-                            Margin="0,0,10,0" IsEnabled="False"
+                            Margin="0,0,5,0" IsEnabled="False"
                             ToolTip="계산된 변환을 모든 API 마커에 다시 적용합니다"/>
+                    <Button x:Name="BtnResetDbPositions" Content="초기화" Width="60" Height="28"
+                            Click="BtnResetDbPositions_Click" Background="#D32F2F" Foreground="White" BorderBrush="#B71C1C"
+                            Margin="0,0,10,0" IsEnabled="False"
+                            ToolTip="수정한 DB 마커 위치를 원래대로 되돌립니다"/>
 
                     <Separator Width="1" Background="#555" Margin="10,2"/>
 

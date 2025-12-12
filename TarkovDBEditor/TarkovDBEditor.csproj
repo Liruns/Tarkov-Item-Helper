@@ -29,4 +29,11 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\TarkovHelper\Assets\tarkov_data.db">
+      <Link>tarkov_data.db</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

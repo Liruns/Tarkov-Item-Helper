@@ -64,6 +64,14 @@ public partial class MapTransferWindow : Window
     // Category filter
     private string? _categoryFilter;
 
+    // DB 마커 드래그 (Ctrl+클릭)
+    private bool _isDraggingDbMarker;
+    private MapMarker? _draggingDbMarker;
+    private Point _dbMarkerDragStart;
+
+    // DB 마커 임시 수정 위치 (마커 ID -> 수정된 게임 좌표)
+    private readonly Dictionary<string, (double X, double Z)> _modifiedDbPositions = new();
+
     public MapTransferWindow()
     {
         InitializeComponent();
@@ -434,6 +442,7 @@ public partial class MapTransferWindow : Window
 
     /// <summary>
     /// 매칭된 참조점으로 Transform 계산 및 모든 API 마커에 적용
+    /// (수정된 DB 마커 위치가 있으면 그 값을 사용)
     /// </summary>
     private void CalculateAndApplyTransform()
     {
@@ -441,12 +450,20 @@ public partial class MapTransferWindow : Window
 
         var referencePoints = _matchResults
             .Where(m => m.IsReferencePoint && m.ApiMarker.Geometry != null)
-            .Select(m => (
-                dbX: m.DbMarker.X,
-                dbZ: m.DbMarker.Z,
-                svgX: m.ApiMarker.Geometry!.X,
-                svgY: m.ApiMarker.Geometry!.Y
-            ))
+            .Select(m =>
+            {
+                // 수정된 위치가 있으면 사용, 없으면 원본 사용
+                double dbX = m.DbMarker.X;
+                double dbZ = m.DbMarker.Z;
+
+                if (_modifiedDbPositions.TryGetValue(m.DbMarker.Id, out var modifiedPos))
+                {
+                    dbX = modifiedPos.X;
+                    dbZ = modifiedPos.Z;
+                }
+
+                return (dbX, dbZ, svgX: m.ApiMarker.Geometry!.X, svgY: m.ApiMarker.Geometry!.Y);
+            })
             .ToList();
 
         if (referencePoints.Count < 3) return;
@@ -457,7 +474,7 @@ public partial class MapTransferWindow : Window
 
         _currentError = CoordinateTransformService.CalculateError(referencePoints, _currentTransform);
 
-        // 매칭된 마커들의 오차 계산
+        // 매칭된 마커들의 오차 계산 (수정된 위치 기준)
         foreach (var match in _matchResults)
         {
             if (match.ApiMarker.Geometry == null) continue;
@@ -467,8 +484,17 @@ public partial class MapTransferWindow : Window
                 match.ApiMarker.Geometry.Y,
                 _currentTransform);
 
-            var dx = calcX - match.DbMarker.X;
-            var dz = calcZ - match.DbMarker.Z;
+            // 수정된 위치가 있으면 사용
+            double targetX = match.DbMarker.X;
+            double targetZ = match.DbMarker.Z;
+            if (_modifiedDbPositions.TryGetValue(match.DbMarker.Id, out var modPos))
+            {
+                targetX = modPos.X;
+                targetZ = modPos.Z;
+            }
+
+            var dx = calcX - targetX;
+            var dz = calcZ - targetZ;
             match.DistanceError = Math.Sqrt(dx * dx + dz * dz);
         }
 
@@ -533,6 +559,25 @@ public partial class MapTransferWindow : Window
         }
 
         StatusText.Text = "변환이 모든 API 마커에 다시 적용되었습니다";
+        RedrawAll();
+    }
+
+    private void BtnResetDbPositions_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentMapConfig == null) return;
+
+        // 현재 맵의 수정된 DB 마커 위치만 초기화
+        var keysToRemove = _modifiedDbPositions.Keys
+            .Where(key => _dbMarkers.Any(m => m.Id == key && m.MapKey == _currentMapConfig.Key))
+            .ToList();
+
+        foreach (var key in keysToRemove)
+        {
+            _modifiedDbPositions.Remove(key);
+        }
+
+        StatusText.Text = $"DB 마커 위치가 원본으로 초기화되었습니다 ({keysToRemove.Count}개)";
+        UpdateButtonStates();
         RedrawAll();
     }
 
@@ -736,6 +781,12 @@ public partial class MapTransferWindow : Window
         BtnApplyTransform.IsEnabled = _currentTransform != null;
         BtnSelectAll.IsEnabled = _apiMarkers.Count > 0;
         BtnImportSelected.IsEnabled = _selectedApiMarkers.Count > 0 && _currentTransform != null;
+
+        // 수정된 DB 마커가 있으면 초기화 버튼 활성화
+        var hasModifiedDbMarkers = _currentMapConfig != null &&
+            _modifiedDbPositions.Any(kvp =>
+                _dbMarkers.Any(m => m.Id == kvp.Key && m.MapKey == _currentMapConfig.Key));
+        BtnResetDbPositions.IsEnabled = hasModifiedDbMarkers;
     }
 
     private void UpdateTransformInfo()
@@ -752,6 +803,20 @@ public partial class MapTransferWindow : Window
         {
             TransformInfoText.Text = "Not calculated";
             ErrorText.Text = "-";
+        }
+    }
+
+    private void UpdateModifiedCount()
+    {
+        if (_currentMapConfig == null) return;
+
+        var modifiedCount = _modifiedDbPositions.Count(kvp =>
+            _dbMarkers.Any(m => m.Id == kvp.Key && m.MapKey == _currentMapConfig.Key));
+
+        // 수정된 마커 개수를 상태바에 표시
+        if (modifiedCount > 0)
+        {
+            StatusText.Text = $"수정된 DB 마커: {modifiedCount}개 (Ctrl+클릭으로 드래그, 재계산 버튼으로 Transform 업데이트)";
         }
     }
 
@@ -837,7 +902,19 @@ public partial class MapTransferWindow : Window
 
         foreach (var marker in markersForMap)
         {
-            var (sx, sy) = _currentMapConfig.GameToScreen(marker.X, marker.Z);
+            // 수정된 위치가 있으면 사용, 없으면 원본 사용
+            double gameX = marker.X;
+            double gameZ = marker.Z;
+            bool isModified = false;
+
+            if (_modifiedDbPositions.TryGetValue(marker.Id, out var modifiedPos))
+            {
+                gameX = modifiedPos.X;
+                gameZ = modifiedPos.Z;
+                isModified = true;
+            }
+
+            var (sx, sy) = _currentMapConfig.GameToScreen(gameX, gameZ);
 
             double opacity = 1.0;
             if (hasFloors && _currentFloorId != null && marker.FloorId != null)
@@ -850,6 +927,25 @@ public partial class MapTransferWindow : Window
 
             var markerSize = 48 * inverseScale;
             var iconImage = GetMarkerIcon(marker.MarkerType);
+
+            // DB 마커 구분용 원형 테두리 (수정된 경우 주황색, 아닌 경우 녹색)
+            var outlineColor = isModified
+                ? Color.FromArgb((byte)(opacity * 255), 255, 152, 0)   // Orange #FF9800 (수정됨)
+                : Color.FromArgb((byte)(opacity * 255), 76, 175, 80);  // Green #4CAF50 (원본)
+
+            var dbOutline = new Ellipse
+            {
+                Width = markerSize + 12 * inverseScale,
+                Height = markerSize + 12 * inverseScale,
+                Fill = Brushes.Transparent,
+                Stroke = new SolidColorBrush(outlineColor),
+                StrokeThickness = (isModified ? 4 : 3) * inverseScale,
+                Tag = marker.Id,  // 클릭 감지용
+                Cursor = Cursors.Hand
+            };
+            Canvas.SetLeft(dbOutline, sx - (markerSize + 12 * inverseScale) / 2);
+            Canvas.SetTop(dbOutline, sy - (markerSize + 12 * inverseScale) / 2);
+            DbMarkersCanvas.Children.Add(dbOutline);
 
             if (iconImage != null)
             {
@@ -911,6 +1007,29 @@ public partial class MapTransferWindow : Window
                 Canvas.SetTop(icon, sy - icon.DesiredSize.Height / 2);
                 DbMarkersCanvas.Children.Add(icon);
             }
+
+            // "DB" 또는 "수정됨" 배지 (마커 우측 상단)
+            var badgeColor = isModified
+                ? Color.FromArgb((byte)(opacity * 230), 255, 152, 0)   // Orange
+                : Color.FromArgb((byte)(opacity * 230), 76, 175, 80);  // Green
+
+            var dbBadge = new Border
+            {
+                Background = new SolidColorBrush(badgeColor),
+                CornerRadius = new CornerRadius(3 * inverseScale),
+                Padding = new Thickness(3 * inverseScale, 1 * inverseScale, 3 * inverseScale, 1 * inverseScale),
+                Child = new TextBlock
+                {
+                    Text = isModified ? "수정" : "DB",
+                    Foreground = Brushes.White,
+                    FontSize = 12 * inverseScale,
+                    FontWeight = FontWeights.Bold
+                }
+            };
+            dbBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Canvas.SetLeft(dbBadge, sx + markerSize / 2 - 4 * inverseScale);
+            Canvas.SetTop(dbBadge, sy - markerSize / 2 - 8 * inverseScale);
+            DbMarkersCanvas.Children.Add(dbBadge);
 
             // Name label
             var nameLabel = new TextBlock
@@ -985,6 +1104,23 @@ public partial class MapTransferWindow : Window
             var isSelected = _selectedApiMarkers.Contains(marker.Uid);
             var markerSize = (isSelected ? 52 : 44) * inverseScale;
 
+            // API 마커 구분용 파란색 다이아몬드 테두리 (모든 API 마커에 적용)
+            var diamondSize = markerSize + 16 * inverseScale;
+            var apiOutline = new Polygon
+            {
+                Points = new PointCollection
+                {
+                    new Point(sx, sy - diamondSize / 2),              // 상단
+                    new Point(sx + diamondSize / 2, sy),              // 우측
+                    new Point(sx, sy + diamondSize / 2),              // 하단
+                    new Point(sx - diamondSize / 2, sy)               // 좌측
+                },
+                Fill = Brushes.Transparent,
+                Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 33, 150, 243)), // Blue #2196F3
+                StrokeThickness = 3 * inverseScale
+            };
+            ApiMarkersCanvas.Children.Add(apiOutline);
+
             // API 마커가 매핑 가능한 타입이면 아이콘 사용
             var mappedType = marker.MappedMarkerType;
             BitmapImage? iconImage = null;
@@ -1010,23 +1146,23 @@ public partial class MapTransferWindow : Window
                 Canvas.SetTop(image, sy - markerSize / 2);
                 ApiMarkersCanvas.Children.Add(image);
 
-                // 선택된 경우 테두리 추가
+                // 선택된 경우 추가 테두리
                 if (isSelected)
                 {
-                    var selectionRect = new Rectangle
+                    var selectionDiamond = new Polygon
                     {
-                        Width = markerSize + 8 * inverseScale,
-                        Height = markerSize + 8 * inverseScale,
+                        Points = new PointCollection
+                        {
+                            new Point(sx, sy - (diamondSize + 8 * inverseScale) / 2),
+                            new Point(sx + (diamondSize + 8 * inverseScale) / 2, sy),
+                            new Point(sx, sy + (diamondSize + 8 * inverseScale) / 2),
+                            new Point(sx - (diamondSize + 8 * inverseScale) / 2, sy)
+                        },
                         Fill = Brushes.Transparent,
                         Stroke = new SolidColorBrush(Color.FromRgb(0, 188, 212)), // Cyan
-                        StrokeThickness = 3 * inverseScale,
-                        RadiusX = 4 * inverseScale,
-                        RadiusY = 4 * inverseScale
+                        StrokeThickness = 3 * inverseScale
                     };
-
-                    Canvas.SetLeft(selectionRect, sx - (markerSize + 8 * inverseScale) / 2);
-                    Canvas.SetTop(selectionRect, sy - (markerSize + 8 * inverseScale) / 2);
-                    ApiMarkersCanvas.Children.Add(selectionRect);
+                    ApiMarkersCanvas.Children.Add(selectionDiamond);
                 }
             }
             else
@@ -1077,6 +1213,25 @@ public partial class MapTransferWindow : Window
                 Canvas.SetTop(catLabel, sy - catLabel.DesiredSize.Height / 2);
                 ApiMarkersCanvas.Children.Add(catLabel);
             }
+
+            // "API" 배지 (마커 우측 상단)
+            var apiBadge = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb((byte)(opacity * 230), 33, 150, 243)), // Blue
+                CornerRadius = new CornerRadius(3 * inverseScale),
+                Padding = new Thickness(3 * inverseScale, 1 * inverseScale, 3 * inverseScale, 1 * inverseScale),
+                Child = new TextBlock
+                {
+                    Text = "API",
+                    Foreground = Brushes.White,
+                    FontSize = 12 * inverseScale,
+                    FontWeight = FontWeights.Bold
+                }
+            };
+            apiBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Canvas.SetLeft(apiBadge, sx + markerSize / 2 - 4 * inverseScale);
+            Canvas.SetTop(apiBadge, sy - markerSize / 2 - 8 * inverseScale);
+            ApiMarkersCanvas.Children.Add(apiBadge);
 
             // Name label
             var (r, g, b) = mappedType.HasValue
@@ -1130,7 +1285,16 @@ public partial class MapTransferWindow : Window
             // Geometry가 없는 마커는 스킵
             if (match.ApiMarker.Geometry == null) continue;
 
-            var (dbSx, dbSy) = _currentMapConfig.GameToScreen(match.DbMarker.X, match.DbMarker.Z);
+            // 수정된 위치가 있으면 사용
+            double dbGameX = match.DbMarker.X;
+            double dbGameZ = match.DbMarker.Z;
+            if (_modifiedDbPositions.TryGetValue(match.DbMarker.Id, out var modifiedPos))
+            {
+                dbGameX = modifiedPos.X;
+                dbGameZ = modifiedPos.Z;
+            }
+
+            var (dbSx, dbSy) = _currentMapConfig.GameToScreen(dbGameX, dbGameZ);
 
             double apiSx, apiSy;
             if (match.ApiMarker.GameX.HasValue && match.ApiMarker.GameZ.HasValue)
@@ -1268,6 +1432,28 @@ public partial class MapTransferWindow : Window
 
     private void MapViewer_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // Ctrl+클릭: DB 마커 드래그
+        if (Keyboard.Modifiers == ModifierKeys.Control && _currentMapConfig != null)
+        {
+            var dbPos = e.GetPosition(DbMarkersCanvas);
+            var dbHitResult = VisualTreeHelper.HitTest(DbMarkersCanvas, dbPos);
+
+            // Ellipse (테두리)에서 Tag 확인
+            if (dbHitResult?.VisualHit is Ellipse ellipse && ellipse.Tag is string markerId)
+            {
+                var marker = _dbMarkers.FirstOrDefault(m => m.Id == markerId);
+                if (marker != null)
+                {
+                    _isDraggingDbMarker = true;
+                    _draggingDbMarker = marker;
+                    _dbMarkerDragStart = e.GetPosition(MapCanvas);
+                    MapViewerGrid.CaptureMouse();
+                    MapCanvas.Cursor = Cursors.SizeAll;
+                    return;
+                }
+            }
+        }
+
         // API 마커 클릭 체크
         var pos = e.GetPosition(ApiMarkersCanvas);
         var hitResult = VisualTreeHelper.HitTest(ApiMarkersCanvas, pos);
@@ -1312,6 +1498,25 @@ public partial class MapTransferWindow : Window
 
     private void MapViewer_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        // DB 마커 드래그 종료
+        if (_isDraggingDbMarker && _draggingDbMarker != null && _currentMapConfig != null)
+        {
+            var canvasPos = e.GetPosition(MapCanvas);
+            var (newGameX, newGameZ) = _currentMapConfig.ScreenToGame(canvasPos.X, canvasPos.Y);
+
+            // 수정된 위치 저장
+            _modifiedDbPositions[_draggingDbMarker.Id] = (newGameX, newGameZ);
+
+            _isDraggingDbMarker = false;
+            _draggingDbMarker = null;
+            MapViewerGrid.ReleaseMouseCapture();
+            MapCanvas.Cursor = Cursors.Arrow;
+
+            UpdateModifiedCount();
+            RedrawAll();
+            return;
+        }
+
         _isDragging = false;
         MapViewerGrid.ReleaseMouseCapture();
         MapCanvas.Cursor = Cursors.Arrow;
@@ -1325,6 +1530,18 @@ public partial class MapTransferWindow : Window
             var canvasPos = e.GetPosition(MapCanvas);
             var (gameX, gameZ) = _currentMapConfig.ScreenToGame(canvasPos.X, canvasPos.Y);
             GameCoordsText.Text = $"X: {gameX:F1}, Z: {gameZ:F1}";
+        }
+
+        // DB 마커 드래그 중
+        if (_isDraggingDbMarker && _draggingDbMarker != null && _currentMapConfig != null)
+        {
+            var canvasPos = e.GetPosition(MapCanvas);
+            var (newGameX, newGameZ) = _currentMapConfig.ScreenToGame(canvasPos.X, canvasPos.Y);
+
+            // 임시로 수정된 위치 저장하고 다시 그리기
+            _modifiedDbPositions[_draggingDbMarker.Id] = (newGameX, newGameZ);
+            RedrawAll();
+            return;
         }
 
         if (!_isDragging) return;
