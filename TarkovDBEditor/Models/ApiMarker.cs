@@ -96,4 +96,18 @@ public class ApiMarker
     /// Import 시점
     /// </summary>
     public DateTime ImportedAt { get; set; }
+
+    // ─────────────────────────────────────────────
+    // 승인 상태
+    // ─────────────────────────────────────────────
+
+    /// <summary>
+    /// 승인 여부 (사용자가 검증 완료했는지)
+    /// </summary>
+    public bool IsApproved { get; set; }
+
+    /// <summary>
+    /// 승인 시점
+    /// </summary>
+    public DateTime? ApprovedAt { get; set; }
 }

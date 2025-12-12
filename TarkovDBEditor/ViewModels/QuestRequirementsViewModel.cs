@@ -642,7 +642,9 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
                     QuestBsgId = marker.QuestBsgId,
                     QuestNameEn = marker.QuestNameEn,
                     ObjectiveDescription = marker.ObjectiveDescription,
-                    ImportedAt = marker.ImportedAt
+                    ImportedAt = marker.ImportedAt,
+                    IsApproved = marker.IsApproved,
+                    ApprovedAt = marker.ApprovedAt
                 };
                 SelectedApiMarkers.Add(item);
             }
@@ -653,6 +655,15 @@ public class QuestRequirementsViewModel : INotifyPropertyChanged
         }
 
         OnPropertyChanged(nameof(HasNoApiMarkers));
+    }
+
+    /// <summary>
+    /// API 마커 승인 상태 업데이트
+    /// </summary>
+    public async Task UpdateApiMarkerApprovalAsync(string markerId, bool isApproved)
+    {
+        await _apiMarkerService.UpdateApprovalAsync(markerId, isApproved);
+        System.Diagnostics.Debug.WriteLine($"[UpdateApiMarkerApprovalAsync] Updated markerId={markerId}, IsApproved={isApproved}");
     }
 
     /// <summary>
@@ -1427,6 +1438,15 @@ public class ApiReferenceMarkerItem : INotifyPropertyChanged
     public string? ObjectiveDescription { get; set; }
     public DateTime ImportedAt { get; set; }
 
+    private bool _isApproved;
+    public bool IsApproved
+    {
+        get => _isApproved;
+        set { _isApproved = value; OnPropertyChanged(); OnPropertyChanged(nameof(ApprovalStatus)); }
+    }
+
+    public DateTime? ApprovedAt { get; set; }
+
     /// <summary>
     /// 표시할 이름 (NameKo가 있으면 우선, 없으면 Name)
     /// </summary>
@@ -1455,6 +1475,11 @@ public class ApiReferenceMarkerItem : INotifyPropertyChanged
     /// API 소스 여부 (항상 true - Tarkov Market에서 온 마커)
     /// </summary>
     public bool IsApiSource => true;
+
+    /// <summary>
+    /// 승인 상태 표시
+    /// </summary>
+    public string ApprovalStatus => IsApproved ? "Approved" : "Pending";
 
     public event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged([CallerMemberName] string? name = null)

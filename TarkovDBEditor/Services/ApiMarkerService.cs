@@ -55,6 +55,10 @@ public class ApiMarkerService
                 -- 메타 정보
                 ImportedAt TEXT NOT NULL,
 
+                -- 승인 상태
+                IsApproved INTEGER NOT NULL DEFAULT 0,
+                ApprovedAt TEXT,
+
                 UNIQUE(TarkovMarketUid)
             )";
 
@@ -68,6 +72,23 @@ public class ApiMarkerService
             CREATE INDEX IF NOT EXISTS idx_apimarkers_questname ON ApiMarkers(QuestNameEn)";
         await using var indexCmd = new SqliteCommand(indexSql, connection);
         await indexCmd.ExecuteNonQueryAsync();
+
+        // Migration: Add IsApproved, ApprovedAt columns if not exist
+        try
+        {
+            await using var alterCmd1 = new SqliteCommand(
+                "ALTER TABLE ApiMarkers ADD COLUMN IsApproved INTEGER NOT NULL DEFAULT 0", connection);
+            await alterCmd1.ExecuteNonQueryAsync();
+        }
+        catch { /* Column already exists */ }
+
+        try
+        {
+            await using var alterCmd2 = new SqliteCommand(
+                "ALTER TABLE ApiMarkers ADD COLUMN ApprovedAt TEXT", connection);
+            await alterCmd2.ExecuteNonQueryAsync();
+        }
+        catch { /* Column already exists */ }
 
         // 스키마 메타 등록
         await RegisterSchemaMetaAsync(connection);
@@ -93,7 +114,9 @@ public class ApiMarkerService
             new() { Name = "QuestBsgId", DisplayName = "Quest BSG ID", Type = ColumnType.Text, SortOrder = 11 },
             new() { Name = "QuestNameEn", DisplayName = "Quest Name", Type = ColumnType.Text, SortOrder = 12 },
             new() { Name = "ObjectiveDescription", DisplayName = "Objective", Type = ColumnType.Text, SortOrder = 13 },
-            new() { Name = "ImportedAt", DisplayName = "Imported At", Type = ColumnType.DateTime, SortOrder = 14 }
+            new() { Name = "ImportedAt", DisplayName = "Imported At", Type = ColumnType.DateTime, SortOrder = 14 },
+            new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, SortOrder = 15 },
+            new() { Name = "ApprovedAt", DisplayName = "Approved At", Type = ColumnType.DateTime, SortOrder = 16 }
         };
 
         var schemaJson = JsonSerializer.Serialize(columns);
@@ -151,12 +174,14 @@ public class ApiMarkerService
                     INSERT INTO ApiMarkers (
                         Id, TarkovMarketUid, Name, NameKo, Category, SubCategory,
                         MapKey, X, Y, Z, FloorId,
-                        QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt
+                        QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt,
+                        IsApproved, ApprovedAt
                     )
                     VALUES (
                         @Id, @TarkovMarketUid, @Name, @NameKo, @Category, @SubCategory,
                         @MapKey, @X, @Y, @Z, @FloorId,
-                        @QuestBsgId, @QuestNameEn, @ObjectiveDescription, @ImportedAt
+                        @QuestBsgId, @QuestNameEn, @ObjectiveDescription, @ImportedAt,
+                        @IsApproved, @ApprovedAt
                     )
                     ON CONFLICT(TarkovMarketUid) DO UPDATE SET
                         Name = @Name,
@@ -189,6 +214,8 @@ public class ApiMarkerService
                 cmd.Parameters.AddWithValue("@QuestNameEn", (object?)marker.QuestNameEn ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@ObjectiveDescription", (object?)marker.ObjectiveDescription ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@ImportedAt", marker.ImportedAt.ToString("o"));
+                cmd.Parameters.AddWithValue("@IsApproved", marker.IsApproved ? 1 : 0);
+                cmd.Parameters.AddWithValue("@ApprovedAt", marker.ApprovedAt.HasValue ? marker.ApprovedAt.Value.ToString("o") : DBNull.Value);
 
                 await cmd.ExecuteNonQueryAsync();
             }
@@ -218,7 +245,8 @@ public class ApiMarkerService
 
         var sql = @"SELECT Id, TarkovMarketUid, Name, NameKo, Category, SubCategory,
                            MapKey, X, Y, Z, FloorId,
-                           QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt
+                           QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt,
+                           IsApproved, ApprovedAt
                     FROM ApiMarkers WHERE MapKey = @MapKey";
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@MapKey", mapKey);
@@ -248,7 +276,8 @@ public class ApiMarkerService
 
         var sql = @"SELECT Id, TarkovMarketUid, Name, NameKo, Category, SubCategory,
                            MapKey, X, Y, Z, FloorId,
-                           QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt
+                           QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt,
+                           IsApproved, ApprovedAt
                     FROM ApiMarkers WHERE QuestBsgId = @BsgId";
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@BsgId", bsgId);
@@ -279,7 +308,8 @@ public class ApiMarkerService
         // LIKE 검색으로 유사 매칭
         var sql = @"SELECT Id, TarkovMarketUid, Name, NameKo, Category, SubCategory,
                            MapKey, X, Y, Z, FloorId,
-                           QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt
+                           QuestBsgId, QuestNameEn, ObjectiveDescription, ImportedAt,
+                           IsApproved, ApprovedAt
                     FROM ApiMarkers WHERE QuestNameEn LIKE @QuestName";
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@QuestName", $"%{questName}%");
@@ -364,7 +394,33 @@ public class ApiMarkerService
             QuestBsgId = reader.IsDBNull(11) ? null : reader.GetString(11),
             QuestNameEn = reader.IsDBNull(12) ? null : reader.GetString(12),
             ObjectiveDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
-            ImportedAt = DateTime.TryParse(reader.GetString(14), out var dt) ? dt : DateTime.MinValue
+            ImportedAt = DateTime.TryParse(reader.GetString(14), out var dt) ? dt : DateTime.MinValue,
+            IsApproved = !reader.IsDBNull(15) && reader.GetInt64(15) != 0,
+            ApprovedAt = reader.IsDBNull(16) ? null : DateTime.TryParse(reader.GetString(16), out var adt) ? adt : null
         };
+    }
+
+    /// <summary>
+    /// API 마커 승인 상태 업데이트
+    /// </summary>
+    public async Task UpdateApprovalAsync(string markerId, bool isApproved)
+    {
+        if (!_db.IsConnected || string.IsNullOrEmpty(markerId)) return;
+
+        var connectionString = $"Data Source={_db.DatabasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        var sql = isApproved
+            ? "UPDATE ApiMarkers SET IsApproved = 1, ApprovedAt = @ApprovedAt WHERE Id = @Id"
+            : "UPDATE ApiMarkers SET IsApproved = 0, ApprovedAt = NULL WHERE Id = @Id";
+
+        await using var cmd = new SqliteCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@Id", markerId);
+        if (isApproved)
+        {
+            cmd.Parameters.AddWithValue("@ApprovedAt", DateTime.UtcNow.ToString("o"));
+        }
+        await cmd.ExecuteNonQueryAsync();
     }
 }

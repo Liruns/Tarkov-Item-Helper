@@ -403,6 +403,19 @@ public partial class QuestRequirementsView : Window
         }
     }
 
+    private async void ApiMarkerApprovalCheckbox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox cb && cb.DataContext is ApiReferenceMarkerItem item)
+        {
+            var isApproved = cb.IsChecked ?? false;
+            item.IsApproved = isApproved; // Update model immediately
+            await _viewModel.UpdateApiMarkerApprovalAsync(item.Id, isApproved);
+            StatusText.Text = isApproved
+                ? $"Approved API marker: {item.DisplayName}"
+                : $"Unapproved API marker: {item.DisplayName}";
+        }
+    }
+
     private async void ApplyApiMarkerLocation_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn) return;
