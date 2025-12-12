@@ -24,6 +24,7 @@ namespace TarkovDBEditor.Services
         private readonly string _itemsCachePath;
         private readonly string _questsCachePath;
         private readonly string _hideoutCachePath;
+        private readonly string _tradersCachePath;
 
         public TarkovDevDataService(string? basePath = null)
         {
@@ -36,6 +37,7 @@ namespace TarkovDBEditor.Services
             _itemsCachePath = Path.Combine(_cacheDir, "tarkov_dev_items.json");
             _questsCachePath = Path.Combine(_cacheDir, "tarkov_dev_quests.json");
             _hideoutCachePath = Path.Combine(_cacheDir, "tarkov_dev_hideout.json");
+            _tradersCachePath = Path.Combine(_cacheDir, "tarkov_dev_traders.json");
 
             Directory.CreateDirectory(_cacheDir);
         }
@@ -67,7 +69,15 @@ namespace TarkovDBEditor.Services
         }
 
         /// <summary>
-        /// 캐시 정보 가져오기 (캐시 날짜, 아이템 수, 퀘스트 수, Hideout 수)
+        /// 캐시된 Traders 데이터가 있는지 확인
+        /// </summary>
+        public bool HasCachedTraders()
+        {
+            return File.Exists(_tradersCachePath);
+        }
+
+        /// <summary>
+        /// 캐시 정보 가져오기 (캐시 날짜, 아이템 수, 퀘스트 수, Hideout 수, Traders 수)
         /// </summary>
         public TarkovDevCacheInfo GetCacheInfo()
         {
@@ -111,6 +121,20 @@ namespace TarkovDBEditor.Services
                     var json = File.ReadAllText(_hideoutCachePath);
                     var cache = JsonSerializer.Deserialize<TarkovDevHideoutCache>(json);
                     info.HideoutCount = cache?.Stations?.Count ?? 0;
+                }
+                catch { }
+            }
+
+            if (File.Exists(_tradersCachePath))
+            {
+                try
+                {
+                    var fileInfo = new FileInfo(_tradersCachePath);
+                    info.TradersCachedAt = fileInfo.LastWriteTime;
+
+                    var json = File.ReadAllText(_tradersCachePath);
+                    var cache = JsonSerializer.Deserialize<TarkovDevTradersCache>(json);
+                    info.TradersCount = cache?.Traders?.Count ?? 0;
                 }
                 catch { }
             }
@@ -182,6 +206,27 @@ namespace TarkovDBEditor.Services
         }
 
         /// <summary>
+        /// 캐시된 Traders 데이터 로드
+        /// </summary>
+        public async Task<List<TarkovDevTraderCacheItem>?> LoadCachedTradersAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (!File.Exists(_tradersCachePath))
+                return null;
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(_tradersCachePath, cancellationToken);
+                var cache = JsonSerializer.Deserialize<TarkovDevTradersCache>(json);
+                return cache?.Traders;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 아이템 데이터 캐시에 저장
         /// </summary>
         public async Task SaveItemsCacheAsync(
@@ -233,6 +278,24 @@ namespace TarkovDBEditor.Services
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(cache, options);
             await File.WriteAllTextAsync(_hideoutCachePath, json, cancellationToken);
+        }
+
+        /// <summary>
+        /// Traders 데이터 캐시에 저장
+        /// </summary>
+        public async Task SaveTradersCacheAsync(
+            List<TarkovDevTraderCacheItem> traders,
+            CancellationToken cancellationToken = default)
+        {
+            var cache = new TarkovDevTradersCache
+            {
+                CachedAt = DateTime.UtcNow,
+                Traders = traders
+            };
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(cache, options);
+            await File.WriteAllTextAsync(_tradersCachePath, json, cancellationToken);
         }
 
         /// <summary>
@@ -290,6 +353,22 @@ namespace TarkovDBEditor.Services
             {
                 result.HideoutError = ex.Message;
                 progress?.Invoke($"Failed to cache hideout: {ex.Message}");
+            }
+
+            try
+            {
+                // Traders 데이터 다운로드 및 캐시
+                progress?.Invoke("Downloading traders from tarkov.dev...");
+                var traders = await FetchAllTradersAsync(progress, cancellationToken);
+                await SaveTradersCacheAsync(traders, cancellationToken);
+                result.TradersCount = traders.Count;
+                result.TradersSuccess = true;
+                progress?.Invoke($"Cached {traders.Count} traders from tarkov.dev");
+            }
+            catch (Exception ex)
+            {
+                result.TradersError = ex.Message;
+                progress?.Invoke($"Failed to cache traders: {ex.Message}");
             }
 
             result.CachedAt = DateTime.Now;
@@ -395,6 +474,103 @@ namespace TarkovDBEditor.Services
             }
 
             progress?.Invoke($"Fetched {result.Count} quests from tarkov.dev");
+            return result;
+        }
+
+        /// <summary>
+        /// tarkov.dev에서 Traders 다국어 데이터 가져오기
+        /// </summary>
+        public async Task<List<TarkovDevTraderCacheItem>> FetchAllTradersAsync(
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            progress?.Invoke("Fetching traders from tarkov.dev API...");
+
+            var query = @"
+            {
+                traders(lang: en) {
+                    id
+                    name
+                    normalizedName
+                    imageLink
+                }
+                ko: traders(lang: ko) { id name }
+                ja: traders(lang: ja) { id name }
+            }";
+
+            var requestBody = JsonSerializer.Serialize(new { query });
+            var content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(GraphQLEndpoint, content, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+
+            var result = new List<TarkovDevTraderCacheItem>();
+
+            if (!doc.RootElement.TryGetProperty("data", out var data))
+                return result;
+
+            // 한국어, 일본어 맵 생성
+            var koNames = new Dictionary<string, string>();
+            var jaNames = new Dictionary<string, string>();
+
+            if (data.TryGetProperty("ko", out var koTraders))
+            {
+                foreach (var trader in koTraders.EnumerateArray())
+                {
+                    var id = trader.GetProperty("id").GetString();
+                    var name = trader.GetProperty("name").GetString();
+                    if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                        koNames[id] = name;
+                }
+            }
+
+            if (data.TryGetProperty("ja", out var jaTraders))
+            {
+                foreach (var trader in jaTraders.EnumerateArray())
+                {
+                    var id = trader.GetProperty("id").GetString();
+                    var name = trader.GetProperty("name").GetString();
+                    if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                        jaNames[id] = name;
+                }
+            }
+
+            // 영어 기준으로 병합
+            if (data.TryGetProperty("traders", out var traders))
+            {
+                foreach (var trader in traders.EnumerateArray())
+                {
+                    var id = trader.GetProperty("id").GetString();
+                    var name = trader.GetProperty("name").GetString();
+                    var normalizedName = trader.TryGetProperty("normalizedName", out var nn) ? nn.GetString() : null;
+                    var imageLink = trader.TryGetProperty("imageLink", out var il) ? il.GetString() : null;
+
+                    if (string.IsNullOrEmpty(id))
+                        continue;
+
+                    var nameKo = koNames.TryGetValue(id, out var ko) ? ko : null;
+                    var nameJa = jaNames.TryGetValue(id, out var ja) ? ja : null;
+
+                    // 번역이 영어와 같으면 null로 처리
+                    if (nameKo == name) nameKo = null;
+                    if (nameJa == name) nameJa = null;
+
+                    result.Add(new TarkovDevTraderCacheItem
+                    {
+                        Id = id,
+                        Name = name ?? "",
+                        NameKO = nameKo,
+                        NameJA = nameJa,
+                        NormalizedName = normalizedName,
+                        ImageLink = imageLink
+                    });
+                }
+            }
+
+            progress?.Invoke($"Fetched {result.Count} traders from tarkov.dev");
             return result;
         }
 
@@ -1313,10 +1489,13 @@ namespace TarkovDBEditor.Services
         public int QuestsCount { get; set; }
         public DateTime? HideoutCachedAt { get; set; }
         public int HideoutCount { get; set; }
+        public DateTime? TradersCachedAt { get; set; }
+        public int TradersCount { get; set; }
 
         public bool HasItemsCache => ItemsCachedAt.HasValue;
         public bool HasQuestsCache => QuestsCachedAt.HasValue;
         public bool HasHideoutCache => HideoutCachedAt.HasValue;
+        public bool HasTradersCache => TradersCachedAt.HasValue;
     }
 
     /// <summary>
@@ -1334,6 +1513,9 @@ namespace TarkovDBEditor.Services
         public bool HideoutSuccess { get; set; }
         public int HideoutCount { get; set; }
         public string? HideoutError { get; set; }
+        public bool TradersSuccess { get; set; }
+        public int TradersCount { get; set; }
+        public string? TradersError { get; set; }
     }
 
     /// <summary>
@@ -1400,6 +1582,45 @@ namespace TarkovDBEditor.Services
 
         [JsonPropertyName("stations")]
         public List<TarkovDevHideoutStation> Stations { get; set; } = new();
+    }
+
+    /// <summary>
+    /// tarkov.dev Traders 캐시 파일
+    /// </summary>
+    public class TarkovDevTradersCache
+    {
+        [JsonPropertyName("cachedAt")]
+        public DateTime CachedAt { get; set; }
+
+        [JsonPropertyName("traders")]
+        public List<TarkovDevTraderCacheItem> Traders { get; set; } = new();
+    }
+
+    /// <summary>
+    /// tarkov.dev Trader 캐시 아이템
+    /// </summary>
+    public class TarkovDevTraderCacheItem
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = "";
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = "";
+
+        [JsonPropertyName("nameKO")]
+        public string? NameKO { get; set; }
+
+        [JsonPropertyName("nameJA")]
+        public string? NameJA { get; set; }
+
+        [JsonPropertyName("normalizedName")]
+        public string? NormalizedName { get; set; }
+
+        [JsonPropertyName("imageLink")]
+        public string? ImageLink { get; set; }
+
+        [JsonPropertyName("localIconPath")]
+        public string? LocalIconPath { get; set; }
     }
 
     #endregion

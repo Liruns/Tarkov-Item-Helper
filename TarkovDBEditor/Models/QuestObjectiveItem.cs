@@ -78,6 +78,13 @@ namespace TarkovDBEditor.Models
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
+        public QuestObjectiveItem()
+        {
+            // 컬렉션 변경 시 관련 프로퍼티 알림
+            _locationPoints.CollectionChanged += LocationPoints_CollectionChanged;
+            _optionalPoints.CollectionChanged += OptionalPoints_CollectionChanged;
+        }
+
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -183,12 +190,27 @@ namespace TarkovDBEditor.Models
             get => _locationPoints;
             set
             {
+                if (_locationPoints != null)
+                    _locationPoints.CollectionChanged -= LocationPoints_CollectionChanged;
+
                 _locationPoints = value;
+
+                if (_locationPoints != null)
+                    _locationPoints.CollectionChanged += LocationPoints_CollectionChanged;
+
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(HasCoordinates));
                 OnPropertyChanged(nameof(CoordinatesDisplay));
                 OnPropertyChanged(nameof(PolygonType));
             }
+        }
+
+        private void LocationPoints_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(LocationPoints));
+            OnPropertyChanged(nameof(HasCoordinates));
+            OnPropertyChanged(nameof(CoordinatesDisplay));
+            OnPropertyChanged(nameof(PolygonType));
         }
 
         // JSON 문자열로 직렬화/역직렬화
@@ -212,6 +234,63 @@ namespace TarkovDBEditor.Models
                 else
                 {
                     LocationPoints = new ObservableCollection<LocationPoint>();
+                }
+            }
+        }
+
+        // Optional 좌표 집합 (여러 위치 중 한 곳 - OR 관계)
+        private ObservableCollection<LocationPoint> _optionalPoints = new();
+        /// <summary>
+        /// 여러 위치 중 한 곳을 나타내는 포인트 목록 (OR 관계)
+        /// LocationPoints가 범위(영역)를 정의하는 반면, OptionalPoints는 개별 선택지 위치들을 나타냅니다.
+        /// </summary>
+        public ObservableCollection<LocationPoint> OptionalPoints
+        {
+            get => _optionalPoints;
+            set
+            {
+                if (_optionalPoints != null)
+                    _optionalPoints.CollectionChanged -= OptionalPoints_CollectionChanged;
+
+                _optionalPoints = value;
+
+                if (_optionalPoints != null)
+                    _optionalPoints.CollectionChanged += OptionalPoints_CollectionChanged;
+
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasOptionalPoints));
+                OnPropertyChanged(nameof(OptionalPointsDisplay));
+            }
+        }
+
+        private void OptionalPoints_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(OptionalPoints));
+            OnPropertyChanged(nameof(HasOptionalPoints));
+            OnPropertyChanged(nameof(OptionalPointsDisplay));
+        }
+
+        // Optional Points JSON 직렬화/역직렬화
+        public string? OptionalPointsJson
+        {
+            get => OptionalPoints.Count > 0 ? JsonSerializer.Serialize(OptionalPoints) : null;
+            set
+            {
+                if (!string.IsNullOrEmpty(value))
+                {
+                    try
+                    {
+                        var points = JsonSerializer.Deserialize<List<LocationPoint>>(value);
+                        OptionalPoints = new ObservableCollection<LocationPoint>(points ?? new List<LocationPoint>());
+                    }
+                    catch
+                    {
+                        OptionalPoints = new ObservableCollection<LocationPoint>();
+                    }
+                }
+                else
+                {
+                    OptionalPoints = new ObservableCollection<LocationPoint>();
                 }
             }
         }
@@ -288,6 +367,12 @@ namespace TarkovDBEditor.Models
             4 => "Quad",
             _ => $"Polygon"
         };
+
+        public bool HasOptionalPoints => OptionalPoints.Count > 0;
+
+        public string OptionalPointsDisplay => HasOptionalPoints
+            ? $"{OptionalPoints.Count} locations"
+            : "";
 
         public string ApprovalStatus => IsApproved ? "Approved" : "Pending";
 

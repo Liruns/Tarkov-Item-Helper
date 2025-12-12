@@ -1011,6 +1011,134 @@ namespace TarkovDBEditor.Services
 
         #endregion
 
+        #region Trader 아이콘 다운로드
+
+        /// <summary>
+        /// Trader 아이콘 이미지를 Trader ID로 저장하여 배치 다운로드합니다
+        /// tarkov.dev 캐시된 데이터의 imageLink를 사용합니다
+        /// </summary>
+        public async Task<IconDownloadResult> DownloadTraderIconsAsync(
+            IEnumerable<TarkovDevTraderCacheItem> traders,
+            Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new IconDownloadResult();
+
+            // traders 디렉토리 생성
+            var traderIconDir = Path.Combine(_iconDir, "traders");
+            Directory.CreateDirectory(traderIconDir);
+
+            var traderList = traders.Where(t => !string.IsNullOrEmpty(t.ImageLink)).ToList();
+            result.TotalItems = traderList.Count;
+
+            if (traderList.Count == 0)
+            {
+                progress?.Invoke("No trader icons to download");
+                return result;
+            }
+
+            // 이미 다운로드된 아이콘 확인
+            var toDownload = new List<TarkovDevTraderCacheItem>();
+            foreach (var trader in traderList)
+            {
+                var ext = GetImageExtension(trader.ImageLink!);
+                var filePath = Path.Combine(traderIconDir, $"{trader.Id}{ext}");
+
+                if (File.Exists(filePath))
+                {
+                    result.AlreadyDownloaded++;
+                }
+                else
+                {
+                    toDownload.Add(trader);
+                }
+            }
+
+            progress?.Invoke($"Trader icons: {result.AlreadyDownloaded} already downloaded, {toDownload.Count} to download");
+
+            if (toDownload.Count == 0)
+            {
+                return result;
+            }
+
+            // 병렬 다운로드 (최대 5개 동시)
+            var semaphore = new SemaphoreSlim(5);
+            var lockObj = new object();
+            var completed = 0;
+
+            var tasks = toDownload.Select(async trader =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    var success = await DownloadTraderIconAsync(trader.Id, trader.ImageLink!, traderIconDir, cancellationToken);
+
+                    lock (lockObj)
+                    {
+                        completed++;
+                        if (success)
+                            result.Downloaded++;
+                        else
+                            result.Failed++;
+
+                        progress?.Invoke($"Downloading trader icons: {completed}/{toDownload.Count} ({result.Downloaded} success, {result.Failed} failed)");
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+
+            progress?.Invoke($"Trader icon download complete: {result.Downloaded} downloaded, {result.Failed} failed, {result.AlreadyDownloaded} already existed");
+            return result;
+        }
+
+        /// <summary>
+        /// 단일 Trader 아이콘 다운로드
+        /// </summary>
+        private async Task<bool> DownloadTraderIconAsync(string traderId, string iconUrl, string targetDir, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var ext = GetImageExtension(iconUrl);
+                var filePath = Path.Combine(targetDir, $"{traderId}{ext}");
+
+                using var response = await _httpClient.GetAsync(iconUrl, cancellationToken);
+                response.EnsureSuccessStatusCode();
+
+                var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                await File.WriteAllBytesAsync(filePath, bytes, cancellationToken);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _failedDownloads.TryAdd($"trader_{traderId}", (iconUrl, ex.Message));
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 특정 Trader ID의 아이콘 파일 경로 가져오기 (없으면 null)
+        /// </summary>
+        public string? GetTraderIconPath(string traderId)
+        {
+            var traderIconDir = Path.Combine(_iconDir, "traders");
+            var extensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp" };
+            foreach (var ext in extensions)
+            {
+                var path = Path.Combine(traderIconDir, $"{traderId}{ext}");
+                if (File.Exists(path))
+                    return path;
+            }
+            return null;
+        }
+
+        #endregion
+
         public void Dispose()
         {
             _httpClient.Dispose();
