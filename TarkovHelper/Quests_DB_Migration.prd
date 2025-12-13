@@ -369,9 +369,73 @@ DB 데이터(퀘스트 정보)와 사용자 데이터(진행 상태)는 **완전
 
 | 데이터 유형 | 저장 위치 | 업데이트 주체 | 보존 정책 |
 |-------------|-----------|---------------|-----------|
-| 퀘스트 정보 | SQLite DB | TarkovDBEditor / API 동기화 | 언제든 덮어쓰기 가능 |
-| 사용자 진행 상태 | JSON 파일 | 사용자 액션 | 영구 보존 |
-| 목표 완료 상태 | JSON 파일 | 사용자 액션 | 영구 보존 |
+| 퀘스트 정보 | `tarkov_data.db` | TarkovDBEditor / API 동기화 | 언제든 덮어쓰기 가능 |
+| 사용자 진행 상태 | `user_data.db` | 사용자 액션 | 영구 보존 |
+| 목표 완료 상태 | `user_data.db` | 사용자 액션 | 영구 보존 |
+| 아이템 인벤토리 | `user_data.db` | 사용자 액션 | 영구 보존 |
+| 하이드아웃 진행 | `user_data.db` | 사용자 액션 | 영구 보존 |
+
+### 8.1.1 사용자 데이터 DB 구조 (`user_data.db`)
+
+```sql
+-- 퀘스트 진행 상태
+CREATE TABLE QuestProgress (
+    Id TEXT PRIMARY KEY,           -- tarkov.dev Quest ID
+    NormalizedName TEXT,           -- 폴백용
+    Status TEXT NOT NULL,          -- Done, Failed
+    UpdatedAt TEXT NOT NULL
+);
+
+-- 퀘스트 목표 진행 상태
+CREATE TABLE ObjectiveProgress (
+    Id TEXT PRIMARY KEY,           -- QuestObjective ID 또는 "questName:index"
+    QuestId TEXT,                  -- 연결된 퀘스트 ID
+    IsCompleted INTEGER NOT NULL DEFAULT 0,
+    UpdatedAt TEXT NOT NULL
+);
+
+-- 아이템 인벤토리 (향후 확장)
+CREATE TABLE ItemInventory (
+    ItemId TEXT PRIMARY KEY,
+    Count INTEGER NOT NULL DEFAULT 0,
+    FoundInRaid INTEGER NOT NULL DEFAULT 0,
+    UpdatedAt TEXT NOT NULL
+);
+
+-- 하이드아웃 진행 (향후 확장)
+CREATE TABLE HideoutProgress (
+    StationId TEXT PRIMARY KEY,
+    Level INTEGER NOT NULL DEFAULT 0,
+    UpdatedAt TEXT NOT NULL
+);
+
+-- 설정
+CREATE TABLE UserSettings (
+    Key TEXT PRIMARY KEY,
+    Value TEXT NOT NULL
+);
+```
+
+### 8.1.2 JSON → DB 마이그레이션
+
+기존 JSON 파일이 존재하면 자동으로 DB로 마이그레이션 후 삭제합니다.
+
+```
+마이그레이션 대상:
+- quest_progress.json → QuestProgress 테이블
+- quest_progress_v2.json → QuestProgress 테이블
+- objective_progress.json → ObjectiveProgress 테이블
+- hideout_progress.json → HideoutProgress 테이블
+- item_inventory.json → ItemInventory 테이블 (있는 경우)
+```
+
+마이그레이션 순서:
+1. user_data.db 생성 (없으면)
+2. 테이블 생성
+3. JSON 파일 읽기
+4. DB에 데이터 삽입
+5. JSON 파일 삭제
+6. 마이그레이션 완료 로그
 
 ### 8.2 식별자 전략
 

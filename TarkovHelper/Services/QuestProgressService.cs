@@ -1,5 +1,3 @@
-using System.IO;
-using System.Text.Json;
 using TarkovHelper.Debug;
 using TarkovHelper.Models;
 
@@ -12,10 +10,6 @@ namespace TarkovHelper.Services
     {
         private static QuestProgressService? _instance;
         public static QuestProgressService Instance => _instance ??= new QuestProgressService();
-
-        private const string ProgressFileName = "quest_progress.json";
-        private const string ProgressFileNameV2 = "quest_progress_v2.json";
-        private const string ObjectiveProgressFileName = "objective_progress.json";
 
         private Dictionary<string, QuestStatus> _questProgress = new();
         private Dictionary<string, TarkovTask> _tasksByNormalizedName = new();
@@ -130,7 +124,7 @@ namespace TarkovHelper.Services
 
             if (changed)
             {
-                SaveProgressV2();
+                SaveProgress();
             }
         }
 
@@ -762,270 +756,208 @@ namespace TarkovHelper.Services
 
         #region Persistence
 
+        private readonly UserDataDbService _userDataDb = UserDataDbService.Instance;
+
         private void SaveProgress()
         {
-            // V1 형식으로 저장 (레거시 호환성)
-            try
-            {
-                var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileName);
-                Directory.CreateDirectory(AppEnv.ConfigPath);
-
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                };
-
-                // Convert enum to string for JSON
-                var progressData = _questProgress.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => kvp.Value.ToString()
-                );
-
-                var json = JsonSerializer.Serialize(progressData, options);
-                File.WriteAllText(filePath, json);
-            }
-            catch
-            {
-                // Ignore save failures
-            }
-
-            // V2 형식도 함께 저장
-            SaveProgressV2();
+            // DB에 저장 (비동기를 동기로 호출)
+            SaveProgressToDbAsync().GetAwaiter().GetResult();
         }
 
-        private void SaveProgressV2()
+        private async Task SaveProgressToDbAsync()
         {
             try
             {
-                var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileNameV2);
-                Directory.CreateDirectory(AppEnv.ConfigPath);
-
-                // V2 데이터 동기화 (_questProgress에서)
-                SyncQuestProgressToV2();
-
-                var options = new JsonSerializerOptions
+                foreach (var kvp in _questProgress)
                 {
-                    WriteIndented = true
-                };
+                    var normalizedName = kvp.Key;
+                    var status = kvp.Value;
 
-                var json = JsonSerializer.Serialize(_progressDataV2, options);
-                File.WriteAllText(filePath, json);
+                    // ID 조회
+                    string id = normalizedName;
+                    if (_tasksByNormalizedName.TryGetValue(normalizedName, out var task))
+                    {
+                        id = task.Ids?.FirstOrDefault() ?? normalizedName;
+                    }
+
+                    await _userDataDb.SaveQuestProgressAsync(id, normalizedName, status);
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save V2 progress: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save progress to DB: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// _questProgress 딕셔너리를 V2 형식으로 동기화
+        /// 단일 퀘스트 진행 상태를 DB에 저장
         /// </summary>
-        private void SyncQuestProgressToV2()
+        private void SaveSingleQuestProgress(string normalizedName, QuestStatus status)
         {
-            // 기존 V2 데이터의 매핑 정보 보존
-            var existingById = _progressDataV2.CompletedQuests
-                .Concat(_progressDataV2.FailedQuests)
-                .Where(e => !string.IsNullOrEmpty(e.Id))
-                .ToDictionary(e => e.NormalizedName ?? "", e => e.Id, StringComparer.OrdinalIgnoreCase);
-
-            _progressDataV2.CompletedQuests.Clear();
-            _progressDataV2.FailedQuests.Clear();
-
-            foreach (var kvp in _questProgress)
+            Task.Run(async () =>
             {
-                var normalizedName = kvp.Key;
-                var status = kvp.Value;
+                try
+                {
+                    string id = normalizedName;
+                    if (_tasksByNormalizedName.TryGetValue(normalizedName, out var task))
+                    {
+                        id = task.Ids?.FirstOrDefault() ?? normalizedName;
+                    }
 
-                // ID 조회 (태스크에서 또는 기존 매핑에서)
-                string? id = null;
-                if (_tasksByNormalizedName.TryGetValue(normalizedName, out var task))
-                {
-                    id = task.Ids?.FirstOrDefault();
+                    await _userDataDb.SaveQuestProgressAsync(id, normalizedName, status);
                 }
-                else if (existingById.TryGetValue(normalizedName, out var existingId))
+                catch (Exception ex)
                 {
-                    id = existingId;
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save single quest progress: {ex.Message}");
                 }
+            });
+        }
 
-                var entry = new QuestProgressEntry
+        /// <summary>
+        /// 단일 퀘스트 진행 상태를 DB에서 삭제
+        /// </summary>
+        private void DeleteSingleQuestProgress(string normalizedName)
+        {
+            Task.Run(async () =>
+            {
+                try
                 {
-                    Id = id,
-                    NormalizedName = normalizedName,
-                    Status = status.ToString()
-                };
+                    string id = normalizedName;
+                    if (_tasksByNormalizedName.TryGetValue(normalizedName, out var task))
+                    {
+                        id = task.Ids?.FirstOrDefault() ?? normalizedName;
+                    }
 
-                if (status == QuestStatus.Done)
-                {
-                    _progressDataV2.CompletedQuests.Add(entry);
+                    await _userDataDb.DeleteQuestProgressAsync(id);
                 }
-                else if (status == QuestStatus.Failed)
+                catch (Exception ex)
                 {
-                    _progressDataV2.FailedQuests.Add(entry);
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to delete quest progress: {ex.Message}");
                 }
-            }
+            });
         }
 
         private void LoadProgress()
         {
-            // V2 형식 먼저 시도
-            if (LoadProgressV2())
-            {
-                // V2에서 _questProgress로 동기화
-                SyncV2ToQuestProgress();
-                return;
-            }
+            // JSON → DB 마이그레이션 먼저 수행
+            _userDataDb.MigrateFromJsonAsync().GetAwaiter().GetResult();
 
-            // V1 형식으로 폴백
-            LoadProgressV1();
+            // DB에서 로드
+            LoadProgressFromDbAsync().GetAwaiter().GetResult();
         }
 
-        private bool LoadProgressV2()
+        private async Task LoadProgressFromDbAsync()
         {
             try
             {
-                var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileNameV2);
+                var dbProgress = await _userDataDb.LoadQuestProgressAsync();
 
-                if (!File.Exists(filePath))
-                    return false;
-
-                var json = File.ReadAllText(filePath);
-                var progressData = JsonSerializer.Deserialize<QuestProgressDataV2>(json);
-
-                if (progressData != null && progressData.Version >= 2)
+                _questProgress.Clear();
+                foreach (var kvp in dbProgress)
                 {
-                    _progressDataV2 = progressData;
-                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Loaded V2 progress: {progressData.CompletedQuests.Count} completed, {progressData.FailedQuests.Count} failed");
-                    return true;
+                    _questProgress[kvp.Key] = kvp.Value;
                 }
+
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Loaded {_questProgress.Count} quest progress from DB");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to load V2 progress: {ex.Message}");
-            }
-
-            return false;
-        }
-
-        private void LoadProgressV1()
-        {
-            try
-            {
-                var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileName);
-
-                if (!File.Exists(filePath))
-                    return;
-
-                var json = File.ReadAllText(filePath);
-                var progressData = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-
-                if (progressData != null)
-                {
-                    _questProgress.Clear();
-                    foreach (var kvp in progressData)
-                    {
-                        if (Enum.TryParse<QuestStatus>(kvp.Value, out var status))
-                        {
-                            _questProgress[kvp.Key] = status;
-                        }
-                    }
-
-                    // V1 → V2 마이그레이션
-                    SyncQuestProgressToV2();
-                    SaveProgressV2();
-                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Migrated V1 progress to V2: {_questProgress.Count} entries");
-                }
-            }
-            catch
-            {
-                // Use empty progress on load failure
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to load progress from DB: {ex.Message}");
                 _questProgress.Clear();
-            }
-        }
-
-        /// <summary>
-        /// V2 데이터를 _questProgress 딕셔너리로 동기화
-        /// </summary>
-        private void SyncV2ToQuestProgress()
-        {
-            _questProgress.Clear();
-
-            foreach (var entry in _progressDataV2.CompletedQuests)
-            {
-                // NormalizedName 우선, 없으면 ID로 조회
-                var key = entry.NormalizedName;
-                if (string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(entry.Id))
-                {
-                    if (_tasksById.TryGetValue(entry.Id, out var task))
-                    {
-                        key = task.NormalizedName;
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(key))
-                {
-                    _questProgress[key] = QuestStatus.Done;
-                }
-            }
-
-            foreach (var entry in _progressDataV2.FailedQuests)
-            {
-                var key = entry.NormalizedName;
-                if (string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(entry.Id))
-                {
-                    if (_tasksById.TryGetValue(entry.Id, out var task))
-                    {
-                        key = task.NormalizedName;
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(key))
-                {
-                    _questProgress[key] = QuestStatus.Failed;
-                }
             }
         }
 
         private void SaveObjectiveProgress()
         {
+            // DB에 저장 (비동기를 동기로 호출)
+            SaveObjectiveProgressToDbAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task SaveObjectiveProgressToDbAsync()
+        {
             try
             {
-                var filePath = Path.Combine(AppEnv.ConfigPath, ObjectiveProgressFileName);
-                Directory.CreateDirectory(AppEnv.ConfigPath);
-
-                var options = new JsonSerializerOptions
+                foreach (var kvp in _objectiveProgress)
                 {
-                    WriteIndented = true
-                };
+                    // 키 형식: "questName:index" 또는 "id:objectiveId"
+                    string? questId = null;
+                    if (kvp.Key.Contains(':'))
+                    {
+                        var parts = kvp.Key.Split(':');
+                        if (parts[0] != "id")
+                        {
+                            questId = parts[0];
+                        }
+                    }
 
-                var json = JsonSerializer.Serialize(_objectiveProgress, options);
-                File.WriteAllText(filePath, json);
+                    await _userDataDb.SaveObjectiveProgressAsync(kvp.Key, questId, kvp.Value);
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore save failures
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save objective progress to DB: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 단일 목표 진행 상태를 DB에 저장
+        /// </summary>
+        private void SaveSingleObjectiveProgress(string key, bool isCompleted, string? questId = null)
+        {
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await _userDataDb.SaveObjectiveProgressAsync(key, questId, isCompleted);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save single objective progress: {ex.Message}");
+                }
+            });
+        }
+
+        /// <summary>
+        /// 단일 목표 진행 상태를 DB에서 삭제
+        /// </summary>
+        private void DeleteSingleObjectiveProgress(string key)
+        {
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await _userDataDb.DeleteObjectiveProgressAsync(key);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to delete objective progress: {ex.Message}");
+                }
+            });
         }
 
         private void LoadObjectiveProgress()
         {
+            // DB에서 로드
+            LoadObjectiveProgressFromDbAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task LoadObjectiveProgressFromDbAsync()
+        {
             try
             {
-                var filePath = Path.Combine(AppEnv.ConfigPath, ObjectiveProgressFileName);
+                var dbProgress = await _userDataDb.LoadObjectiveProgressAsync();
 
-                if (!File.Exists(filePath))
-                    return;
-
-                var json = File.ReadAllText(filePath);
-                var progressData = JsonSerializer.Deserialize<Dictionary<string, bool>>(json);
-
-                if (progressData != null)
+                _objectiveProgress.Clear();
+                foreach (var kvp in dbProgress)
                 {
-                    _objectiveProgress = progressData;
+                    _objectiveProgress[kvp.Key] = kvp.Value;
                 }
+
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Loaded {_objectiveProgress.Count} objective progress from DB");
             }
-            catch
+            catch (Exception ex)
             {
-                // Use empty progress on load failure
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to load objective progress from DB: {ex.Message}");
                 _objectiveProgress.Clear();
             }
         }
