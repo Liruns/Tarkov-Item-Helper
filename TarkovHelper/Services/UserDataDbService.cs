@@ -21,6 +21,30 @@ public sealed class UserDataDbService
     public bool IsInitialized => _isInitialized;
     public string DatabasePath => _databasePath;
 
+    /// <summary>
+    /// 마이그레이션 진행 상황 이벤트
+    /// </summary>
+    public event Action<string>? MigrationProgress;
+
+    /// <summary>
+    /// 마이그레이션이 필요한지 확인
+    /// </summary>
+    public bool NeedsMigration()
+    {
+        var v2Path = Path.Combine(AppEnv.ConfigPath, "quest_progress_v2.json");
+        var v1Path = Path.Combine(AppEnv.ConfigPath, "quest_progress.json");
+        var objPath = Path.Combine(AppEnv.ConfigPath, "objective_progress.json");
+        var hideoutPath = Path.Combine(AppEnv.ConfigPath, "hideout_progress.json");
+
+        return File.Exists(v2Path) || File.Exists(v1Path) || File.Exists(objPath) || File.Exists(hideoutPath);
+    }
+
+    private void ReportProgress(string message)
+    {
+        MigrationProgress?.Invoke(message);
+        System.Diagnostics.Debug.WriteLine($"[UserDataDbService] {message}");
+    }
+
     private UserDataDbService()
     {
         _databasePath = Path.Combine(AppEnv.ConfigPath, "user_data.db");
@@ -361,16 +385,30 @@ public sealed class UserDataDbService
     /// </summary>
     public async Task<bool> MigrateFromJsonAsync()
     {
+        if (!NeedsMigration())
+        {
+            return false;
+        }
+
+        ReportProgress("데이터 마이그레이션을 시작합니다...");
         var migrated = false;
 
         // Quest Progress 마이그레이션
+        ReportProgress("퀘스트 진행 데이터 마이그레이션 중...");
         migrated |= await MigrateQuestProgressJsonAsync();
 
         // Objective Progress 마이그레이션
+        ReportProgress("목표 진행 데이터 마이그레이션 중...");
         migrated |= await MigrateObjectiveProgressJsonAsync();
 
         // Hideout Progress 마이그레이션
+        ReportProgress("하이드아웃 진행 데이터 마이그레이션 중...");
         migrated |= await MigrateHideoutProgressJsonAsync();
+
+        if (migrated)
+        {
+            ReportProgress("데이터 마이그레이션 완료!");
+        }
 
         return migrated;
     }

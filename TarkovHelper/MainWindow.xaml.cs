@@ -215,6 +215,15 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 마이그레이션 진행 상황 업데이트
+    /// </summary>
+    private void OnMigrationProgress(string message)
+    {
+        // BeginInvoke를 사용하여 비동기로 UI 업데이트 (데드락 방지)
+        Dispatcher.BeginInvoke(() => UpdateLoadingStatus(message));
+    }
+
+    /// <summary>
     /// Load task data and show Quest List page
     /// </summary>
     private async Task LoadAndShowQuestListAsync()
@@ -222,23 +231,43 @@ public partial class MainWindow : Window
         var tarkovService = TarkovDataService.Instance;
         var progressService = QuestProgressService.Instance;
         var apiService = TarkovDevApiService.Instance;
+        var userDataDb = UserDataDbService.Instance;
 
         List<TarkovTask>? tasks = null;
 
-        // 1. DB에서 먼저 로드 시도
-        if (await progressService.InitializeFromDbAsync())
+        // 마이그레이션 필요 여부 확인 및 진행 표시
+        bool needsMigration = userDataDb.NeedsMigration();
+        if (needsMigration)
         {
-            tasks = progressService.AllTasks.ToList();
-            System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from DB");
+            ShowLoadingOverlay("데이터 마이그레이션 준비 중...");
+            userDataDb.MigrationProgress += OnMigrationProgress;
         }
-        else
+
+        try
         {
-            // 2. DB 로드 실패 시 JSON 폴백
-            tasks = await tarkovService.LoadTasksFromJsonAsync();
-            if (tasks != null && tasks.Count > 0)
+            // 1. DB에서 먼저 로드 시도
+            if (await progressService.InitializeFromDbAsync())
             {
-                progressService.Initialize(tasks);
-                System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from JSON (DB fallback)");
+                tasks = progressService.AllTasks.ToList();
+                System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from DB");
+            }
+            else
+            {
+                // 2. DB 로드 실패 시 JSON 폴백
+                tasks = await tarkovService.LoadTasksFromJsonAsync();
+                if (tasks != null && tasks.Count > 0)
+                {
+                    progressService.Initialize(tasks);
+                    System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from JSON (DB fallback)");
+                }
+            }
+        }
+        finally
+        {
+            if (needsMigration)
+            {
+                userDataDb.MigrationProgress -= OnMigrationProgress;
+                HideLoadingOverlay();
             }
         }
 

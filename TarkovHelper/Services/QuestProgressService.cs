@@ -760,8 +760,8 @@ namespace TarkovHelper.Services
 
         private void SaveProgress()
         {
-            // DB에 저장 (비동기를 동기로 호출)
-            SaveProgressToDbAsync().GetAwaiter().GetResult();
+            // DB에 저장 (Task.Run으로 데드락 방지)
+            Task.Run(async () => await SaveProgressToDbAsync()).GetAwaiter().GetResult();
         }
 
         private async Task SaveProgressToDbAsync()
@@ -839,11 +839,15 @@ namespace TarkovHelper.Services
 
         private void LoadProgress()
         {
-            // JSON → DB 마이그레이션 먼저 수행
-            _userDataDb.MigrateFromJsonAsync().GetAwaiter().GetResult();
+            // Task.Run으로 데드락 방지
+            Task.Run(async () =>
+            {
+                // JSON → DB 마이그레이션 먼저 수행
+                await _userDataDb.MigrateFromJsonAsync();
 
-            // DB에서 로드
-            LoadProgressFromDbAsync().GetAwaiter().GetResult();
+                // DB에서 로드
+                await LoadProgressFromDbAsync();
+            }).GetAwaiter().GetResult();
         }
 
         private async Task LoadProgressFromDbAsync()
@@ -869,8 +873,8 @@ namespace TarkovHelper.Services
 
         private void SaveObjectiveProgress()
         {
-            // DB에 저장 (비동기를 동기로 호출)
-            SaveObjectiveProgressToDbAsync().GetAwaiter().GetResult();
+            // DB에 저장 (Task.Run으로 데드락 방지)
+            Task.Run(async () => await SaveObjectiveProgressToDbAsync()).GetAwaiter().GetResult();
         }
 
         private async Task SaveObjectiveProgressToDbAsync()
@@ -937,8 +941,8 @@ namespace TarkovHelper.Services
 
         private void LoadObjectiveProgress()
         {
-            // DB에서 로드
-            LoadObjectiveProgressFromDbAsync().GetAwaiter().GetResult();
+            // DB에서 로드 (Task.Run으로 데드락 방지)
+            Task.Run(async () => await LoadObjectiveProgressFromDbAsync()).GetAwaiter().GetResult();
         }
 
         private async Task LoadObjectiveProgressFromDbAsync()
