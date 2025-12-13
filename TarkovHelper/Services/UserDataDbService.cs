@@ -35,8 +35,10 @@ public sealed class UserDataDbService
         var v1Path = Path.Combine(AppEnv.ConfigPath, "quest_progress.json");
         var objPath = Path.Combine(AppEnv.ConfigPath, "objective_progress.json");
         var hideoutPath = Path.Combine(AppEnv.ConfigPath, "hideout_progress.json");
+        var inventoryPath = Path.Combine(AppEnv.ConfigPath, "item_inventory.json");
 
-        return File.Exists(v2Path) || File.Exists(v1Path) || File.Exists(objPath) || File.Exists(hideoutPath);
+        return File.Exists(v2Path) || File.Exists(v1Path) || File.Exists(objPath) ||
+               File.Exists(hideoutPath) || File.Exists(inventoryPath);
     }
 
     private void ReportProgress(string message)
@@ -98,9 +100,9 @@ public sealed class UserDataDbService
 
             -- 아이템 인벤토리
             CREATE TABLE IF NOT EXISTS ItemInventory (
-                ItemId TEXT PRIMARY KEY,
-                Count INTEGER NOT NULL DEFAULT 0,
-                FoundInRaid INTEGER NOT NULL DEFAULT 0,
+                ItemNormalizedName TEXT PRIMARY KEY,
+                FirQuantity INTEGER NOT NULL DEFAULT 0,
+                NonFirQuantity INTEGER NOT NULL DEFAULT 0,
                 UpdatedAt TEXT NOT NULL
             );
 
@@ -361,6 +363,16 @@ public sealed class UserDataDbService
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
 
+        // 레벨이 0이면 삭제
+        if (level == 0)
+        {
+            var deleteSql = "DELETE FROM HideoutProgress WHERE StationId = @stationId";
+            await using var deleteCmd = new SqliteCommand(deleteSql, connection);
+            deleteCmd.Parameters.AddWithValue("@stationId", stationId);
+            await deleteCmd.ExecuteNonQueryAsync();
+            return;
+        }
+
         var sql = @"
             INSERT INTO HideoutProgress (StationId, Level, UpdatedAt)
             VALUES (@stationId, @level, @updatedAt)
@@ -373,6 +385,106 @@ public sealed class UserDataDbService
         cmd.Parameters.AddWithValue("@level", level);
         cmd.Parameters.AddWithValue("@updatedAt", DateTime.UtcNow.ToString("o"));
 
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// 모든 하이드아웃 진행 상태 삭제
+    /// </summary>
+    public async Task ClearAllHideoutProgressAsync()
+    {
+        await InitializeAsync();
+
+        var connectionString = $"Data Source={_databasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var cmd = new SqliteCommand("DELETE FROM HideoutProgress", connection);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    #endregion
+
+    #region Item Inventory
+
+    /// <summary>
+    /// 모든 아이템 인벤토리 로드
+    /// </summary>
+    public async Task<Dictionary<string, (int FirQuantity, int NonFirQuantity)>> LoadItemInventoryAsync()
+    {
+        await InitializeAsync();
+
+        var result = new Dictionary<string, (int FirQuantity, int NonFirQuantity)>(StringComparer.OrdinalIgnoreCase);
+
+        var connectionString = $"Data Source={_databasePath};Mode=ReadOnly";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        var sql = "SELECT ItemNormalizedName, FirQuantity, NonFirQuantity FROM ItemInventory";
+        await using var cmd = new SqliteCommand(sql, connection);
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            var itemName = reader.GetString(0);
+            var firQty = reader.GetInt32(1);
+            var nonFirQty = reader.GetInt32(2);
+            result[itemName] = (firQty, nonFirQty);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 아이템 인벤토리 저장
+    /// </summary>
+    public async Task SaveItemInventoryAsync(string itemNormalizedName, int firQuantity, int nonFirQuantity)
+    {
+        await InitializeAsync();
+
+        var connectionString = $"Data Source={_databasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        // 둘 다 0이면 삭제
+        if (firQuantity == 0 && nonFirQuantity == 0)
+        {
+            var deleteSql = "DELETE FROM ItemInventory WHERE ItemNormalizedName = @itemName";
+            await using var deleteCmd = new SqliteCommand(deleteSql, connection);
+            deleteCmd.Parameters.AddWithValue("@itemName", itemNormalizedName);
+            await deleteCmd.ExecuteNonQueryAsync();
+            return;
+        }
+
+        var sql = @"
+            INSERT INTO ItemInventory (ItemNormalizedName, FirQuantity, NonFirQuantity, UpdatedAt)
+            VALUES (@itemName, @firQty, @nonFirQty, @updatedAt)
+            ON CONFLICT(ItemNormalizedName) DO UPDATE SET
+                FirQuantity = @firQty,
+                NonFirQuantity = @nonFirQty,
+                UpdatedAt = @updatedAt";
+
+        await using var cmd = new SqliteCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@itemName", itemNormalizedName);
+        cmd.Parameters.AddWithValue("@firQty", firQuantity);
+        cmd.Parameters.AddWithValue("@nonFirQty", nonFirQuantity);
+        cmd.Parameters.AddWithValue("@updatedAt", DateTime.UtcNow.ToString("o"));
+
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// 모든 아이템 인벤토리 삭제
+    /// </summary>
+    public async Task ClearAllItemInventoryAsync()
+    {
+        await InitializeAsync();
+
+        var connectionString = $"Data Source={_databasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var cmd = new SqliteCommand("DELETE FROM ItemInventory", connection);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -404,6 +516,10 @@ public sealed class UserDataDbService
         // Hideout Progress 마이그레이션
         ReportProgress("하이드아웃 진행 데이터 마이그레이션 중...");
         migrated |= await MigrateHideoutProgressJsonAsync();
+
+        // Item Inventory 마이그레이션
+        ReportProgress("아이템 인벤토리 데이터 마이그레이션 중...");
+        migrated |= await MigrateItemInventoryJsonAsync();
 
         if (migrated)
         {
@@ -584,6 +700,51 @@ public sealed class UserDataDbService
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[UserDataDbService] Hideout migration failed: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    private async Task<bool> MigrateItemInventoryJsonAsync()
+    {
+        var filePath = Path.Combine(AppEnv.ConfigPath, "item_inventory.json");
+
+        if (!File.Exists(filePath))
+            return false;
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(filePath);
+            var options = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+
+            var data = JsonSerializer.Deserialize<ItemInventoryData>(json, options);
+
+            if (data != null && data.Items.Count > 0)
+            {
+                await InitializeAsync();
+
+                foreach (var kvp in data.Items)
+                {
+                    var inventory = kvp.Value;
+                    await SaveItemInventoryAsync(
+                        kvp.Key,
+                        inventory.FirQuantity,
+                        inventory.NonFirQuantity);
+                }
+
+                // 마이그레이션 완료 후 파일 삭제
+                File.Delete(filePath);
+                System.Diagnostics.Debug.WriteLine($"[UserDataDbService] Migrated and deleted: {filePath}");
+
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UserDataDbService] ItemInventory migration failed: {ex.Message}");
         }
 
         return false;
