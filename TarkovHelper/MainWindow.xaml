@@ -196,6 +196,9 @@
                             <RadioButton x:Name="TabMapTracker" Content="Map"
                                          Style="{StaticResource TabButtonStyle}"
                                          Checked="Tab_Checked"/>
+                            <RadioButton x:Name="TabTestMap" Content="Test Map"
+                                         Style="{StaticResource TabButtonStyle}"
+                                         Checked="Tab_Checked"/>
                         </StackPanel>
                     </Border>
 

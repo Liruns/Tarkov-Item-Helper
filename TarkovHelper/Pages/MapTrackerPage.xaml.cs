@@ -25,6 +25,7 @@ public partial class MapTrackerPage : UserControl
 {
     private readonly MapTrackerService? _trackerService;
     private readonly TarkovMarketMarkerService _tmMarkerService = TarkovMarketMarkerService.Instance;
+    private readonly MapMarkerDbService _dbMarkerService = MapMarkerDbService.Instance;
     private readonly QuestProgressService _progressService = QuestProgressService.Instance;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private readonly MarkerQuestBridgeService _bridgeService = MarkerQuestBridgeService.Instance;
@@ -53,7 +54,8 @@ public partial class MapTrackerPage : UserControl
     private FrameworkElement? _selectedMarkerElement;
 
     // 탈출구 마커 관련 필드
-    private List<TarkovMarketMarker> _currentMapTmExtractMarkers = new();  // tarkov-market 탈출구 마커
+    private List<TarkovMarketMarker> _currentMapTmExtractMarkers = new();  // tarkov-market 탈출구 마커 (레거시)
+    private List<MapMarker> _currentMapDbExtractMarkers = new();  // DB 탈출구 마커
     private readonly List<FrameworkElement> _extractMarkerElements = new();
     private bool _showExtractMarkers = true;
     private bool _showPmcExtracts = true;
@@ -62,9 +64,13 @@ public partial class MapTrackerPage : UserControl
     private bool _hideCompletedObjectives = false;
 
     // 트랜짓 마커 관련 필드
-    private List<TarkovMarketMarker> _currentMapTmTransitMarkers = new();  // tarkov-market 트랜짓 마커
+    private List<TarkovMarketMarker> _currentMapTmTransitMarkers = new();  // tarkov-market 트랜짓 마커 (레거시)
+    private List<MapMarker> _currentMapDbTransitMarkers = new();  // DB 트랜짓 마커
     private readonly List<FrameworkElement> _transitMarkerElements = new();
     private bool _showTransitMarkers = true;
+
+    // 마커 아이콘 캐시
+    private static readonly Dictionary<MapMarkerType, BitmapImage?> _markerIconCache = new();
 
     // 로그 맵 감시 서비스 (자동 맵 전환용)
     private readonly LogMapWatcherService _logMapWatcher = LogMapWatcherService.Instance;
@@ -625,13 +631,10 @@ public partial class MapTrackerPage : UserControl
             var playerMarkerSize = _trackerService?.Settings.PlayerMarkerSize ?? 16;
             UpdatePlayerMarkerSize(playerMarkerSize);
 
-            // 초기화 완료 후에만 호출
-            if (_tmMarkerService.IsLoaded)
+            // 초기화 완료 후에만 호출 (DB 마커가 로드된 경우)
+            if (_dbMarkerService.IsLoaded)
             {
                 RefreshQuestMarkers();
-            }
-            if (_tmMarkerService.IsLoaded)
-            {
                 RefreshExtractMarkers();
                 RefreshTransitMarkers();
             }
@@ -994,6 +997,16 @@ public partial class MapTrackerPage : UserControl
             return;
         }
 
+        // DbMapConfig에서 이미지 크기 가져오기 (TarkovDBEditor와 동일한 방식)
+        var dbConfig = _dbMarkerService.GetDbMapConfig(mapKey);
+        var imageWidth = dbConfig?.ImageWidth ?? config.ImageWidth;
+        var imageHeight = dbConfig?.ImageHeight ?? config.ImageHeight;
+
+        System.Diagnostics.Debug.WriteLine($"[LoadMapImage] Map={mapKey}");
+        System.Diagnostics.Debug.WriteLine($"  config: {config.ImageWidth}x{config.ImageHeight}");
+        System.Diagnostics.Debug.WriteLine($"  dbConfig: {dbConfig?.ImageWidth}x{dbConfig?.ImageHeight}");
+        System.Diagnostics.Debug.WriteLine($"  using: {imageWidth}x{imageHeight}");
+
         var imagePath = config.ImagePath;
 
         // 상대 경로인 경우 앱 디렉토리 기준으로 변환
@@ -1048,16 +1061,16 @@ public partial class MapTrackerPage : UserControl
                     }
                 }
 
-                var pngImage = ConvertSvgToPngWithPreprocessing(imagePath, config.ImageWidth, config.ImageHeight, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity);
+                var pngImage = ConvertSvgToPngWithPreprocessing(imagePath, imageWidth, imageHeight, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity);
                 if (pngImage != null)
                 {
                     MapImage.Source = pngImage;
                     MapImage.Stretch = Stretch.None;
-                    MapImage.Width = config.ImageWidth;
-                    MapImage.Height = config.ImageHeight;
+                    MapImage.Width = imageWidth;
+                    MapImage.Height = imageHeight;
 
-                    MapCanvas.Width = config.ImageWidth;
-                    MapCanvas.Height = config.ImageHeight;
+                    MapCanvas.Width = imageWidth;
+                    MapCanvas.Height = imageHeight;
                     Canvas.SetLeft(MapImage, 0);
                     Canvas.SetTop(MapImage, 0);
                 }
@@ -1067,10 +1080,10 @@ public partial class MapTrackerPage : UserControl
                     MapImage.Visibility = Visibility.Collapsed;
                     MapSvg.Visibility = Visibility.Visible;
                     MapSvg.Source = new Uri(imagePath, UriKind.Absolute);
-                    MapCanvas.Width = config.ImageWidth;
-                    MapCanvas.Height = config.ImageHeight;
-                    MapSvg.Width = config.ImageWidth;
-                    MapSvg.Height = config.ImageHeight;
+                    MapCanvas.Width = imageWidth;
+                    MapCanvas.Height = imageHeight;
+                    MapSvg.Width = imageWidth;
+                    MapSvg.Height = imageHeight;
                     Canvas.SetLeft(MapSvg, 0);
                     Canvas.SetTop(MapSvg, 0);
                 }
@@ -1320,13 +1333,30 @@ public partial class MapTrackerPage : UserControl
             }
         }
 
-        // 탈출구 마커 업데이트
-        foreach (var marker in _extractMarkerElements)
+        // 탈출구 마커 업데이트 - DB 마커는 재생성 필요 (inverseScale이 크기에 내장됨)
+        var hasDbExtractMarkers = _currentMapDbExtractMarkers.Count > 0;
+        if (hasDbExtractMarkers)
         {
-            if (marker is Canvas canvas)
+            // DB 마커는 재생성 (크기와 위치가 inverseScale에 의존)
+            RefreshDbExtractMarkers();
+        }
+        else
+        {
+            // 레거시 마커는 RenderTransform 업데이트
+            foreach (var marker in _extractMarkerElements)
             {
-                canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                if (marker is Canvas canvas)
+                {
+                    canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                }
             }
+        }
+
+        // 트랜짓 마커 업데이트 - DB 마커는 재생성 필요
+        var hasDbTransitMarkers = _currentMapDbTransitMarkers.Count > 0;
+        if (hasDbTransitMarkers)
+        {
+            RefreshDbTransitMarkers();
         }
 
         // 그룹 마커 업데이트
@@ -1349,6 +1379,67 @@ public partial class MapTrackerPage : UserControl
 
         // 플레이어 마커 업데이트
         UpdatePlayerMarkerScale(inverseScale);
+    }
+
+    /// <summary>
+    /// DB 탈출구 마커를 현재 줌 레벨에 맞게 재생성합니다.
+    /// </summary>
+    private void RefreshDbExtractMarkers()
+    {
+        if (!_showExtractMarkers || string.IsNullOrEmpty(_currentMapKey))
+            return;
+
+        if (!_dbMarkerService.ConfigsLoaded)
+            return;
+
+        // 기존 마커 삭제
+        _extractMarkerElements.Clear();
+        ExtractMarkersContainer.Children.Clear();
+
+        // DB 마커 재생성
+        foreach (var dbMarker in _currentMapDbExtractMarkers)
+        {
+            var faction = dbMarker.ToExtractFaction();
+
+            // 필터링 체크 (Shared는 PMC 필터 사용)
+            if (!_showPmcExtracts && faction == ExtractFaction.Pmc) continue;
+            if (!_showScavExtracts && faction == ExtractFaction.Scav) continue;
+            if (!_showPmcExtracts && faction == ExtractFaction.Shared) continue;
+
+            // DB 좌표를 화면 좌표로 변환 (TarkovDBEditor 방식: DbMapConfig.GameToScreen 사용)
+            var screenCoords = _dbMarkerService.GetMarkerScreenCoords(dbMarker);
+            if (screenCoords.HasValue)
+            {
+                AddDbExtractMarkerWithLabel(dbMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY, faction);
+            }
+        }
+    }
+
+    /// <summary>
+    /// DB 트랜짓 마커를 현재 줌 레벨에 맞게 재생성합니다.
+    /// </summary>
+    private void RefreshDbTransitMarkers()
+    {
+        if (!_showTransitMarkers || string.IsNullOrEmpty(_currentMapKey))
+            return;
+
+        if (!_dbMarkerService.ConfigsLoaded)
+            return;
+
+        // 기존 마커 삭제
+        _transitMarkerElements.Clear();
+        TransitMarkersContainer.Children.Clear();
+
+        // DB 마커 재생성
+        foreach (var dbMarker in _currentMapDbTransitMarkers)
+        {
+            // DB 좌표를 화면 좌표로 변환 (TarkovDBEditor 방식: DbMapConfig.GameToScreen 사용)
+            var screenCoords = _dbMarkerService.GetMarkerScreenCoords(dbMarker);
+            if (screenCoords.HasValue)
+            {
+                AddDbTransitMarkerWithLabel(dbMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY);
+            }
+        }
     }
 
     /// <summary>
@@ -1487,18 +1578,25 @@ public partial class MapTrackerPage : UserControl
     {
         try
         {
-            TxtStatus.Text = "Loading tarkov-market markers...";
+            TxtStatus.Text = "Loading markers from database...";
 
-            // tarkov-market 마커 로드
-            await _tmMarkerService.EnsureLoadedAsync(msg =>
+            // DB 맵 설정 로드
+            if (_dbMarkerService.MapConfigsExists)
             {
-                Dispatcher.Invoke(() => TxtStatus.Text = msg);
-            });
+                _dbMarkerService.LoadMapConfigs();
+                System.Diagnostics.Debug.WriteLine($"[MapTrackerPage] Loaded {_dbMarkerService.MapConfigCount} map configs");
+            }
 
-            var cacheInfo = _tmMarkerService.CacheLastUpdated.HasValue
-                ? $" (Updated: {_tmMarkerService.CacheLastUpdated:yyyy-MM-dd})"
-                : "";
-            TxtStatus.Text = $"{_tmMarkerService.TotalMarkerCount} markers loaded{cacheInfo}";
+            // DB 마커 로드
+            if (_dbMarkerService.DatabaseExists)
+            {
+                await _dbMarkerService.LoadMarkersAsync();
+                TxtStatus.Text = $"{_dbMarkerService.TotalMarkerCount} markers loaded from database";
+            }
+            else
+            {
+                TxtStatus.Text = "Database not found: Assets/tarkov_data.db";
+            }
 
             if (!string.IsNullOrEmpty(_currentMapKey))
             {
@@ -1582,33 +1680,8 @@ public partial class MapTrackerPage : UserControl
         var config = _trackerService?.GetMapConfig(_currentMapKey);
         if (config == null) return;
 
-        // tarkov-market 마커 사용
-        if (_tmMarkerService.IsLoaded)
-        {
-            _currentMapTmQuestMarkers = _tmMarkerService.GetQuestMarkersForMap(_currentMapKey);
-            TxtStatus.Text = $"Found {_currentMapTmQuestMarkers.Count} quest markers for {_currentMapKey}";
-
-            foreach (var tmMarker in _currentMapTmQuestMarkers)
-            {
-                // TM 좌표를 화면 좌표로 변환
-                var screenCoords = _tmMarkerService.GetMarkerScreenCoords(tmMarker, config);
-                if (screenCoords.HasValue)
-                {
-                    var isHighlighted = IsMarkerHighlighted(tmMarker);
-                    var marker = CreateTarkovMarketQuestMarker(tmMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY, isHighlighted);
-                    _questMarkerElements.Add(marker);
-                    QuestMarkersContainer.Children.Add(marker);
-                }
-            }
-        }
-
-        // 이름을 표시하는 스타일일 때만 겹침 감지 수행
-        var showName = _questMarkerStyle == QuestMarkerStyle.DefaultWithName ||
-                       _questMarkerStyle == QuestMarkerStyle.GreenCircleWithName;
-        if (showName)
-        {
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, DetectAndGroupOverlappingMarkers);
-        }
+        // TODO: 퀘스트 마커는 DB의 QuestObjectives 테이블에서 로드하도록 구현 필요
+        // 현재는 퀘스트 마커 표시 안함
     }
 
     private FrameworkElement CreateQuestMarker(TaskObjectiveWithLocation objective, QuestObjectiveLocation location, ScreenPosition screenPos)
@@ -3019,9 +3092,8 @@ public partial class MapTrackerPage : UserControl
 
     private Task LoadExtractsAsync()
     {
-        // Tarkov Market 마커 서비스를 사용하므로 별도 로딩 불필요
-        // 마커 서비스는 이미 로드되어 있음
-        if (_tmMarkerService.IsLoaded)
+        // DB 마커 서비스가 로드된 경우
+        if (_dbMarkerService.IsLoaded)
         {
             TxtStatus.Text = "Extract data ready";
 
@@ -3043,40 +3115,37 @@ public partial class MapTrackerPage : UserControl
 
         if (!_showExtractMarkers) return;
 
-        // 맵 설정 가져오기
-        var config = _trackerService?.GetMapConfig(_currentMapKey);
-        if (config == null) return;
+        // DB 마커 사용
+        if (!_dbMarkerService.IsLoaded || !_dbMarkerService.ConfigsLoaded) return;
 
-        // Tarkov Market 마커만 사용 (tarkov.dev 제거)
-        if (!_tmMarkerService.IsLoaded) return;
+        var dbExtracts = _dbMarkerService.GetExtractMarkersForMap(_currentMapKey);
+        _currentMapDbExtractMarkers = dbExtracts;
 
-        // 탈출구 마커 가져오기 (Transit 제외)
-        var tmExtracts = _tmMarkerService.GetExtractMarkersForMap(_currentMapKey)
-            .Where(m => m.SubCategory != "Transition")  // Transit은 별도 처리
-            .ToList();
-        _currentMapTmExtractMarkers = tmExtracts;
-
-        foreach (var tmMarker in tmExtracts)
+        // Debug: 캔버스 크기와 DbMapConfig 비교
+        var dbConfig = _dbMarkerService.GetDbMapConfig(_currentMapKey);
+        System.Diagnostics.Debug.WriteLine($"[RefreshExtractMarkers] Map={_currentMapKey}");
+        System.Diagnostics.Debug.WriteLine($"  MapCanvas: {MapCanvas.Width}x{MapCanvas.Height}");
+        if (dbConfig != null)
         {
-            // SubCategory에서 진영 결정
-            var faction = tmMarker.SubCategory switch
-            {
-                "PMC Extraction" => ExtractFaction.Pmc,
-                "Scav Extraction" => ExtractFaction.Scav,
-                "Co-Op Extraction" => ExtractFaction.Shared,
-                _ => ExtractFaction.Pmc
-            };
+            System.Diagnostics.Debug.WriteLine($"  DbMapConfig: {dbConfig.ImageWidth}x{dbConfig.ImageHeight}");
+            var transform = dbConfig.CalibratedTransform;
+            if (transform != null)
+                System.Diagnostics.Debug.WriteLine($"  Transform: [{string.Join(", ", transform)}]");
+        }
+
+        foreach (var dbMarker in dbExtracts)
+        {
+            var faction = dbMarker.ToExtractFaction();
 
             // 진영 필터 적용
             if (!ShouldShowExtract(faction)) continue;
 
-            // TM 좌표를 화면 좌표로 변환
-            var screenCoords = _tmMarkerService.GetMarkerScreenCoords(tmMarker, config);
+            // DB 좌표를 화면 좌표로 변환 (TarkovDBEditor 방식: DbMapConfig.GameToScreen 사용)
+            var screenCoords = _dbMarkerService.GetMarkerScreenCoords(dbMarker);
             if (screenCoords.HasValue)
             {
-                var marker = CreateTarkovMarketExtractMarker(tmMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY, faction);
-                _extractMarkerElements.Add(marker);
-                ExtractMarkersContainer.Children.Add(marker);
+                System.Diagnostics.Debug.WriteLine($"  Marker '{dbMarker.Name}': Game({dbMarker.X:F2}, {dbMarker.Z:F2}) -> Screen({screenCoords.Value.ScreenX:F2}, {screenCoords.Value.ScreenY:F2})");
+                AddDbExtractMarkerWithLabel(dbMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY, faction);
             }
         }
     }
@@ -3090,25 +3159,19 @@ public partial class MapTrackerPage : UserControl
 
         if (!_showTransitMarkers) return;
 
-        // 맵 설정 가져오기
-        var config = _trackerService?.GetMapConfig(_currentMapKey);
-        if (config == null) return;
+        // DB 마커 사용
+        if (!_dbMarkerService.IsLoaded || !_dbMarkerService.ConfigsLoaded) return;
 
-        // Tarkov Market 트랜짓 마커만 사용
-        if (!_tmMarkerService.IsLoaded) return;
+        var dbTransits = _dbMarkerService.GetTransitMarkersForMap(_currentMapKey);
+        _currentMapDbTransitMarkers = dbTransits;
 
-        var tmTransits = _tmMarkerService.GetTransitMarkersForMap(_currentMapKey);
-        _currentMapTmTransitMarkers = tmTransits;
-
-        foreach (var tmMarker in tmTransits)
+        foreach (var dbMarker in dbTransits)
         {
-            // TM 좌표를 화면 좌표로 변환
-            var screenCoords = _tmMarkerService.GetMarkerScreenCoords(tmMarker, config);
+            // DB 좌표를 화면 좌표로 변환 (TarkovDBEditor 방식: DbMapConfig.GameToScreen 사용)
+            var screenCoords = _dbMarkerService.GetMarkerScreenCoords(dbMarker);
             if (screenCoords.HasValue)
             {
-                var marker = CreateTarkovMarketTransitMarker(tmMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY);
-                _transitMarkerElements.Add(marker);
-                TransitMarkersContainer.Children.Add(marker);
+                AddDbTransitMarkerWithLabel(dbMarker, screenCoords.Value.ScreenX, screenCoords.Value.ScreenY);
             }
         }
     }
@@ -3410,6 +3473,236 @@ public partial class MapTrackerPage : UserControl
         canvas.Cursor = Cursors.Hand;
 
         return canvas;
+    }
+
+    /// <summary>
+    /// DB 데이터로 탈출구 마커를 생성합니다. (TarkovDBEditor 방식 - 요소 직접 추가)
+    /// 반환값은 Container Canvas이며, 직접 ExtractMarkersContainer에 추가하지 않고
+    /// 호출자가 AddDbExtractMarkerElements를 사용해야 합니다.
+    /// </summary>
+    private FrameworkElement CreateDbExtractMarker(MapMarker dbMarker, double screenX, double screenY, ExtractFaction faction)
+    {
+        // 줌에 상관없이 고정 크기 유지를 위해 역스케일 적용 (TarkovDBEditor 방식)
+        var inverseScale = 1.0 / _zoomLevel;
+        var markerSize = 48 * inverseScale;  // TarkovDBEditor와 동일한 크기
+
+        // 진영별 색상 설정
+        var (r, g, b) = MapMarker.GetMarkerColor(dbMarker.MarkerType);
+        var markerColor = Color.FromRgb(r, g, b);
+
+        // webp 아이콘 사용 (TarkovDBEditor 방식: 직접 컨테이너에 추가)
+        var iconImage = GetMarkerIcon(dbMarker.MarkerType);
+        FrameworkElement mainElement;
+
+        if (iconImage != null)
+        {
+            var image = new System.Windows.Controls.Image
+            {
+                Source = iconImage,
+                Width = markerSize,
+                Height = markerSize,
+                Tag = dbMarker
+            };
+            Canvas.SetLeft(image, screenX - markerSize / 2);
+            Canvas.SetTop(image, screenY - markerSize / 2);
+            mainElement = image;
+        }
+        else
+        {
+            // 아이콘 로드 실패 시 폴백 (색상 원)
+            var mainCircle = new Ellipse
+            {
+                Width = markerSize,
+                Height = markerSize,
+                Fill = new SolidColorBrush(markerColor),
+                Stroke = new SolidColorBrush(Colors.White),
+                StrokeThickness = 3 * inverseScale,
+                Tag = dbMarker
+            };
+            Canvas.SetLeft(mainCircle, screenX - markerSize / 2);
+            Canvas.SetTop(mainCircle, screenY - markerSize / 2);
+            mainElement = mainCircle;
+        }
+
+        // 툴팁
+        var displayName = _loc.CurrentLanguage == AppLanguage.KO && !string.IsNullOrEmpty(dbMarker.NameKo)
+            ? dbMarker.NameKo
+            : dbMarker.Name;
+        var factionText = faction switch
+        {
+            ExtractFaction.Pmc => "PMC",
+            ExtractFaction.Scav => "Scav",
+            ExtractFaction.Shared => "Co-op",
+            _ => "Extract"
+        };
+        mainElement.ToolTip = $"[{factionText}] {displayName}";
+        mainElement.Cursor = Cursors.Hand;
+
+        return mainElement;
+    }
+
+    /// <summary>
+    /// DB 탈출구 마커와 이름 라벨을 직접 컨테이너에 추가합니다. (TarkovDBEditor 방식)
+    /// </summary>
+    private void AddDbExtractMarkerWithLabel(MapMarker dbMarker, double screenX, double screenY, ExtractFaction faction)
+    {
+        var inverseScale = 1.0 / _zoomLevel;
+        var markerSize = 48 * inverseScale;
+
+        // 진영별 색상
+        var (r, g, b) = MapMarker.GetMarkerColor(dbMarker.MarkerType);
+        var markerColor = Color.FromRgb(r, g, b);
+
+        // 마커 요소 생성 및 추가
+        var markerElement = CreateDbExtractMarker(dbMarker, screenX, screenY, faction);
+        _extractMarkerElements.Add(markerElement);
+        ExtractMarkersContainer.Children.Add(markerElement);
+
+        // 이름 라벨 (TarkovDBEditor 방식: 마커 오른쪽에 표시)
+        var displayName = _loc.CurrentLanguage == AppLanguage.KO && !string.IsNullOrEmpty(dbMarker.NameKo)
+            ? dbMarker.NameKo
+            : dbMarker.Name;
+
+        var nameLabel = new TextBlock
+        {
+            Text = displayName,
+            Foreground = new SolidColorBrush(markerColor),
+            FontSize = 28 * inverseScale,
+            FontWeight = FontWeights.SemiBold
+        };
+        Canvas.SetLeft(nameLabel, screenX + markerSize / 2 + 8 * inverseScale);
+        Canvas.SetTop(nameLabel, screenY - 14 * inverseScale);
+        ExtractMarkersContainer.Children.Add(nameLabel);
+    }
+
+    /// <summary>
+    /// DB 데이터로 트랜짓 마커를 생성합니다. (TarkovDBEditor 방식)
+    /// </summary>
+    private FrameworkElement CreateDbTransitMarker(MapMarker dbMarker, double screenX, double screenY)
+    {
+        // 줌에 상관없이 고정 크기 유지를 위해 역스케일 적용 (TarkovDBEditor 방식)
+        var inverseScale = 1.0 / _zoomLevel;
+        var markerSize = 48 * inverseScale;  // TarkovDBEditor와 동일한 크기
+
+        // 트랜짓 마커 색상 (주황색)
+        var (r, g, b) = MapMarker.GetMarkerColor(MapMarkerType.Transit);
+        var markerColor = Color.FromRgb(r, g, b);
+
+        // 트랜짓 이름 (한국어 우선)
+        var displayName = _loc.CurrentLanguage == AppLanguage.KO && !string.IsNullOrEmpty(dbMarker.NameKo)
+            ? dbMarker.NameKo
+            : dbMarker.Name;
+
+        // webp 아이콘 사용
+        var iconImage = GetMarkerIcon(dbMarker.MarkerType);
+        FrameworkElement mainElement;
+
+        if (iconImage != null)
+        {
+            var image = new System.Windows.Controls.Image
+            {
+                Source = iconImage,
+                Width = markerSize,
+                Height = markerSize,
+                Tag = dbMarker
+            };
+            Canvas.SetLeft(image, screenX - markerSize / 2);
+            Canvas.SetTop(image, screenY - markerSize / 2);
+            mainElement = image;
+        }
+        else
+        {
+            // 아이콘 로드 실패 시 폴백 (색상 원)
+            var mainCircle = new Ellipse
+            {
+                Width = markerSize,
+                Height = markerSize,
+                Fill = new SolidColorBrush(markerColor),
+                Stroke = new SolidColorBrush(Colors.White),
+                StrokeThickness = 3 * inverseScale,
+                Tag = dbMarker
+            };
+            Canvas.SetLeft(mainCircle, screenX - markerSize / 2);
+            Canvas.SetTop(mainCircle, screenY - markerSize / 2);
+            mainElement = mainCircle;
+        }
+
+        // 툴팁
+        mainElement.ToolTip = $"[Transit] {displayName}";
+        mainElement.Cursor = Cursors.Hand;
+
+        return mainElement;
+    }
+
+    /// <summary>
+    /// DB 트랜짓 마커와 이름 라벨을 직접 컨테이너에 추가합니다. (TarkovDBEditor 방식)
+    /// </summary>
+    private void AddDbTransitMarkerWithLabel(MapMarker dbMarker, double screenX, double screenY)
+    {
+        var inverseScale = 1.0 / _zoomLevel;
+        var markerSize = 48 * inverseScale;
+
+        // 마커 색상
+        var (r, g, b) = MapMarker.GetMarkerColor(MapMarkerType.Transit);
+        var markerColor = Color.FromRgb(r, g, b);
+
+        // 마커 요소 생성 및 추가
+        var markerElement = CreateDbTransitMarker(dbMarker, screenX, screenY);
+        _transitMarkerElements.Add(markerElement);
+        TransitMarkersContainer.Children.Add(markerElement);
+
+        // 이름 라벨 (TarkovDBEditor 방식: 마커 오른쪽에 표시)
+        var displayName = _loc.CurrentLanguage == AppLanguage.KO && !string.IsNullOrEmpty(dbMarker.NameKo)
+            ? dbMarker.NameKo
+            : dbMarker.Name;
+
+        var nameLabel = new TextBlock
+        {
+            Text = displayName,
+            Foreground = new SolidColorBrush(markerColor),
+            FontSize = 28 * inverseScale,
+            FontWeight = FontWeights.SemiBold
+        };
+        Canvas.SetLeft(nameLabel, screenX + markerSize / 2 + 8 * inverseScale);
+        Canvas.SetTop(nameLabel, screenY - 14 * inverseScale);
+        TransitMarkersContainer.Children.Add(nameLabel);
+    }
+
+    /// <summary>
+    /// 마커 타입에 해당하는 아이콘 이미지를 반환합니다. (캐시 사용)
+    /// </summary>
+    private static BitmapImage? GetMarkerIcon(MapMarkerType markerType)
+    {
+        if (_markerIconCache.TryGetValue(markerType, out var cachedIcon))
+        {
+            return cachedIcon;
+        }
+
+        try
+        {
+            var iconFileName = MapMarker.GetIconFileName(markerType);
+            var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "DB", "Icons", iconFileName);
+
+            if (File.Exists(iconPath))
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(iconPath, UriKind.Absolute);
+                bitmap.DecodePixelWidth = 64;
+                bitmap.EndInit();
+                bitmap.Freeze();
+                _markerIconCache[markerType] = bitmap;
+                return bitmap;
+            }
+        }
+        catch
+        {
+            // 아이콘 로딩 실패 시 무시
+        }
+
+        _markerIconCache[markerType] = null;
+        return null;
     }
 
     private static (Color fill, Color stroke) GetExtractStyle(ExtractFaction faction)
@@ -3772,7 +4065,7 @@ public partial class MapTrackerPage : UserControl
             }
 
             // 마커 새로고침
-            if (_tmMarkerService.IsLoaded)
+            if (_dbMarkerService.IsLoaded)
             {
                 RefreshExtractMarkers();
                 RefreshTransitMarkers();

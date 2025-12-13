@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private ItemsPage? _itemsPage;
     private CollectorPage? _collectorPage;
     private MapTrackerPage? _mapTrackerPage;
+    private TestMapPage? _testMapPage;
     private List<HideoutModule>? _hideoutModules;
     private ObservableCollection<QuestChangeInfo>? _pendingSyncChanges;
     private bool _isFullScreen;
@@ -318,6 +319,12 @@ public partial class MainWindow : Window
             // Lazy creation of MapTrackerPage
             _mapTrackerPage ??= new MapTrackerPage();
             PageContent.Content = _mapTrackerPage;
+        }
+        else if (sender == TabTestMap)
+        {
+            // Lazy creation of TestMapPage (DB Editor style map)
+            _testMapPage ??= new TestMapPage();
+            PageContent.Content = _testMapPage;
         }
     }
 

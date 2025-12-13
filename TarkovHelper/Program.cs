@@ -55,6 +55,13 @@ public class Program
             return;
         }
 
+        // CLI mode: --test-quest-markers
+        if (args.Length > 0 && args[0] == "--test-quest-markers")
+        {
+            Tests.QuestMarkerTest.RunAllTests().GetAwaiter().GetResult();
+            return;
+        }
+
         var app = new App();
         app.InitializeComponent();
 
