@@ -38,6 +38,8 @@ public partial class TestMapPage : UserControl
     // Data services
     private readonly MapMarkerDbService _dbService;
     private readonly QuestProgressService _progressService = QuestProgressService.Instance;
+    private readonly SettingsService _settings = SettingsService.Instance;
+    private readonly LocalizationService _loc = LocalizationService.Instance;
 
     // Quest marker state
     private List<TaskObjectiveWithLocation> _currentMapQuestObjectives = new();
@@ -53,6 +55,17 @@ public partial class TestMapPage : UserControl
     private HashSet<string> _collapsedQuestIds = new(); // 접힌 퀘스트 ID
     private string _searchText = ""; // 검색어
     private string _sortOption = "name"; // 정렬 옵션: name, progress, count
+
+    // Marker scale
+    private double _markerScale = 1.0;
+
+    // Quest type filters
+    private HashSet<string> _enabledQuestTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "visit", "mark", "plantitem", "extract",
+        "finditem", "findquestitem", "giveitem",
+        "kill", "shoot", "other"
+    };
 
     // 마커-Drawer 연계
     private Dictionary<string, List<FrameworkElement>> _markersByObjectiveId = new(); // 목표ID → 마커 UI 요소
@@ -74,6 +87,13 @@ public partial class TestMapPage : UserControl
     private bool _showPlayerMarker = true;
     private bool _showTrail = true;
 
+    // Minimap state
+    private bool _isMinimapExpanded = true;
+    private RenderTargetBitmap? _minimapBitmap;
+    private double _minimapScale = 1.0;
+    private Size _mapSize = Size.Empty;
+    private bool _isMinimapDragging = false;
+
     public TestMapPage()
     {
         InitializeComponent();
@@ -88,6 +108,9 @@ public partial class TestMapPage : UserControl
         // Connect log map watcher for auto map switch
         _logMapWatcher.MapChanged += OnLogMapChanged;
 
+        // Subscribe to language changes
+        _loc.LanguageChanged += OnLanguageChanged;
+
         Loaded += TestMapPage_Loaded;
         Unloaded += TestMapPage_Unloaded;
     }
@@ -101,13 +124,393 @@ public partial class TestMapPage : UserControl
         // Load quest objectives data
         await LoadQuestDataAsync();
 
+        // Load settings from DB
+        LoadSettingsFromDb();
+
         LoadMapSelector();
+
+        // Try to restore last selected map, or use first map
+        var lastMap = _settings.MapLastSelectedMap;
+        var selectedIndex = 0;
+        if (!string.IsNullOrEmpty(lastMap))
+        {
+            for (int i = 0; i < MapSelector.Items.Count; i++)
+            {
+                if (MapSelector.Items[i] is DbMapConfig config && config.Key == lastMap)
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+        }
 
         if (MapSelector.Items.Count > 0)
         {
-            MapSelector.SelectedIndex = 0;
+            MapSelector.SelectedIndex = selectedIndex;
+        }
+
+        // Apply drawer state after map is loaded
+        if (_settings.MapDrawerOpen)
+        {
+            OpenDrawer();
+        }
+
+        // Apply localization
+        UpdateLocalization();
+    }
+
+    /// <summary>
+    /// Load settings from SettingsService and apply to UI
+    /// </summary>
+    private void LoadSettingsFromDb()
+    {
+        // Load cached settings
+        _hiddenQuestIds = _settings.MapHiddenQuests;
+        _collapsedQuestIds = _settings.MapCollapsedQuests;
+        _drawerWidth = _settings.MapDrawerWidth;
+        _sortOption = _settings.MapSortOption;
+
+        // Apply checkbox states
+        if (ChkShowMarkers != null)
+            ChkShowMarkers.IsChecked = _settings.MapShowExtracts;
+        if (ChkShowTransit != null)
+            ChkShowTransit.IsChecked = _settings.MapShowTransits;
+        if (ChkShowQuests != null)
+            ChkShowQuests.IsChecked = _settings.MapShowQuests;
+        if (ChkIncompleteOnly != null)
+            ChkIncompleteOnly.IsChecked = _settings.MapIncompleteOnly;
+        if (ChkCurrentMapOnly != null)
+            ChkCurrentMapOnly.IsChecked = _settings.MapCurrentMapOnly;
+
+        // Apply marker scale
+        _markerScale = _settings.MapMarkerScale;
+        if (MarkerScaleSlider != null)
+        {
+            MarkerScaleSlider.Value = _markerScale;
+            if (MarkerScaleText != null)
+                MarkerScaleText.Text = $"{_markerScale:F1}x";
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[TestMapPage] Settings loaded - DrawerOpen: {_settings.MapDrawerOpen}, HiddenQuests: {_hiddenQuestIds.Count}, MarkerScale: {_markerScale}");
+    }
+
+    #region Localization
+
+    private void OnLanguageChanged(object? sender, AppLanguage e)
+    {
+        UpdateLocalization();
+    }
+
+    /// <summary>
+    /// Updates all UI text elements with localized strings
+    /// </summary>
+    private void UpdateLocalization()
+    {
+        // Top Toolbar
+        if (BtnToggleQuestPanel != null)
+            BtnToggleQuestPanel.ToolTip = _loc.QuestPanelTooltip;
+        if (BtnSettings != null)
+            BtnSettings.ToolTip = _loc.SettingsTooltip;
+
+        // Drawer
+        UpdateDrawerLocalization();
+
+        // Settings Panel
+        UpdateSettingsLocalization();
+
+        // Quest Filter Popup
+        UpdateQuestFilterLocalization();
+
+        // Legend Popup
+        UpdateLegendLocalization();
+
+        // Status Bar
+        UpdateStatusBarLocalization();
+
+        // Map Area
+        UpdateMapAreaLocalization();
+
+        // Zoom Controls
+        if (BtnZoomIn != null)
+            BtnZoomIn.ToolTip = _loc.ZoomInTooltip;
+        if (BtnZoomOut != null)
+            BtnZoomOut.ToolTip = _loc.ZoomOutTooltip;
+        if (BtnResetView != null)
+            BtnResetView.ToolTip = _loc.ResetViewTooltip;
+
+        // Refresh quest drawer to update any dynamic text
+        if (_isDrawerOpen)
+        {
+            RefreshQuestDrawer();
         }
     }
+
+    private void UpdateDrawerLocalization()
+    {
+        // Drawer title and header
+        if (DrawerTitleText != null)
+            DrawerTitleText.Text = _loc.Quest;
+        if (HeaderQuestLabel != null)
+            HeaderQuestLabel.Text = _loc.Quest;
+
+        // Update drawer help button
+        if (BtnDrawerHelp != null)
+            BtnDrawerHelp.ToolTip = _loc.ShortcutHelp;
+
+        // Search placeholder
+        if (SearchPlaceholderText != null)
+            SearchPlaceholderText.Text = _loc.SearchPlaceholder;
+
+        // Filter checkboxes
+        if (FilterIncompleteText != null)
+            FilterIncompleteText.Text = _loc.Incomplete;
+        if (FilterCurrentMapText != null)
+            FilterCurrentMapText.Text = _loc.CurrentMap;
+
+        // Empty state text
+        if (EmptyStateTitle != null)
+            EmptyStateTitle.Text = _loc.NoQuestsToDisplay;
+        if (EmptyStateSubtitle != null)
+            EmptyStateSubtitle.Text = _loc.TryAdjustingFilters;
+
+        // Help hints
+        if (HelpOpenCloseText != null)
+            HelpOpenCloseText.Text = $" {_loc.OpenClose}";
+        if (HelpMoveText != null)
+            HelpMoveText.Text = $" {_loc.Move}";
+        if (HelpSelectText != null)
+            HelpSelectText.Text = $" {_loc.Select}";
+        if (HelpClickKey != null)
+            HelpClickKey.Text = _loc.Click;
+        if (HelpClickText != null)
+            HelpClickText.Text = $" {_loc.GoToMap}";
+        if (HelpRightClickKey != null)
+            HelpRightClickKey.Text = _loc.RightClick;
+        if (HelpRightClickText != null)
+            HelpRightClickText.Text = $" {_loc.ToggleComplete}";
+    }
+
+    private void UpdateSettingsLocalization()
+    {
+        // Settings Header
+        if (SettingsHeaderText != null)
+            SettingsHeaderText.Text = _loc.SettingsTitle;
+
+        // Settings Tab Headers
+        if (TabDisplay != null)
+            TabDisplay.Content = _loc.TabDisplay;
+        if (TabMarker != null)
+            TabMarker.Content = _loc.TabMarker;
+        if (TabTracker != null)
+            TabTracker.Content = _loc.TabTracker;
+        if (TabShortcuts != null)
+            TabShortcuts.Content = _loc.TabShortcuts;
+
+        // Display Tab - Layers
+        if (SettingsLayersLabel != null)
+            SettingsLayersLabel.Text = _loc.Layers;
+        if (SettingsExtractLabel != null)
+            SettingsExtractLabel.Text = _loc.Extract;
+        if (SettingsTransitLabel != null)
+            SettingsTransitLabel.Text = _loc.TransitPoint;
+        if (SettingsQuestObjLabel != null)
+            SettingsQuestObjLabel.Text = _loc.QuestObjective;
+        if (SettingsTrailLabel != null)
+            SettingsTrailLabel.Text = _loc.Trail;
+
+        // Display Tab - Minimap
+        if (SettingsMinimapLabel != null)
+            SettingsMinimapLabel.Text = _loc.Minimap;
+        if (SettingsShowMinimapLabel != null)
+            SettingsShowMinimapLabel.Text = _loc.ShowMinimap;
+        if (SettingsMinimapSizeLabel != null)
+            SettingsMinimapSizeLabel.Text = _loc.MinimapSize;
+
+        // Display Tab - Quick Actions
+        if (SettingsQuestFilterLabel != null)
+            SettingsQuestFilterLabel.Text = _loc.QuestFilter;
+        if (SettingsLegendLabel != null)
+            SettingsLegendLabel.Text = _loc.Legend;
+
+        // Marker Tab
+        if (SettingsMarkerSizeLabel != null)
+            SettingsMarkerSizeLabel.Text = _loc.MarkerSize;
+        if (SettingsMarkerOpacityLabel != null)
+            SettingsMarkerOpacityLabel.Text = _loc.MarkerOpacity;
+        if (SettingsQuestDisplayLabel != null)
+            SettingsQuestDisplayLabel.Text = _loc.QuestDisplay;
+        if (SettingsAutoHideCompletedLabel != null)
+            SettingsAutoHideCompletedLabel.Text = _loc.AutoHideCompleted;
+        if (SettingsFadeCompletedLabel != null)
+            SettingsFadeCompletedLabel.Text = _loc.FadeCompleted;
+        if (SettingsShowLabelsLabel != null)
+            SettingsShowLabelsLabel.Text = _loc.ShowMarkerLabels;
+
+        // Tracker Tab
+        if (SettingsTrackerStatusLabel != null)
+            SettingsTrackerStatusLabel.Text = _loc.TrackerStatus;
+        if (TrackingStatusText != null && !_trackerService.IsWatching)
+            TrackingStatusText.Text = _loc.Waiting;
+        if (TrackingFolderText != null && string.IsNullOrEmpty(_trackerService.Settings.ScreenshotFolderPath))
+            TrackingFolderText.Text = _loc.NoFolderSelected;
+        if (BtnSelectFolderText != null)
+            BtnSelectFolderText.Text = _loc.Folder;
+        if (BtnOpenFolderText != null)
+            BtnOpenFolderText.Text = _loc.Open;
+        if (TrackingButtonText != null)
+            TrackingButtonText.Text = _trackerService.IsWatching ? _loc.Stop : _loc.Start;
+
+        // Tracker Tab - Trail Settings
+        if (SettingsTrailConfigLabel != null)
+            SettingsTrailConfigLabel.Text = _loc.PathSettings;
+        if (SettingsTrailColorLabel != null)
+            SettingsTrailColorLabel.Text = _loc.PathColor;
+        if (SettingsTrailThicknessLabel != null)
+            SettingsTrailThicknessLabel.Text = _loc.PathThickness;
+
+        // Tracker Tab - Automation
+        if (SettingsAutomationLabel != null)
+            SettingsAutomationLabel.Text = _loc.Automation;
+        if (SettingsAutoTrackLabel != null)
+            SettingsAutoTrackLabel.Text = _loc.AutoTrackOnMapLoad;
+
+        // Shortcuts Tab - Map Controls
+        if (ShortcutsMapControlLabel != null)
+            ShortcutsMapControlLabel.Text = _loc.MapControls;
+        if (ShortcutsZoomLabel != null)
+            ShortcutsZoomLabel.Text = _loc.ZoomInOut;
+        if (ShortcutsZoomKey != null)
+            ShortcutsZoomKey.Text = _loc.Scroll;
+        if (ShortcutsPanLabel != null)
+            ShortcutsPanLabel.Text = _loc.PanMap;
+        if (ShortcutsPanKey != null)
+            ShortcutsPanKey.Text = _loc.Drag;
+        if (ShortcutsResetLabel != null)
+            ShortcutsResetLabel.Text = _loc.ResetView;
+
+        // Shortcuts Tab - Layer Toggle
+        if (ShortcutsLayerToggleLabel != null)
+            ShortcutsLayerToggleLabel.Text = _loc.LayerToggle;
+        if (ShortcutsExtractLabel != null)
+            ShortcutsExtractLabel.Text = _loc.ShowHideExtracts;
+        if (ShortcutsTransitLabel != null)
+            ShortcutsTransitLabel.Text = _loc.ShowHideTransit;
+        if (ShortcutsQuestLabel != null)
+            ShortcutsQuestLabel.Text = _loc.ShowHideQuests;
+
+        // Shortcuts Tab - Panel
+        if (ShortcutsPanelLabel != null)
+            ShortcutsPanelLabel.Text = _loc.Panel;
+        if (ShortcutsQuestPanelLabel != null)
+            ShortcutsQuestPanelLabel.Text = _loc.QuestPanel;
+        if (ShortcutsFloorChangeLabel != null)
+            ShortcutsFloorChangeLabel.Text = _loc.FloorChange;
+
+        // Settings Footer
+        if (BtnResetSettingsFooter != null)
+        {
+            BtnResetSettingsFooter.Content = _loc.ResetAll;
+            BtnResetSettingsFooter.ToolTip = _loc.ResetAllSettings;
+        }
+        if (BtnCloseSettingsFooter != null)
+            BtnCloseSettingsFooter.Content = _loc.Close;
+    }
+
+    private void UpdateQuestFilterLocalization()
+    {
+        // Filter Popup Title
+        if (FilterPopupTitle != null)
+            FilterPopupTitle.Text = _loc.QuestTypeFilter;
+
+        // Filter Types
+        if (FilterVisitText != null)
+            FilterVisitText.Text = _loc.VisitType;
+        if (FilterMarkText != null)
+            FilterMarkText.Text = _loc.MarkType;
+        if (FilterPlantText != null)
+            FilterPlantText.Text = _loc.PlantType;
+        if (FilterExtractText != null)
+            FilterExtractText.Text = _loc.ExtractType;
+        if (FilterFindText != null)
+            FilterFindText.Text = _loc.FindType;
+        if (FilterKillText != null)
+            FilterKillText.Text = _loc.KillType;
+        if (FilterOtherText != null)
+            FilterOtherText.Text = _loc.OtherType;
+    }
+
+    private void UpdateLegendLocalization()
+    {
+        // Legend Title
+        if (LegendTitle != null)
+            LegendTitle.Text = _loc.MapLegend;
+
+        // Legend Items
+        if (LegendExtract != null)
+            LegendExtract.Text = _loc.Extract;
+        if (LegendTransit != null)
+            LegendTransit.Text = _loc.TransitPoint;
+        if (LegendQuestObjective != null)
+            LegendQuestObjective.Text = _loc.QuestObjective;
+
+        // Quest Types
+        if (LegendQuestType != null)
+            LegendQuestType.Text = _loc.QuestType;
+        if (LegendVisit != null)
+            LegendVisit.Text = _loc.Visit;
+        if (LegendMark != null)
+            LegendMark.Text = _loc.Mark;
+        if (LegendPlantItem != null)
+            LegendPlantItem.Text = _loc.PlantItem;
+        if (LegendExtractType != null)
+            LegendExtractType.Text = _loc.Extract;
+        if (LegendKill != null)
+            LegendKill.Text = _loc.Kill;
+    }
+
+    private void UpdateStatusBarLocalization()
+    {
+        // Status Bar - Map Name (when no map selected)
+        if (CurrentMapName != null && _currentMapConfig == null)
+            CurrentMapName.Text = _loc.SelectMap;
+
+        // Status Bar Tooltips
+        if (ExtractCountPanel != null)
+            ExtractCountPanel.ToolTip = _loc.Extract;
+        if (TransitCountPanel != null)
+            TransitCountPanel.ToolTip = _loc.TransitPoint;
+        if (QuestCountPanel != null)
+            QuestCountPanel.ToolTip = _loc.QuestObjective;
+        if (BtnCopyCoords != null)
+            BtnCopyCoords.ToolTip = _loc.CopyCoordinates;
+        if (TrackingStatusPanel != null)
+            TrackingStatusPanel.ToolTip = _loc.TrackerStatus;
+    }
+
+    private void UpdateMapAreaLocalization()
+    {
+        // Loading text
+        if (LoadingText != null)
+            LoadingText.Text = _loc.LoadingMap;
+
+        // Minimap labels
+        if (MinimapLabel != null)
+            MinimapLabel.Text = _loc.Minimap;
+
+        // Map hint texts
+        if (MapHintScrollKey != null)
+            MapHintScrollKey.Text = _loc.Scroll;
+        if (MapHintZoomText != null)
+            MapHintZoomText.Text = $" {_loc.Zoom}";
+        if (MapHintDragKey != null)
+            MapHintDragKey.Text = _loc.Drag;
+        if (MapHintMoveText != null)
+            MapHintMoveText.Text = $" {_loc.Move}";
+        if (MapHintResetText != null)
+            MapHintResetText.Text = $" {_loc.Reset}";
+    }
+
+    #endregion
 
     private void LoadMapSelector()
     {
@@ -156,6 +559,9 @@ public partial class TestMapPage : UserControl
             UpdateCounts();
             RedrawAll();
             UpdateStatusBarMapInfo();
+
+            // Save last selected map
+            _settings.MapLastSelectedMap = config.Key;
 
             // Drawer가 열려있으면 새로고침
             if (_isDrawerOpen)
@@ -306,11 +712,13 @@ public partial class TestMapPage : UserControl
                 {
                     CenterMapInView();
                     RedrawAll();
+                    UpdateMinimap();
                 }), System.Windows.Threading.DispatcherPriority.Loaded);
             }
             else
             {
                 RedrawAll();
+                UpdateMinimap();
             }
 
             var floorInfo = !string.IsNullOrEmpty(_currentFloorId) ? $" [{_currentFloorId}]" : "";
@@ -377,6 +785,39 @@ public partial class TestMapPage : UserControl
 
     private void LayerVisibility_Changed(object sender, RoutedEventArgs e)
     {
+        // Save checkbox states to settings
+        if (sender is CheckBox checkBox)
+        {
+            var isChecked = checkBox.IsChecked == true;
+            switch (checkBox.Name)
+            {
+                case "ChkShowMarkers":
+                    _settings.MapShowExtracts = isChecked;
+                    break;
+                case "ChkShowTransit":
+                    _settings.MapShowTransits = isChecked;
+                    break;
+                case "ChkShowQuests":
+                    _settings.MapShowQuests = isChecked;
+                    break;
+            }
+        }
+
+        RedrawAll();
+    }
+
+    private void MarkerScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        _markerScale = e.NewValue;
+
+        // Update display text
+        if (MarkerScaleText != null)
+            MarkerScaleText.Text = $"{_markerScale:F1}x";
+
+        // Save to settings
+        _settings.MapMarkerScale = _markerScale;
+
+        // Redraw all markers with new scale
         RedrawAll();
     }
 
@@ -447,7 +888,7 @@ public partial class TestMapPage : UserControl
             var (r, g, b) = MapMarker.GetMarkerColor(marker.MarkerType);
             var markerColor = Color.FromArgb((byte)(opacity * 255), r, g, b);
 
-            var markerSize = 48 * inverseScale;
+            var markerSize = 48 * inverseScale * _markerScale;
             var iconImage = GetMarkerIcon(marker.MarkerType);
 
             if (iconImage != null)
@@ -568,7 +1009,7 @@ public partial class TestMapPage : UserControl
 
             var transitColor = Color.FromArgb((byte)(opacity * 255), 33, 150, 243); // #2196F3
 
-            var markerSize = 40 * inverseScale;
+            var markerSize = 40 * inverseScale * _markerScale;
             var iconImage = GetMarkerIcon(MapMarkerType.Transit);
 
             if (iconImage != null)
@@ -731,6 +1172,10 @@ public partial class TestMapPage : UserControl
         {
             // 숨긴 퀘스트 필터링
             if (_hiddenQuestIds.Contains(objective.TaskNormalizedName))
+                continue;
+
+            // 퀘스트 타입 필터링
+            if (!IsQuestTypeEnabled(objective.Type))
                 continue;
 
             // 현재 맵의 위치만 필터링
@@ -953,7 +1398,7 @@ public partial class TestMapPage : UserControl
     /// </summary>
     private Canvas CreateDiamondMarker(double screenX, double screenY, Color color, double inverseScale, double opacity, TaskObjectiveWithLocation? objective = null)
     {
-        var size = 18 * inverseScale;
+        var size = 18 * inverseScale * _markerScale;
         var canvas = new Canvas { Width = 0, Height = 0 };
 
         // 글로우 효과 (배경 마름모)
@@ -1344,6 +1789,7 @@ public partial class TestMapPage : UserControl
             if (obj != null)
             {
                 _hiddenQuestIds.Add(obj.TaskNormalizedName);
+                _settings.MapHiddenQuests = _hiddenQuestIds; // Save to settings
                 RefreshQuestMarkers();
                 RefreshQuestDrawer();
             }
@@ -1655,20 +2101,84 @@ public partial class TestMapPage : UserControl
     {
         var nextPreset = ZoomPresets.FirstOrDefault(p => p > _zoomLevel);
         var newZoom = nextPreset > 0 ? nextPreset : _zoomLevel * 1.25;
-        ZoomToCenter(newZoom);
+        ZoomToCenterAnimated(newZoom);
     }
 
     private void BtnZoomOut_Click(object sender, RoutedEventArgs e)
     {
         var prevPreset = ZoomPresets.LastOrDefault(p => p < _zoomLevel);
         var newZoom = prevPreset > 0 ? prevPreset : _zoomLevel * 0.8;
-        ZoomToCenter(newZoom);
+        ZoomToCenterAnimated(newZoom);
     }
 
     private void BtnResetView_Click(object sender, RoutedEventArgs e)
     {
-        SetZoom(1.0);
-        CenterMapInView();
+        ResetViewAnimated();
+    }
+
+    /// <summary>
+    /// 중앙 기준 줌 (애니메이션)
+    /// </summary>
+    private void ZoomToCenterAnimated(double newZoom)
+    {
+        var viewerCenterX = MapViewerGrid.ActualWidth / 2;
+        var viewerCenterY = MapViewerGrid.ActualHeight / 2;
+        ZoomToPointAnimated(newZoom, new Point(viewerCenterX, viewerCenterY));
+    }
+
+    /// <summary>
+    /// 특정 지점 기준 줌 (애니메이션)
+    /// </summary>
+    private void ZoomToPointAnimated(double newZoom, Point viewerPoint)
+    {
+        newZoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
+
+        // 현재 값 캡처
+        var currentTranslateX = MapTranslate.X;
+        var currentTranslateY = MapTranslate.Y;
+        var currentZoom = MapScale.ScaleX;
+
+        // 진행 중인 애니메이션 중지
+        MapTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        MapTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+        MapScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        MapScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+
+        // 값 복원
+        MapTranslate.X = currentTranslateX;
+        MapTranslate.Y = currentTranslateY;
+        MapScale.ScaleX = currentZoom;
+        MapScale.ScaleY = currentZoom;
+
+        if (Math.Abs(newZoom - currentZoom) < 0.001) return;
+
+        // 목표 위치 계산 (마우스 포인트 기준 줌)
+        var canvasX = (viewerPoint.X - currentTranslateX) / currentZoom;
+        var canvasY = (viewerPoint.Y - currentTranslateY) / currentZoom;
+        var targetTranslateX = viewerPoint.X - canvasX * newZoom;
+        var targetTranslateY = viewerPoint.Y - canvasY * newZoom;
+
+        // 부드러운 애니메이션 적용
+        AnimateMapTo(newZoom, targetTranslateX, targetTranslateY);
+    }
+
+    /// <summary>
+    /// 뷰 리셋 (애니메이션)
+    /// </summary>
+    private void ResetViewAnimated()
+    {
+        var viewerWidth = MapViewerGrid.ActualWidth;
+        var viewerHeight = MapViewerGrid.ActualHeight;
+
+        if (viewerWidth <= 0 || viewerHeight <= 0) return;
+
+        var targetZoom = 1.0;
+        var scaledMapWidth = MapCanvas.Width * targetZoom;
+        var scaledMapHeight = MapCanvas.Height * targetZoom;
+        var targetTranslateX = (viewerWidth - scaledMapWidth) / 2;
+        var targetTranslateY = (viewerHeight - scaledMapHeight) / 2;
+
+        AnimateMapTo(targetZoom, targetTranslateX, targetTranslateY);
     }
 
     private void ZoomToCenter(double newZoom)
@@ -1734,6 +2244,7 @@ public partial class TestMapPage : UserControl
         ZoomText.Text = zoomPercent;
 
         RedrawAll();
+        UpdateMinimapViewport();
     }
 
     private void CenterMapInView()
@@ -1838,6 +2349,9 @@ public partial class TestMapPage : UserControl
         MapTranslate.X = _dragStartTranslateX + deltaX;
         MapTranslate.Y = _dragStartTranslateY + deltaY;
         MapCanvas.Cursor = Cursors.ScrollAll;
+
+        // Update minimap viewport during drag
+        UpdateMinimapViewport();
     }
 
     private void MapViewer_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -1887,6 +2401,9 @@ public partial class TestMapPage : UserControl
         QuestDrawerPanel.Visibility = Visibility.Visible;
         BtnToggleDrawer.Content = "▶";
         RefreshQuestDrawer();
+
+        // Save drawer state
+        _settings.MapDrawerOpen = true;
     }
 
     /// <summary>
@@ -1898,6 +2415,9 @@ public partial class TestMapPage : UserControl
         QuestDrawerColumn.Width = new GridLength(0);
         QuestDrawerPanel.Visibility = Visibility.Collapsed;
         BtnToggleDrawer.Content = "◀";
+
+        // Save drawer state
+        _settings.MapDrawerOpen = false;
     }
 
     /// <summary>
@@ -1905,6 +2425,21 @@ public partial class TestMapPage : UserControl
     /// </summary>
     private void DrawerFilter_Changed(object sender, RoutedEventArgs e)
     {
+        // Save filter states to settings
+        if (sender is CheckBox checkBox)
+        {
+            var isChecked = checkBox.IsChecked == true;
+            switch (checkBox.Name)
+            {
+                case "ChkIncompleteOnly":
+                    _settings.MapIncompleteOnly = isChecked;
+                    break;
+                case "ChkCurrentMapOnly":
+                    _settings.MapCurrentMapOnly = isChecked;
+                    break;
+            }
+        }
+
         if (_isDrawerOpen)
         {
             RefreshQuestDrawer();
@@ -2020,6 +2555,13 @@ public partial class TestMapPage : UserControl
         {
             QuestCountText.Text = $"({groups.Count}퀘스트, {completedObjectives}/{totalObjectives})";
         }
+
+        // 헤더 퀘스트 카운트 업데이트
+        if (HeaderQuestCount != null)
+        {
+            var incompleteCount = groups.Count(g => !g.IsCompleted);
+            HeaderQuestCount.Text = incompleteCount > 0 ? $"({incompleteCount})" : "";
+        }
     }
 
     /// <summary>
@@ -2048,6 +2590,9 @@ public partial class TestMapPage : UserControl
             {
                 _hiddenQuestIds.Add(group.QuestId);
             }
+
+            // Save to settings
+            _settings.MapHiddenQuests = _hiddenQuestIds;
 
             // 맵 마커 새로고침
             RefreshQuestMarkers();
@@ -2088,6 +2633,9 @@ public partial class TestMapPage : UserControl
                 _collapsedQuestIds.Remove(group.QuestId);
             else
                 _collapsedQuestIds.Add(group.QuestId);
+
+            // Save to settings
+            _settings.MapCollapsedQuests = _collapsedQuestIds;
         }
     }
 
@@ -2111,6 +2659,7 @@ public partial class TestMapPage : UserControl
         if (sender is ComboBox comboBox && comboBox.SelectedItem is ComboBoxItem item)
         {
             _sortOption = item.Tag?.ToString() ?? "name";
+            _settings.MapSortOption = _sortOption; // Save to settings
             RefreshQuestDrawer();
         }
     }
@@ -2121,6 +2670,7 @@ public partial class TestMapPage : UserControl
     private void BtnShowAll_Click(object sender, RoutedEventArgs e)
     {
         _hiddenQuestIds.Clear();
+        _settings.MapHiddenQuests = _hiddenQuestIds; // Save to settings
         RefreshQuestDrawer();
         RefreshQuestMarkers();
     }
@@ -2134,6 +2684,7 @@ public partial class TestMapPage : UserControl
         {
             foreach (var g in groups)
                 _hiddenQuestIds.Add(g.QuestId);
+            _settings.MapHiddenQuests = _hiddenQuestIds; // Save to settings
             RefreshQuestDrawer();
             RefreshQuestMarkers();
         }
@@ -2145,6 +2696,7 @@ public partial class TestMapPage : UserControl
     private void BtnExpandAll_Click(object sender, RoutedEventArgs e)
     {
         _collapsedQuestIds.Clear();
+        _settings.MapCollapsedQuests = _collapsedQuestIds; // Save to settings
         RefreshQuestDrawer();
     }
 
@@ -2157,7 +2709,79 @@ public partial class TestMapPage : UserControl
         {
             foreach (var g in groups)
                 _collapsedQuestIds.Add(g.QuestId);
+            _settings.MapCollapsedQuests = _collapsedQuestIds; // Save to settings
             RefreshQuestDrawer();
+        }
+    }
+
+    /// <summary>
+    /// 도움말 버튼 클릭 - 키보드 힌트 토글
+    /// </summary>
+    private void BtnDrawerHelp_Click(object sender, RoutedEventArgs e)
+    {
+        if (DrawerHelpPanel != null)
+        {
+            DrawerHelpPanel.Visibility = DrawerHelpPanel.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+    }
+
+    /// <summary>
+    /// 옵션 버튼 클릭 - 빠른 작업 팝업
+    /// </summary>
+    private void BtnDrawerOptions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+
+        var menu = new ContextMenu();
+
+        var showAllItem = new MenuItem { Header = "전체 표시" };
+        showAllItem.Click += BtnShowAll_Click;
+        menu.Items.Add(showAllItem);
+
+        var hideAllItem = new MenuItem { Header = "전체 숨김" };
+        hideAllItem.Click += BtnHideAll_Click;
+        menu.Items.Add(hideAllItem);
+
+        menu.Items.Add(new Separator());
+
+        var expandAllItem = new MenuItem { Header = "모두 펼치기" };
+        expandAllItem.Click += BtnExpandAll_Click;
+        menu.Items.Add(expandAllItem);
+
+        var collapseAllItem = new MenuItem { Header = "모두 접기" };
+        collapseAllItem.Click += BtnCollapseAll_Click;
+        menu.Items.Add(collapseAllItem);
+
+        menu.PlacementTarget = btn;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// 목표 맵 이동 버튼 클릭
+    /// </summary>
+    private void ObjectiveGoToMap_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is QuestDrawerItem item)
+        {
+            FocusOnQuestObjective(item.Objective);
+        }
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// 컨텍스트 메뉴 - 맵에서 숨기기
+    /// </summary>
+    private void QuestContextMenu_HideFromMap(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && menuItem.DataContext is QuestDrawerGroup group)
+        {
+            _hiddenQuestIds.Add(group.QuestId);
+            _settings.MapHiddenQuests = _hiddenQuestIds;
+            RefreshQuestDrawer();
+            RefreshQuestMarkers();
         }
     }
 
@@ -2272,6 +2896,7 @@ public partial class TestMapPage : UserControl
                     _collapsedQuestIds.Remove(groups[currentIndex].QuestId);
                 else
                     _collapsedQuestIds.Add(groups[currentIndex].QuestId);
+                _settings.MapCollapsedQuests = _collapsedQuestIds; // Save to settings
                 return;
             default:
                 return;
@@ -2419,6 +3044,7 @@ public partial class TestMapPage : UserControl
             _zoomLevel = targetZoom;
             ZoomText.Text = $"{_zoomLevel * 100:F0}%";
             RedrawAll(); // 마커 스케일 업데이트
+            UpdateMinimapViewport(); // 미니맵 뷰포트 업데이트
         };
 
         // 애니메이션 시작
@@ -2558,6 +3184,9 @@ public partial class TestMapPage : UserControl
         else
         {
             LegendPopup.Visibility = Visibility.Visible;
+            // 다른 팝업 닫기
+            SettingsPopup.Visibility = Visibility.Collapsed;
+            QuestFilterPopup.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -2567,6 +3196,440 @@ public partial class TestMapPage : UserControl
     private void BtnCloseLegend_Click(object sender, RoutedEventArgs e)
     {
         LegendPopup.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 퀘스트 타입 필터 버튼 클릭
+    /// </summary>
+    private void BtnQuestFilter_Click(object sender, RoutedEventArgs e)
+    {
+        if (QuestFilterPopup.Visibility == Visibility.Visible)
+        {
+            QuestFilterPopup.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            QuestFilterPopup.Visibility = Visibility.Visible;
+            // 다른 팝업 닫기
+            LegendPopup.Visibility = Visibility.Collapsed;
+            SettingsPopup.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// 퀘스트 타입 필터 닫기 버튼 클릭
+    /// </summary>
+    private void BtnCloseQuestFilter_Click(object sender, RoutedEventArgs e)
+    {
+        QuestFilterPopup.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 퀘스트 타입 필터 체크박스 변경
+    /// </summary>
+    private void QuestTypeFilter_Changed(object sender, RoutedEventArgs e)
+    {
+        UpdateEnabledQuestTypes();
+        RefreshQuestMarkers();
+
+        // Update drawer if open
+        if (_isDrawerOpen)
+        {
+            RefreshQuestDrawer();
+        }
+    }
+
+    /// <summary>
+    /// 전체 선택 버튼 클릭
+    /// </summary>
+    private void BtnSelectAllFilters_Click(object sender, RoutedEventArgs e)
+    {
+        SetAllQuestFilters(true);
+    }
+
+    /// <summary>
+    /// 전체 해제 버튼 클릭
+    /// </summary>
+    private void BtnClearAllFilters_Click(object sender, RoutedEventArgs e)
+    {
+        SetAllQuestFilters(false);
+    }
+
+    /// <summary>
+    /// 설정 버튼 클릭 - 설정 팝업 표시/숨김 토글
+    /// </summary>
+    private void BtnSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsPopup.Visibility == Visibility.Visible)
+        {
+            SettingsPopup.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            SettingsPopup.Visibility = Visibility.Visible;
+            // 다른 팝업 닫기
+            LegendPopup.Visibility = Visibility.Collapsed;
+            QuestFilterPopup.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// 설정 닫기 버튼 클릭
+    /// </summary>
+    private void BtnCloseSettings_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsPopup.Visibility = Visibility.Collapsed;
+    }
+
+    #region Settings Panel - Tab Navigation
+
+    /// <summary>
+    /// 설정 탭 클릭 - 탭 전환
+    /// </summary>
+    private void SettingsTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton tab) return;
+
+        var tabName = tab.Tag?.ToString();
+        PanelDisplay.Visibility = tabName == "Display" ? Visibility.Visible : Visibility.Collapsed;
+        PanelMarker.Visibility = tabName == "Marker" ? Visibility.Visible : Visibility.Collapsed;
+        PanelTracker.Visibility = tabName == "Tracker" ? Visibility.Visible : Visibility.Collapsed;
+        PanelShortcuts.Visibility = tabName == "Shortcuts" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    #endregion
+
+    #region Settings Panel - Display Tab
+
+    /// <summary>
+    /// 이동 경로 표시/숨김
+    /// </summary>
+    private void TrailVisibility_Changed(object sender, RoutedEventArgs e)
+    {
+        _showTrail = ChkShowTrail?.IsChecked ?? true;
+        TrailCanvas.Visibility = _showTrail ? Visibility.Visible : Visibility.Collapsed;
+        _settings.MapShowTrail = _showTrail;
+    }
+
+    /// <summary>
+    /// 미니맵 표시/숨김
+    /// </summary>
+    private void MinimapVisibility_Changed(object sender, RoutedEventArgs e)
+    {
+        var show = ChkShowMinimap?.IsChecked ?? true;
+        MinimapContainer.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        _settings.MapShowMinimap = show;
+    }
+
+    /// <summary>
+    /// 미니맵 크기 변경
+    /// </summary>
+    private void MinimapSize_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton radio) return;
+
+        var size = radio.Tag?.ToString() ?? "Medium";
+        _settings.MapMinimapSize = size;
+
+        // UpdateMinimap()이 맵 비율에 맞게 동적으로 크기 계산
+        UpdateMinimap();
+    }
+
+    #endregion
+
+    #region Settings Panel - Marker Tab
+
+    /// <summary>
+    /// 마커 크기 프리셋 버튼 클릭
+    /// </summary>
+    private void MarkerScalePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+
+        if (double.TryParse(btn.Tag?.ToString(), out var scale))
+        {
+            MarkerScaleSlider.Value = scale;
+        }
+    }
+
+    /// <summary>
+    /// 마커 투명도 슬라이더 변경
+    /// </summary>
+    private void MarkerOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (MarkerOpacityText == null) return;
+
+        var opacity = e.NewValue;
+        MarkerOpacityText.Text = $"{(int)(opacity * 100)}%";
+
+        // Apply opacity to marker canvases
+        MarkersCanvas.Opacity = opacity;
+        TransitCanvas.Opacity = opacity;
+        QuestMarkersCanvas.Opacity = opacity;
+
+        _settings.MapMarkerOpacity = opacity;
+    }
+
+    /// <summary>
+    /// 완료 퀘스트 자동 숨김 변경
+    /// </summary>
+    private void AutoHideCompleted_Changed(object sender, RoutedEventArgs e)
+    {
+        var autoHide = ChkAutoHideCompleted?.IsChecked ?? false;
+        _settings.MapAutoHideCompleted = autoHide;
+        RefreshQuestMarkers();
+        if (_isDrawerOpen) RefreshQuestDrawer();
+    }
+
+    /// <summary>
+    /// 완료 퀘스트 흐리게 표시 변경
+    /// </summary>
+    private void FadeCompleted_Changed(object sender, RoutedEventArgs e)
+    {
+        var fade = ChkFadeCompleted?.IsChecked ?? true;
+        _settings.MapFadeCompleted = fade;
+        RefreshQuestMarkers();
+    }
+
+    /// <summary>
+    /// 마커 라벨 표시 변경
+    /// </summary>
+    private void ShowLabels_Changed(object sender, RoutedEventArgs e)
+    {
+        var showLabels = ChkShowLabels?.IsChecked ?? true;
+        _settings.MapShowLabels = showLabels;
+        RedrawMarkers();
+        RedrawTransit();
+        RefreshQuestMarkers();
+    }
+
+    #endregion
+
+    #region Settings Panel - Tracker Tab
+
+    /// <summary>
+    /// 폴더 열기 버튼 클릭
+    /// </summary>
+    private void BtnOpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = _trackerService.Settings.ScreenshotFolderPath;
+        if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start("explorer.exe", folder);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"폴더 열기 실패: {ex.Message}";
+            }
+        }
+        else
+        {
+            StatusText.Text = "폴더가 설정되지 않았습니다.";
+        }
+    }
+
+    /// <summary>
+    /// 경로 색상 변경
+    /// </summary>
+    private void TrailColor_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton radio) return;
+
+        var colorHex = radio.Tag?.ToString();
+        if (string.IsNullOrEmpty(colorHex)) return;
+
+        try
+        {
+            var color = (Color)ColorConverter.ConvertFromString(colorHex);
+            _settings.MapTrailColor = colorHex;
+
+            // 기존 트레일 마커 색상 업데이트
+            foreach (var marker in _trailMarkers)
+            {
+                marker.Fill = new SolidColorBrush(color);
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 경로 두께 변경
+    /// </summary>
+    private void TrailThickness_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TrailThicknessText == null) return;
+
+        var thickness = (int)e.NewValue;
+        TrailThicknessText.Text = $"{thickness}px";
+        _settings.MapTrailThickness = thickness;
+
+        // 기존 트레일 마커 크기 업데이트
+        foreach (var marker in _trailMarkers)
+        {
+            marker.Width = thickness * 2;
+            marker.Height = thickness * 2;
+        }
+    }
+
+    /// <summary>
+    /// 자동 추적 시작 옵션 변경
+    /// </summary>
+    private void AutoStartTracking_Changed(object sender, RoutedEventArgs e)
+    {
+        var autoStart = ChkAutoStartTracking?.IsChecked ?? false;
+        _settings.MapAutoStartTracking = autoStart;
+    }
+
+    /// <summary>
+    /// 트래킹 폴더 텍스트 업데이트
+    /// </summary>
+    private void UpdateTrackingFolderText()
+    {
+        if (TrackingFolderText == null) return;
+
+        var folder = _trackerService.Settings.ScreenshotFolderPath;
+        if (string.IsNullOrEmpty(folder))
+        {
+            TrackingFolderText.Text = "폴더 미선택";
+        }
+        else
+        {
+            // 경로가 너무 길면 축약
+            var displayPath = folder.Length > 40 ? "..." + folder.Substring(folder.Length - 37) : folder;
+            TrackingFolderText.Text = displayPath;
+        }
+    }
+
+    #endregion
+
+    #region Settings Panel - Reset
+
+    /// <summary>
+    /// 설정 초기화 버튼 클릭
+    /// </summary>
+    private void BtnResetSettings_Click(object sender, RoutedEventArgs e)
+    {
+        // 레이어 표시 초기화
+        if (ChkShowMarkers != null) ChkShowMarkers.IsChecked = true;
+        if (ChkShowTransit != null) ChkShowTransit.IsChecked = true;
+        if (ChkShowQuests != null) ChkShowQuests.IsChecked = true;
+        if (ChkShowTrail != null) ChkShowTrail.IsChecked = true;
+        if (ChkShowMinimap != null) ChkShowMinimap.IsChecked = true;
+
+        // 마커 설정 초기화
+        if (MarkerScaleSlider != null) MarkerScaleSlider.Value = 1.0;
+        if (MarkerOpacitySlider != null) MarkerOpacitySlider.Value = 1.0;
+        if (ChkAutoHideCompleted != null) ChkAutoHideCompleted.IsChecked = false;
+        if (ChkFadeCompleted != null) ChkFadeCompleted.IsChecked = true;
+        if (ChkShowLabels != null) ChkShowLabels.IsChecked = true;
+
+        // 미니맵 크기 초기화
+        if (MinimapSizeM != null) MinimapSizeM.IsChecked = true;
+        MinimapContent.Width = 180;
+        MinimapContent.Height = 140;
+
+        // 트래커 설정 초기화
+        if (TrailColorBlue != null) TrailColorBlue.IsChecked = true;
+        if (TrailThicknessSlider != null) TrailThicknessSlider.Value = 2;
+        if (ChkAutoStartTracking != null) ChkAutoStartTracking.IsChecked = false;
+
+        // 설정 저장
+        _settings.MapShowExtracts = true;
+        _settings.MapShowTransits = true;
+        _settings.MapShowQuests = true;
+        _settings.MapShowTrail = true;
+        _settings.MapShowMinimap = true;
+        _settings.MapMarkerScale = 1.0;
+        _settings.MapMarkerOpacity = 1.0;
+        _settings.MapAutoHideCompleted = false;
+        _settings.MapFadeCompleted = true;
+        _settings.MapShowLabels = true;
+        _settings.MapMinimapSize = "Medium";
+        _settings.MapTrailColor = "#2196F3";
+        _settings.MapTrailThickness = 2;
+        _settings.MapAutoStartTracking = false;
+
+        // UI 갱신
+        _markerScale = 1.0;
+        RedrawMarkers();
+        RedrawTransit();
+        RefreshQuestMarkers();
+        UpdateMinimap();
+
+        StatusText.Text = "설정이 초기화되었습니다.";
+    }
+
+    #endregion
+
+    /// <summary>
+    /// 모든 퀘스트 필터 설정
+    /// </summary>
+    private void SetAllQuestFilters(bool isChecked)
+    {
+        if (ChkFilterVisit != null) ChkFilterVisit.IsChecked = isChecked;
+        if (ChkFilterMark != null) ChkFilterMark.IsChecked = isChecked;
+        if (ChkFilterPlant != null) ChkFilterPlant.IsChecked = isChecked;
+        if (ChkFilterExtract != null) ChkFilterExtract.IsChecked = isChecked;
+        if (ChkFilterFind != null) ChkFilterFind.IsChecked = isChecked;
+        if (ChkFilterKill != null) ChkFilterKill.IsChecked = isChecked;
+        if (ChkFilterOther != null) ChkFilterOther.IsChecked = isChecked;
+
+        UpdateEnabledQuestTypes();
+        RefreshQuestMarkers();
+
+        if (_isDrawerOpen)
+        {
+            RefreshQuestDrawer();
+        }
+    }
+
+    /// <summary>
+    /// 활성화된 퀘스트 타입 업데이트
+    /// </summary>
+    private void UpdateEnabledQuestTypes()
+    {
+        _enabledQuestTypes.Clear();
+
+        if (ChkFilterVisit?.IsChecked == true) _enabledQuestTypes.Add("visit");
+        if (ChkFilterMark?.IsChecked == true) _enabledQuestTypes.Add("mark");
+        if (ChkFilterPlant?.IsChecked == true) _enabledQuestTypes.Add("plantitem");
+        if (ChkFilterExtract?.IsChecked == true) _enabledQuestTypes.Add("extract");
+        if (ChkFilterFind?.IsChecked == true)
+        {
+            _enabledQuestTypes.Add("finditem");
+            _enabledQuestTypes.Add("findquestitem");
+            _enabledQuestTypes.Add("giveitem");
+        }
+        if (ChkFilterKill?.IsChecked == true)
+        {
+            _enabledQuestTypes.Add("kill");
+            _enabledQuestTypes.Add("shoot");
+        }
+        if (ChkFilterOther?.IsChecked == true) _enabledQuestTypes.Add("other");
+    }
+
+    /// <summary>
+    /// 퀘스트 타입이 필터에 의해 표시되어야 하는지 확인
+    /// </summary>
+    private bool IsQuestTypeEnabled(string? type)
+    {
+        if (string.IsNullOrEmpty(type)) return _enabledQuestTypes.Contains("other");
+
+        var normalizedType = type.ToLowerInvariant();
+
+        // 직접 매칭
+        if (_enabledQuestTypes.Contains(normalizedType)) return true;
+
+        // 특수 케이스 처리
+        if (normalizedType.Contains("find") || normalizedType.Contains("give"))
+            return _enabledQuestTypes.Contains("finditem");
+        if (normalizedType.Contains("kill") || normalizedType.Contains("shoot"))
+            return _enabledQuestTypes.Contains("kill");
+
+        // 알 수 없는 타입은 "other"로 처리
+        return _enabledQuestTypes.Contains("other");
     }
 
     /// <summary>
@@ -2630,6 +3693,7 @@ public partial class TestMapPage : UserControl
         _trackerService.WatchingStateChanged -= OnWatchingStateChanged;
         _trackerService.StatusMessage -= OnTrackerStatusMessage;
         _logMapWatcher.MapChanged -= OnLogMapChanged;
+        _loc.LanguageChanged -= OnLanguageChanged;
     }
 
     /// <summary>
@@ -2720,12 +3784,18 @@ public partial class TestMapPage : UserControl
             // Show original game coordinates in status
             if (position.OriginalPosition != null)
             {
+                _currentGameX = position.OriginalPosition.X;
+                _currentGameZ = position.OriginalPosition.Y;
+                _hasValidCoordinates = true;
                 StatusText.Text = $"위치: X={position.OriginalPosition.X:F0}, Z={position.OriginalPosition.Y:F0}";
             }
             else
             {
                 StatusText.Text = $"위치: Screen X={svgX:F0}, Y={svgY:F0}";
             }
+
+            // Update minimap player position
+            UpdateMinimapPlayerPosition();
         });
     }
 
@@ -2737,9 +3807,17 @@ public partial class TestMapPage : UserControl
         Dispatcher.Invoke(() =>
         {
             BtnToggleTracking.Content = isWatching ? "⏹" : "▶";
-            TrackingStatusBorder.Background = isWatching
+            var statusBrush = isWatching
                 ? new SolidColorBrush(Color.FromRgb(76, 175, 80))  // Green
                 : new SolidColorBrush(Color.FromRgb(158, 158, 158)); // Gray
+
+            TrackingStatusBorder.Background = statusBrush;
+            if (TrackingStatusText != null)
+                TrackingStatusText.Text = isWatching ? "추적 중" : "대기";
+
+            // 상태바의 트래킹 인디케이터도 업데이트
+            if (StatusTrackingIndicator != null)
+                StatusTrackingIndicator.Background = statusBrush;
         });
     }
 
@@ -2886,6 +3964,373 @@ public partial class TestMapPage : UserControl
     }
 
     #endregion
+
+    #region Minimap
+
+    /// <summary>
+    /// 미니맵 헤더 클릭 (접기/펼치기)
+    /// </summary>
+    private void MinimapHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        _isMinimapExpanded = !_isMinimapExpanded;
+
+        if (MinimapContent != null)
+            MinimapContent.Visibility = _isMinimapExpanded ? Visibility.Visible : Visibility.Collapsed;
+
+        if (MinimapToggleIcon != null)
+            MinimapToggleIcon.Text = _isMinimapExpanded ? "▼" : "▲";
+    }
+
+    /// <summary>
+    /// 미니맵 클릭 시 해당 위치로 맵 이동
+    /// </summary>
+    private void Minimap_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (MinimapContent == null || _mapSize.IsEmpty) return;
+
+        _isMinimapDragging = true;
+        MinimapContent.CaptureMouse();
+        NavigateToMinimapPosition(e.GetPosition(MinimapContent));
+    }
+
+    /// <summary>
+    /// 미니맵 드래그 중 이동
+    /// </summary>
+    private void Minimap_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isMinimapDragging || MinimapContent == null) return;
+
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            NavigateToMinimapPosition(e.GetPosition(MinimapContent));
+        }
+        else
+        {
+            _isMinimapDragging = false;
+            MinimapContent.ReleaseMouseCapture();
+        }
+    }
+
+    /// <summary>
+    /// 미니맵 위치로 맵 이동
+    /// </summary>
+    private void NavigateToMinimapPosition(Point minimapPos)
+    {
+        if (_mapSize.IsEmpty || MinimapContent == null) return;
+
+        var minimapWidth = MinimapContent.ActualWidth;
+        var minimapHeight = MinimapContent.ActualHeight;
+
+        if (minimapWidth <= 0 || minimapHeight <= 0) return;
+
+        // Convert minimap click to map coordinates (no offset needed)
+        var relativeX = minimapPos.X / minimapWidth;
+        var relativeY = minimapPos.Y / minimapHeight;
+
+        // Clamp to valid range
+        relativeX = Math.Clamp(relativeX, 0, 1);
+        relativeY = Math.Clamp(relativeY, 0, 1);
+
+        // Convert to map coordinates
+        var mapX = relativeX * _mapSize.Width;
+        var mapY = relativeY * _mapSize.Height;
+
+        // Get viewer size
+        var viewerWidth = MapViewerGrid.ActualWidth;
+        var viewerHeight = MapViewerGrid.ActualHeight;
+
+        // Calculate translation to center on this point
+        var newTranslateX = (viewerWidth / 2) - (mapX * _zoomLevel);
+        var newTranslateY = (viewerHeight / 2) - (mapY * _zoomLevel);
+
+        // Animate to the new position
+        AnimateMapTo(_zoomLevel, newTranslateX, newTranslateY);
+    }
+
+    /// <summary>
+    /// 미니맵 업데이트 (맵 로드 시)
+    /// </summary>
+    private void UpdateMinimap()
+    {
+        if (MapSvg == null || MinimapImage == null || MinimapContent == null) return;
+
+        try
+        {
+            // Get the actual size of the SVG map
+            MapSvg.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            MapSvg.Arrange(new Rect(MapSvg.DesiredSize));
+
+            _mapSize = MapSvg.DesiredSize;
+
+            if (_mapSize.Width <= 0 || _mapSize.Height <= 0)
+            {
+                _mapSize = new Size(1000, 1000); // Fallback
+            }
+
+            // 미니맵 크기 설정 (S/M/L)에 따른 기본 크기
+            double baseSize = _settings.MapMinimapSize switch
+            {
+                "Small" => 140,
+                "Large" => 240,
+                _ => 180 // Medium
+            };
+
+            // 맵 비율에 맞게 동적 크기 계산
+            var mapAspect = _mapSize.Width / _mapSize.Height;
+            double minimapWidth, minimapHeight;
+
+            if (mapAspect >= 1)
+            {
+                // 가로가 더 긴 맵
+                minimapWidth = baseSize;
+                minimapHeight = baseSize / mapAspect;
+            }
+            else
+            {
+                // 세로가 더 긴 맵
+                minimapHeight = baseSize;
+                minimapWidth = baseSize * mapAspect;
+            }
+
+            // 미니맵 크기 설정
+            MinimapContent.Width = minimapWidth;
+            MinimapContent.Height = minimapHeight;
+            _minimapScale = minimapWidth / _mapSize.Width;
+
+            // Render the SVG to a bitmap for the minimap
+            var dpi = 96.0;
+            var renderWidth = (int)minimapWidth;
+            var renderHeight = (int)minimapHeight;
+
+            if (renderWidth > 0 && renderHeight > 0)
+            {
+                var renderBitmap = new RenderTargetBitmap(
+                    renderWidth, renderHeight, dpi, dpi, PixelFormats.Pbgra32);
+
+                var drawingVisual = new DrawingVisual();
+                using (var drawingContext = drawingVisual.RenderOpen())
+                {
+                    drawingContext.PushTransform(new ScaleTransform(_minimapScale, _minimapScale));
+                    var brush = new VisualBrush(MapSvg) { Stretch = Stretch.None };
+                    drawingContext.DrawRectangle(brush, null, new Rect(0, 0, _mapSize.Width, _mapSize.Height));
+                }
+
+                renderBitmap.Render(drawingVisual);
+                renderBitmap.Freeze();
+
+                _minimapBitmap = renderBitmap;
+                MinimapImage.Source = _minimapBitmap;
+            }
+
+            // 미니맵 맵 이름 표시
+            if (MinimapMapName != null && _currentMapConfig != null)
+            {
+                MinimapMapName.Text = _currentMapConfig.DisplayName;
+            }
+
+            UpdateMinimapMarkers();
+            UpdateMinimapViewport();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Minimap] Error updating minimap: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 미니맵에 마커 표시
+    /// </summary>
+    private void UpdateMinimapMarkers()
+    {
+        if (MinimapMarkerCanvas == null || _mapSize.IsEmpty || _currentMapConfig == null) return;
+
+        MinimapMarkerCanvas.Children.Clear();
+
+        var minimapWidth = MinimapContent?.ActualWidth ?? 180;
+        var minimapHeight = MinimapContent?.ActualHeight ?? 140;
+
+        if (minimapWidth <= 0 || minimapHeight <= 0) return;
+
+        var scaleX = minimapWidth / _mapSize.Width;
+        var scaleY = minimapHeight / _mapSize.Height;
+
+        // 탈출구 마커 표시
+        if (_settings.MapShowExtracts)
+        {
+            var extractMarkers = _dbService.GetExtractMarkersForMap(_currentMapConfig.Key);
+            foreach (var marker in extractMarkers)
+            {
+                // 게임 좌표 -> SVG 좌표 변환
+                var screenCoords = _currentMapConfig.GameToScreen(marker.X, marker.Z);
+                if (screenCoords == null) continue;
+
+                var (sx, sy) = screenCoords.Value;
+                var x = sx * scaleX;
+                var y = sy * scaleY;
+
+                var dot = new Ellipse
+                {
+                    Width = 4,
+                    Height = 4,
+                    Fill = marker.MarkerType switch
+                    {
+                        MapMarkerType.PmcExtraction => Brushes.LimeGreen,
+                        MapMarkerType.ScavExtraction => Brushes.DeepSkyBlue,
+                        MapMarkerType.SharedExtraction => Brushes.Gold,
+                        _ => Brushes.Green
+                    },
+                    Opacity = 0.9
+                };
+
+                Canvas.SetLeft(dot, x - 2);
+                Canvas.SetTop(dot, y - 2);
+                MinimapMarkerCanvas.Children.Add(dot);
+            }
+        }
+
+        // 퀘스트 마커 표시 (메인 맵과 동일한 데이터 소스 사용)
+        if (_settings.MapShowQuests && _currentMapQuestObjectives.Count > 0)
+        {
+            foreach (var objective in _currentMapQuestObjectives)
+            {
+                // 숨긴 퀘스트 필터링
+                if (_hiddenQuestIds.Contains(objective.TaskNormalizedName)) continue;
+
+                // 완료된 퀘스트 필터링
+                var isCompleted = _progressService.IsObjectiveCompletedById(objective.ObjectiveId);
+                if (isCompleted) continue;
+
+                // 현재 맵의 위치만 가져오기
+                var locationsForCurrentMap = objective.Locations
+                    .Where(loc => IsLocationOnCurrentMap(loc))
+                    .ToList();
+
+                foreach (var loc in locationsForCurrentMap)
+                {
+                    // 게임 좌표 -> SVG 좌표 변환
+                    if (loc.Z == null) continue;
+                    var screenCoords = _currentMapConfig.GameToScreen(loc.X, loc.Z.Value);
+                    if (screenCoords == null) continue;
+
+                    var (sx, sy) = screenCoords.Value;
+                    var x = sx * scaleX;
+                    var y = sy * scaleY;
+
+                    var dot = new Ellipse
+                    {
+                        Width = 3,
+                        Height = 3,
+                        Fill = new SolidColorBrush(Color.FromRgb(255, 193, 7)), // Yellow/Orange
+                        Opacity = 0.8
+                    };
+
+                    Canvas.SetLeft(dot, x - 1.5);
+                    Canvas.SetTop(dot, y - 1.5);
+                    MinimapMarkerCanvas.Children.Add(dot);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 미니맵 뷰포트 사각형 업데이트
+    /// </summary>
+    private void UpdateMinimapViewport()
+    {
+        if (MinimapViewport == null || MinimapContent == null || _mapSize.IsEmpty) return;
+
+        try
+        {
+            var minimapWidth = MinimapContent.ActualWidth;
+            var minimapHeight = MinimapContent.ActualHeight;
+
+            if (minimapWidth <= 0 || minimapHeight <= 0) return;
+
+            // Calculate viewport in map coordinates
+            var viewerWidth = MapViewerGrid.ActualWidth;
+            var viewerHeight = MapViewerGrid.ActualHeight;
+
+            var translateX = MapTranslate.X;
+            var translateY = MapTranslate.Y;
+
+            // Visible area in map coordinates
+            var visibleLeft = -translateX / _zoomLevel;
+            var visibleTop = -translateY / _zoomLevel;
+            var visibleWidth = viewerWidth / _zoomLevel;
+            var visibleHeight = viewerHeight / _zoomLevel;
+
+            // Convert to minimap coordinates (no offset needed - minimap fills entire content)
+            var vpLeft = (visibleLeft / _mapSize.Width) * minimapWidth;
+            var vpTop = (visibleTop / _mapSize.Height) * minimapHeight;
+            var vpWidth = (visibleWidth / _mapSize.Width) * minimapWidth;
+            var vpHeight = (visibleHeight / _mapSize.Height) * minimapHeight;
+
+            // Clamp viewport to minimap bounds
+            vpLeft = Math.Max(0, Math.Min(vpLeft, minimapWidth - vpWidth));
+            vpTop = Math.Max(0, Math.Min(vpTop, minimapHeight - vpHeight));
+            vpWidth = Math.Min(vpWidth, minimapWidth);
+            vpHeight = Math.Min(vpHeight, minimapHeight);
+
+            // Update viewport rectangle
+            Canvas.SetLeft(MinimapViewport, vpLeft);
+            Canvas.SetTop(MinimapViewport, vpTop);
+            MinimapViewport.Width = Math.Max(8, vpWidth);
+            MinimapViewport.Height = Math.Max(8, vpHeight);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Minimap] Error updating viewport: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 미니맵에 플레이어 위치 업데이트
+    /// </summary>
+    private void UpdateMinimapPlayerPosition()
+    {
+        if (MinimapPlayerCanvas == null || !_hasValidCoordinates || _mapSize.IsEmpty) return;
+
+        MinimapPlayerCanvas.Children.Clear();
+
+        var svgPos = TransformEftToSvg(_currentGameX, _currentGameZ);
+        if (svgPos == null) return;
+
+        var minimapWidth = MinimapContent?.ActualWidth ?? 180;
+        var minimapHeight = MinimapContent?.ActualHeight ?? 140;
+
+        // Convert to minimap position (no offset needed)
+        var minimapX = (svgPos.Value.X / _mapSize.Width) * minimapWidth;
+        var minimapY = (svgPos.Value.Y / _mapSize.Height) * minimapHeight;
+
+        // Draw player dot on minimap (larger and more visible)
+        var playerDot = new Ellipse
+        {
+            Width = 8,
+            Height = 8,
+            Fill = Brushes.Cyan,
+            Stroke = Brushes.White,
+            StrokeThickness = 1.5
+        };
+
+        Canvas.SetLeft(playerDot, minimapX - 4);
+        Canvas.SetTop(playerDot, minimapY - 4);
+        MinimapPlayerCanvas.Children.Add(playerDot);
+
+        // Draw direction indicator (optional - if we have heading info)
+        var direction = new Polygon
+        {
+            Points = new PointCollection { new Point(0, -6), new Point(3, 2), new Point(-3, 2) },
+            Fill = Brushes.Cyan,
+            Stroke = Brushes.White,
+            StrokeThickness = 0.5,
+            RenderTransformOrigin = new Point(0.5, 0.5)
+        };
+        Canvas.SetLeft(direction, minimapX - 3);
+        Canvas.SetTop(direction, minimapY - 3);
+        // Note: Could add rotation based on player heading if available
+    }
+
+    #endregion
 }
 
 /// <summary>
@@ -2995,6 +4440,11 @@ public class QuestDrawerItem
         "traderLevel" => "💼", // 트레이더 레벨
         _ => "📋"             // 기타
     };
+
+    /// <summary>
+    /// 위치 정보가 있는지 여부
+    /// </summary>
+    public bool HasLocation => Objective.Locations.Any(l => l.Z.HasValue);
 
     /// <summary>
     /// 첫 번째 위치의 맵 이름
