@@ -223,17 +223,30 @@ public partial class MainWindow : Window
         var progressService = QuestProgressService.Instance;
         var apiService = TarkovDevApiService.Instance;
 
-        // Load tasks from JSON
-        var tasks = await tarkovService.LoadTasksFromJsonAsync();
+        List<TarkovTask>? tasks = null;
+
+        // 1. DB에서 먼저 로드 시도
+        if (await progressService.InitializeFromDbAsync())
+        {
+            tasks = progressService.AllTasks.ToList();
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from DB");
+        }
+        else
+        {
+            // 2. DB 로드 실패 시 JSON 폴백
+            tasks = await tarkovService.LoadTasksFromJsonAsync();
+            if (tasks != null && tasks.Count > 0)
+            {
+                progressService.Initialize(tasks);
+                System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from JSON (DB fallback)");
+            }
+        }
 
         // Load hideout data from JSON
         _hideoutModules = await apiService.LoadHideoutStationsFromJsonAsync();
 
         if (tasks != null && tasks.Count > 0)
         {
-            // Initialize progress service with tasks
-            progressService.Initialize(tasks);
-
             // Initialize quest graph service for dependency tracking
             QuestGraphService.Instance.Initialize(tasks);
 

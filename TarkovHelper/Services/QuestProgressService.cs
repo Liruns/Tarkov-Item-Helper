@@ -14,18 +14,125 @@ namespace TarkovHelper.Services
         public static QuestProgressService Instance => _instance ??= new QuestProgressService();
 
         private const string ProgressFileName = "quest_progress.json";
+        private const string ProgressFileNameV2 = "quest_progress_v2.json";
         private const string ObjectiveProgressFileName = "objective_progress.json";
 
         private Dictionary<string, QuestStatus> _questProgress = new();
         private Dictionary<string, TarkovTask> _tasksByNormalizedName = new();
         private Dictionary<string, TarkovTask> _tasksByBsgId = new();
+        private Dictionary<string, TarkovTask> _tasksById = new();
         private List<TarkovTask> _allTasks = new();
+
+        // V2 진행 데이터 (이중 키 저장)
+        private QuestProgressDataV2 _progressDataV2 = new();
 
         // Objective progress: key = "questNormalizedName:objectiveIndex", value = completed
         private Dictionary<string, bool> _objectiveProgress = new();
 
+        /// <summary>
+        /// 데이터 소스 (JSON 또는 DB)
+        /// </summary>
+        public bool IsLoadedFromDb { get; private set; }
+
         public event EventHandler? ProgressChanged;
         public event EventHandler<ObjectiveProgressChangedEventArgs>? ObjectiveProgressChanged;
+
+        /// <summary>
+        /// DB에서 퀘스트 데이터를 로드하고 초기화합니다.
+        /// </summary>
+        public async Task<bool> InitializeFromDbAsync()
+        {
+            var dbService = QuestDbService.Instance;
+
+            if (!await dbService.LoadQuestsAsync())
+            {
+                System.Diagnostics.Debug.WriteLine("[QuestProgressService] Failed to load quests from DB, falling back to JSON");
+                return false;
+            }
+
+            var tasks = dbService.AllQuests.ToList();
+            Initialize(tasks);
+            IsLoadedFromDb = true;
+
+            // V2 형식으로 진행 데이터 reconcile
+            ReconcileProgressWithDb();
+
+            System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Initialized from DB with {tasks.Count} quests");
+            return true;
+        }
+
+        /// <summary>
+        /// DB 업데이트 후 진행 데이터를 reconcile합니다.
+        /// ID 또는 NormalizedName으로 매핑하고 누락된 키를 채웁니다.
+        /// </summary>
+        private void ReconcileProgressWithDb()
+        {
+            var changed = false;
+
+            // 완료 퀘스트 reconcile
+            foreach (var entry in _progressDataV2.CompletedQuests)
+            {
+                TarkovTask? matched = null;
+
+                // 1차: ID로 매핑
+                if (!string.IsNullOrEmpty(entry.Id) && _tasksById.TryGetValue(entry.Id, out matched))
+                {
+                    // ID 매핑 성공 - NormalizedName 업데이트
+                    if (matched.NormalizedName != null && entry.NormalizedName != matched.NormalizedName)
+                    {
+                        entry.NormalizedName = matched.NormalizedName;
+                        changed = true;
+                    }
+                }
+                // 2차: NormalizedName으로 폴백
+                else if (!string.IsNullOrEmpty(entry.NormalizedName) &&
+                         _tasksByNormalizedName.TryGetValue(entry.NormalizedName, out matched))
+                {
+                    // NormalizedName 매핑 성공 - ID 업데이트
+                    var matchedId = matched.Ids?.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(matchedId) && entry.Id != matchedId)
+                    {
+                        entry.Id = matchedId;
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    // 매핑 실패 - 고아 레코드로 유지 (삭제하지 않음)
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Orphan completed entry: {entry.Id ?? entry.NormalizedName}");
+                }
+            }
+
+            // 실패 퀘스트 reconcile
+            foreach (var entry in _progressDataV2.FailedQuests)
+            {
+                TarkovTask? matched = null;
+
+                if (!string.IsNullOrEmpty(entry.Id) && _tasksById.TryGetValue(entry.Id, out matched))
+                {
+                    if (matched.NormalizedName != null && entry.NormalizedName != matched.NormalizedName)
+                    {
+                        entry.NormalizedName = matched.NormalizedName;
+                        changed = true;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(entry.NormalizedName) &&
+                         _tasksByNormalizedName.TryGetValue(entry.NormalizedName, out matched))
+                {
+                    var matchedId = matched.Ids?.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(matchedId) && entry.Id != matchedId)
+                    {
+                        entry.Id = matchedId;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                SaveProgressV2();
+            }
+        }
 
         /// <summary>
         /// Initialize service with task data
@@ -34,9 +141,10 @@ namespace TarkovHelper.Services
         {
             _allTasks = tasks;
 
-            // Build dictionary, handling duplicates by keeping the first occurrence
+            // Build dictionaries, handling duplicates by keeping the first occurrence
             _tasksByNormalizedName = new Dictionary<string, TarkovTask>(StringComparer.OrdinalIgnoreCase);
             _tasksByBsgId = new Dictionary<string, TarkovTask>(StringComparer.OrdinalIgnoreCase);
+            _tasksById = new Dictionary<string, TarkovTask>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var task in tasks.Where(t => !string.IsNullOrEmpty(t.NormalizedName)))
             {
@@ -45,14 +153,21 @@ namespace TarkovHelper.Services
                     _tasksByNormalizedName[task.NormalizedName!] = task;
                 }
 
-                // Build BsgId lookup (task.Ids contains BSG IDs)
+                // Build Id/BsgId lookup (task.Ids contains IDs)
                 if (task.Ids != null)
                 {
-                    foreach (var bsgId in task.Ids)
+                    foreach (var id in task.Ids)
                     {
-                        if (!string.IsNullOrEmpty(bsgId) && !_tasksByBsgId.ContainsKey(bsgId))
+                        if (!string.IsNullOrEmpty(id))
                         {
-                            _tasksByBsgId[bsgId] = task;
+                            if (!_tasksByBsgId.ContainsKey(id))
+                            {
+                                _tasksByBsgId[id] = task;
+                            }
+                            if (!_tasksById.ContainsKey(id))
+                            {
+                                _tasksById[id] = task;
+                            }
                         }
                     }
                 }
@@ -649,6 +764,7 @@ namespace TarkovHelper.Services
 
         private void SaveProgress()
         {
+            // V1 형식으로 저장 (레거시 호환성)
             try
             {
                 var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileName);
@@ -672,9 +788,125 @@ namespace TarkovHelper.Services
             {
                 // Ignore save failures
             }
+
+            // V2 형식도 함께 저장
+            SaveProgressV2();
+        }
+
+        private void SaveProgressV2()
+        {
+            try
+            {
+                var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileNameV2);
+                Directory.CreateDirectory(AppEnv.ConfigPath);
+
+                // V2 데이터 동기화 (_questProgress에서)
+                SyncQuestProgressToV2();
+
+                var options = new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                };
+
+                var json = JsonSerializer.Serialize(_progressDataV2, options);
+                File.WriteAllText(filePath, json);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save V2 progress: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// _questProgress 딕셔너리를 V2 형식으로 동기화
+        /// </summary>
+        private void SyncQuestProgressToV2()
+        {
+            // 기존 V2 데이터의 매핑 정보 보존
+            var existingById = _progressDataV2.CompletedQuests
+                .Concat(_progressDataV2.FailedQuests)
+                .Where(e => !string.IsNullOrEmpty(e.Id))
+                .ToDictionary(e => e.NormalizedName ?? "", e => e.Id, StringComparer.OrdinalIgnoreCase);
+
+            _progressDataV2.CompletedQuests.Clear();
+            _progressDataV2.FailedQuests.Clear();
+
+            foreach (var kvp in _questProgress)
+            {
+                var normalizedName = kvp.Key;
+                var status = kvp.Value;
+
+                // ID 조회 (태스크에서 또는 기존 매핑에서)
+                string? id = null;
+                if (_tasksByNormalizedName.TryGetValue(normalizedName, out var task))
+                {
+                    id = task.Ids?.FirstOrDefault();
+                }
+                else if (existingById.TryGetValue(normalizedName, out var existingId))
+                {
+                    id = existingId;
+                }
+
+                var entry = new QuestProgressEntry
+                {
+                    Id = id,
+                    NormalizedName = normalizedName,
+                    Status = status.ToString()
+                };
+
+                if (status == QuestStatus.Done)
+                {
+                    _progressDataV2.CompletedQuests.Add(entry);
+                }
+                else if (status == QuestStatus.Failed)
+                {
+                    _progressDataV2.FailedQuests.Add(entry);
+                }
+            }
         }
 
         private void LoadProgress()
+        {
+            // V2 형식 먼저 시도
+            if (LoadProgressV2())
+            {
+                // V2에서 _questProgress로 동기화
+                SyncV2ToQuestProgress();
+                return;
+            }
+
+            // V1 형식으로 폴백
+            LoadProgressV1();
+        }
+
+        private bool LoadProgressV2()
+        {
+            try
+            {
+                var filePath = Path.Combine(AppEnv.ConfigPath, ProgressFileNameV2);
+
+                if (!File.Exists(filePath))
+                    return false;
+
+                var json = File.ReadAllText(filePath);
+                var progressData = JsonSerializer.Deserialize<QuestProgressDataV2>(json);
+
+                if (progressData != null && progressData.Version >= 2)
+                {
+                    _progressDataV2 = progressData;
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Loaded V2 progress: {progressData.CompletedQuests.Count} completed, {progressData.FailedQuests.Count} failed");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to load V2 progress: {ex.Message}");
+            }
+
+            return false;
+        }
+
+        private void LoadProgressV1()
         {
             try
             {
@@ -696,12 +928,60 @@ namespace TarkovHelper.Services
                             _questProgress[kvp.Key] = status;
                         }
                     }
+
+                    // V1 → V2 마이그레이션
+                    SyncQuestProgressToV2();
+                    SaveProgressV2();
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Migrated V1 progress to V2: {_questProgress.Count} entries");
                 }
             }
             catch
             {
                 // Use empty progress on load failure
                 _questProgress.Clear();
+            }
+        }
+
+        /// <summary>
+        /// V2 데이터를 _questProgress 딕셔너리로 동기화
+        /// </summary>
+        private void SyncV2ToQuestProgress()
+        {
+            _questProgress.Clear();
+
+            foreach (var entry in _progressDataV2.CompletedQuests)
+            {
+                // NormalizedName 우선, 없으면 ID로 조회
+                var key = entry.NormalizedName;
+                if (string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(entry.Id))
+                {
+                    if (_tasksById.TryGetValue(entry.Id, out var task))
+                    {
+                        key = task.NormalizedName;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(key))
+                {
+                    _questProgress[key] = QuestStatus.Done;
+                }
+            }
+
+            foreach (var entry in _progressDataV2.FailedQuests)
+            {
+                var key = entry.NormalizedName;
+                if (string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(entry.Id))
+                {
+                    if (_tasksById.TryGetValue(entry.Id, out var task))
+                    {
+                        key = task.NormalizedName;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(key))
+                {
+                    _questProgress[key] = QuestStatus.Failed;
+                }
             }
         }
 
