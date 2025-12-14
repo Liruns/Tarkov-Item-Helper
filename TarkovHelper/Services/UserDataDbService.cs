@@ -81,6 +81,9 @@ public sealed class UserDataDbService
 
     private async Task CreateTablesAsync(SqliteConnection connection)
     {
+        // First, check and fix ItemInventory schema if needed
+        await MigrateItemInventorySchemaAsync(connection);
+
         var createTablesSql = @"
             -- 퀘스트 진행 상태
             CREATE TABLE IF NOT EXISTS QuestProgress (
@@ -126,6 +129,51 @@ public sealed class UserDataDbService
 
         await using var cmd = new SqliteCommand(createTablesSql, connection);
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// ItemInventory 테이블 스키마 마이그레이션 (오래된 스키마 수정)
+    /// </summary>
+    private async Task MigrateItemInventorySchemaAsync(SqliteConnection connection)
+    {
+        try
+        {
+            // Check if ItemInventory table exists
+            var checkTableSql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ItemInventory'";
+            await using var checkCmd = new SqliteCommand(checkTableSql, connection);
+            var tableExists = Convert.ToInt32(await checkCmd.ExecuteScalarAsync()) > 0;
+
+            if (!tableExists) return;
+
+            // Check if ItemNormalizedName column exists
+            var checkColumnSql = "SELECT COUNT(*) FROM pragma_table_info('ItemInventory') WHERE name='ItemNormalizedName'";
+            await using var checkColCmd = new SqliteCommand(checkColumnSql, connection);
+            var columnExists = Convert.ToInt32(await checkColCmd.ExecuteScalarAsync()) > 0;
+
+            if (!columnExists)
+            {
+                System.Diagnostics.Debug.WriteLine("[UserDataDbService] Migrating ItemInventory table schema...");
+
+                // Drop the old table and recreate with correct schema
+                var migrateSql = @"
+                    DROP TABLE IF EXISTS ItemInventory;
+                    CREATE TABLE ItemInventory (
+                        ItemNormalizedName TEXT PRIMARY KEY,
+                        FirQuantity INTEGER NOT NULL DEFAULT 0,
+                        NonFirQuantity INTEGER NOT NULL DEFAULT 0,
+                        UpdatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                ";
+                await using var migrateCmd = new SqliteCommand(migrateSql, connection);
+                await migrateCmd.ExecuteNonQueryAsync();
+
+                System.Diagnostics.Debug.WriteLine("[UserDataDbService] ItemInventory table migrated successfully");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[UserDataDbService] ItemInventory schema migration failed: {ex.Message}");
+        }
     }
 
     #region Quest Progress

@@ -198,10 +198,33 @@ public partial class MainWindow : Window
 
         // Load hideout data from DB
         var hideoutDbService = HideoutDbService.Instance;
-        if (await hideoutDbService.LoadStationsAsync())
+        var hideoutLoaded = await hideoutDbService.LoadStationsAsync();
+        System.Diagnostics.Debug.WriteLine($"[MainWindow] Hideout DB loaded: {hideoutLoaded}, StationCount: {hideoutDbService.StationCount}");
+        if (hideoutLoaded)
         {
             _hideoutModules = hideoutDbService.AllStations.ToList();
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Hideout modules count: {_hideoutModules.Count}");
         }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Hideout loading failed. DB exists: {hideoutDbService.DatabaseExists}");
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[MainWindow] Tasks count: {tasks?.Count ?? 0}");
+
+        // Log diagnostic info to file
+        try
+        {
+            var logPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "startup_log.txt");
+            var logContent = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Startup Diagnostics\n" +
+                             $"  Hideout DB Loaded: {hideoutLoaded}\n" +
+                             $"  Hideout Stations: {hideoutDbService.StationCount}\n" +
+                             $"  Hideout Modules: {_hideoutModules?.Count ?? 0}\n" +
+                             $"  Tasks Count: {tasks?.Count ?? 0}\n" +
+                             $"  Database Path: {hideoutDbService.DatabaseExists}\n\n";
+            System.IO.File.AppendAllText(logPath, logContent);
+        }
+        catch { /* Ignore logging errors */ }
 
         if (tasks != null && tasks.Count > 0)
         {
@@ -226,9 +249,12 @@ public partial class MainWindow : Window
                 _questListPage = new QuestListPage();
             }
 
+            // Debug: Show hideout module status
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Creating HideoutPage: modules={_hideoutModules?.Count ?? 0}");
             _hideoutPage = _hideoutModules != null && _hideoutModules.Count > 0
                 ? new HideoutPage()
                 : null;
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] HideoutPage created: {_hideoutPage != null}");
             _itemsPage = new ItemsPage();
             _collectorPage = new CollectorPage();
             // TestMapPage is created lazily when the tab is selected

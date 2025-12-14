@@ -28,6 +28,30 @@ public class SettingsService
     private const string KeyDspDecodeCount = "app.dspDecodeCount";
     private const string KeyPlayerFaction = "app.playerFaction";
 
+    // Map settings keys
+    private const string KeyMapDrawerOpen = "map.drawerOpen";
+    private const string KeyMapDrawerWidth = "map.drawerWidth";
+    private const string KeyMapShowExtracts = "map.showExtracts";
+    private const string KeyMapShowTransits = "map.showTransits";
+    private const string KeyMapShowQuests = "map.showQuests";
+    private const string KeyMapIncompleteOnly = "map.incompleteOnly";
+    private const string KeyMapCurrentMapOnly = "map.currentMapOnly";
+    private const string KeyMapSortOption = "map.sortOption";
+    private const string KeyMapHiddenQuests = "map.hiddenQuests";
+    private const string KeyMapCollapsedQuests = "map.collapsedQuests";
+    private const string KeyMapLastSelectedMap = "map.lastSelectedMap";
+    private const string KeyMapMarkerScale = "map.markerScale";
+    private const string KeyMapShowTrail = "map.showTrail";
+    private const string KeyMapShowMinimap = "map.showMinimap";
+    private const string KeyMapMinimapSize = "map.minimapSize";
+    private const string KeyMapMarkerOpacity = "map.markerOpacity";
+    private const string KeyMapAutoHideCompleted = "map.autoHideCompleted";
+    private const string KeyMapFadeCompleted = "map.fadeCompleted";
+    private const string KeyMapShowLabels = "map.showLabels";
+    private const string KeyMapTrailColor = "map.trailColor";
+    private const string KeyMapTrailThickness = "map.trailThickness";
+    private const string KeyMapAutoStartTracking = "map.autoStartTracking";
+
     private bool _settingsLoaded;
     private string? _detectionMethod;
 
@@ -41,6 +65,30 @@ public class SettingsService
     private double? _baseFontSize;
     private int? _dspDecodeCount;
     private string? _playerFaction;
+
+    // Map cached values
+    private bool? _mapDrawerOpen;
+    private double? _mapDrawerWidth;
+    private bool? _mapShowExtracts;
+    private bool? _mapShowTransits;
+    private bool? _mapShowQuests;
+    private bool? _mapIncompleteOnly;
+    private bool? _mapCurrentMapOnly;
+    private string? _mapSortOption;
+    private HashSet<string>? _mapHiddenQuests;
+    private HashSet<string>? _mapCollapsedQuests;
+    private string? _mapLastSelectedMap;
+    private double? _mapMarkerScale;
+    private bool? _mapShowTrail;
+    private bool? _mapShowMinimap;
+    private string? _mapMinimapSize;
+    private double? _mapMarkerOpacity;
+    private bool? _mapAutoHideCompleted;
+    private bool? _mapFadeCompleted;
+    private bool? _mapShowLabels;
+    private string? _mapTrailColor;
+    private double? _mapTrailThickness;
+    private bool? _mapAutoStartTracking;
 
     public event EventHandler<string?>? LogFolderChanged;
     public event EventHandler<int>? PlayerLevelChanged;
@@ -308,6 +356,503 @@ public class SettingsService
         return string.Equals(taskFaction, playerFaction, StringComparison.OrdinalIgnoreCase);
     }
 
+    #region Map Settings
+
+    /// <summary>
+    /// Map marker scale constants
+    /// </summary>
+    public const double MinMarkerScale = 0.5;
+    public const double MaxMarkerScale = 2.0;
+    public const double DefaultMarkerScale = 1.0;
+    public const double DefaultDrawerWidth = 320;
+
+    /// <summary>
+    /// Whether the Quest Drawer is open (defaults to true for sidebar always visible)
+    /// </summary>
+    public bool MapDrawerOpen
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapDrawerOpen ?? true;  // Default to open
+        }
+        set
+        {
+            if (_mapDrawerOpen != value)
+            {
+                _mapDrawerOpen = value;
+                SaveSetting(KeyMapDrawerOpen, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Quest Drawer width in pixels
+    /// </summary>
+    public double MapDrawerWidth
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapDrawerWidth ?? DefaultDrawerWidth;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 250, 500);
+            if (Math.Abs((_mapDrawerWidth ?? DefaultDrawerWidth) - clampedValue) > 1)
+            {
+                _mapDrawerWidth = clampedValue;
+                SaveSetting(KeyMapDrawerWidth, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show extract markers on map
+    /// </summary>
+    public bool MapShowExtracts
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowExtracts ?? true;
+        }
+        set
+        {
+            if (_mapShowExtracts != value)
+            {
+                _mapShowExtracts = value;
+                SaveSetting(KeyMapShowExtracts, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show transit markers on map
+    /// </summary>
+    public bool MapShowTransits
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowTransits ?? true;
+        }
+        set
+        {
+            if (_mapShowTransits != value)
+            {
+                _mapShowTransits = value;
+                SaveSetting(KeyMapShowTransits, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show quest markers on map
+    /// </summary>
+    public bool MapShowQuests
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowQuests ?? true;
+        }
+        set
+        {
+            if (_mapShowQuests != value)
+            {
+                _mapShowQuests = value;
+                SaveSetting(KeyMapShowQuests, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Filter to show only incomplete quests in drawer
+    /// </summary>
+    public bool MapIncompleteOnly
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapIncompleteOnly ?? false;
+        }
+        set
+        {
+            if (_mapIncompleteOnly != value)
+            {
+                _mapIncompleteOnly = value;
+                SaveSetting(KeyMapIncompleteOnly, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Filter to show only current map quests in drawer
+    /// </summary>
+    public bool MapCurrentMapOnly
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapCurrentMapOnly ?? true;
+        }
+        set
+        {
+            if (_mapCurrentMapOnly != value)
+            {
+                _mapCurrentMapOnly = value;
+                SaveSetting(KeyMapCurrentMapOnly, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sort option for quest drawer (name, progress, count)
+    /// </summary>
+    public string MapSortOption
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapSortOption ?? "name";
+        }
+        set
+        {
+            if (_mapSortOption != value)
+            {
+                _mapSortOption = value;
+                SaveSetting(KeyMapSortOption, value ?? "name");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Set of hidden quest IDs
+    /// </summary>
+    public HashSet<string> MapHiddenQuests
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapHiddenQuests ?? new HashSet<string>();
+        }
+        set
+        {
+            _mapHiddenQuests = value;
+            var json = JsonSerializer.Serialize(value?.ToArray() ?? Array.Empty<string>());
+            SaveSetting(KeyMapHiddenQuests, json);
+        }
+    }
+
+    /// <summary>
+    /// Set of collapsed quest IDs in drawer
+    /// </summary>
+    public HashSet<string> MapCollapsedQuests
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapCollapsedQuests ?? new HashSet<string>();
+        }
+        set
+        {
+            _mapCollapsedQuests = value;
+            var json = JsonSerializer.Serialize(value?.ToArray() ?? Array.Empty<string>());
+            SaveSetting(KeyMapCollapsedQuests, json);
+        }
+    }
+
+    /// <summary>
+    /// Last selected map key
+    /// </summary>
+    public string? MapLastSelectedMap
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapLastSelectedMap;
+        }
+        set
+        {
+            if (_mapLastSelectedMap != value)
+            {
+                _mapLastSelectedMap = value;
+                SaveSetting(KeyMapLastSelectedMap, value ?? "");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Marker scale multiplier (0.5 - 2.0)
+    /// </summary>
+    public double MapMarkerScale
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapMarkerScale ?? DefaultMarkerScale;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, MinMarkerScale, MaxMarkerScale);
+            if (Math.Abs((_mapMarkerScale ?? DefaultMarkerScale) - clampedValue) > 0.01)
+            {
+                _mapMarkerScale = clampedValue;
+                SaveSetting(KeyMapMarkerScale, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show trail/path on map
+    /// </summary>
+    public bool MapShowTrail
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowTrail ?? true;
+        }
+        set
+        {
+            if (_mapShowTrail != value)
+            {
+                _mapShowTrail = value;
+                SaveSetting(KeyMapShowTrail, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show minimap overlay
+    /// </summary>
+    public bool MapShowMinimap
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowMinimap ?? true;
+        }
+        set
+        {
+            if (_mapShowMinimap != value)
+            {
+                _mapShowMinimap = value;
+                SaveSetting(KeyMapShowMinimap, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Minimap size (S, M, L)
+    /// </summary>
+    public string MapMinimapSize
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapMinimapSize ?? "M";
+        }
+        set
+        {
+            if (_mapMinimapSize != value)
+            {
+                _mapMinimapSize = value;
+                SaveSetting(KeyMapMinimapSize, value ?? "M");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Marker opacity (0-100)
+    /// </summary>
+    public double MapMarkerOpacity
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapMarkerOpacity ?? 100;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 0, 100);
+            if (Math.Abs((_mapMarkerOpacity ?? 100) - clampedValue) > 0.5)
+            {
+                _mapMarkerOpacity = clampedValue;
+                SaveSetting(KeyMapMarkerOpacity, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Auto-hide completed quest markers
+    /// </summary>
+    public bool MapAutoHideCompleted
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapAutoHideCompleted ?? false;
+        }
+        set
+        {
+            if (_mapAutoHideCompleted != value)
+            {
+                _mapAutoHideCompleted = value;
+                SaveSetting(KeyMapAutoHideCompleted, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fade completed quest markers instead of hiding
+    /// </summary>
+    public bool MapFadeCompleted
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapFadeCompleted ?? true;
+        }
+        set
+        {
+            if (_mapFadeCompleted != value)
+            {
+                _mapFadeCompleted = value;
+                SaveSetting(KeyMapFadeCompleted, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show marker labels
+    /// </summary>
+    public bool MapShowLabels
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowLabels ?? false;
+        }
+        set
+        {
+            if (_mapShowLabels != value)
+            {
+                _mapShowLabels = value;
+                SaveSetting(KeyMapShowLabels, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Trail color (hex string)
+    /// </summary>
+    public string MapTrailColor
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapTrailColor ?? "#00FF00";
+        }
+        set
+        {
+            if (_mapTrailColor != value)
+            {
+                _mapTrailColor = value;
+                SaveSetting(KeyMapTrailColor, value ?? "#00FF00");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Trail thickness (1-5)
+    /// </summary>
+    public double MapTrailThickness
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapTrailThickness ?? 2.0;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 1, 5);
+            if (Math.Abs((_mapTrailThickness ?? 2.0) - clampedValue) > 0.1)
+            {
+                _mapTrailThickness = clampedValue;
+                SaveSetting(KeyMapTrailThickness, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Auto-start tracking when map opens
+    /// </summary>
+    public bool MapAutoStartTracking
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapAutoStartTracking ?? false;
+        }
+        set
+        {
+            if (_mapAutoStartTracking != value)
+            {
+                _mapAutoStartTracking = value;
+                SaveSetting(KeyMapAutoStartTracking, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Add a quest to hidden list
+    /// </summary>
+    public void AddHiddenQuest(string questId)
+    {
+        var hidden = MapHiddenQuests;
+        if (hidden.Add(questId))
+        {
+            MapHiddenQuests = hidden;
+        }
+    }
+
+    /// <summary>
+    /// Remove a quest from hidden list
+    /// </summary>
+    public void RemoveHiddenQuest(string questId)
+    {
+        var hidden = MapHiddenQuests;
+        if (hidden.Remove(questId))
+        {
+            MapHiddenQuests = hidden;
+        }
+    }
+
+    /// <summary>
+    /// Clear all hidden quests
+    /// </summary>
+    public void ClearHiddenQuests()
+    {
+        MapHiddenQuests = new HashSet<string>();
+    }
+
+    /// <summary>
+    /// Toggle quest collapsed state
+    /// </summary>
+    public void ToggleQuestCollapsed(string questId)
+    {
+        var collapsed = MapCollapsedQuests;
+        if (collapsed.Contains(questId))
+            collapsed.Remove(questId);
+        else
+            collapsed.Add(questId);
+        MapCollapsedQuests = collapsed;
+    }
+
+    #endregion
+
     /// <summary>
     /// Auto-detect Tarkov log folder from game installation
     /// </summary>
@@ -567,6 +1112,98 @@ public class SettingsService
 
             _playerFaction = _userDataDb.GetSetting(KeyPlayerFaction);
             if (string.IsNullOrEmpty(_playerFaction)) _playerFaction = null;
+
+            // Load Map settings
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapDrawerOpen), out var drawerOpen))
+                _mapDrawerOpen = drawerOpen;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapDrawerWidth), out var drawerWidth))
+                _mapDrawerWidth = drawerWidth;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowExtracts), out var showExtracts))
+                _mapShowExtracts = showExtracts;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowTransits), out var showTransits))
+                _mapShowTransits = showTransits;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowQuests), out var showQuests))
+                _mapShowQuests = showQuests;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapIncompleteOnly), out var incompleteOnly))
+                _mapIncompleteOnly = incompleteOnly;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapCurrentMapOnly), out var currentMapOnly))
+                _mapCurrentMapOnly = currentMapOnly;
+
+            _mapSortOption = _userDataDb.GetSetting(KeyMapSortOption);
+            if (string.IsNullOrEmpty(_mapSortOption)) _mapSortOption = "name";
+
+            // Load hidden quests (JSON array)
+            var hiddenJson = _userDataDb.GetSetting(KeyMapHiddenQuests);
+            if (!string.IsNullOrEmpty(hiddenJson))
+            {
+                try
+                {
+                    var hiddenArray = JsonSerializer.Deserialize<string[]>(hiddenJson);
+                    _mapHiddenQuests = hiddenArray != null ? new HashSet<string>(hiddenArray) : new HashSet<string>();
+                }
+                catch
+                {
+                    _mapHiddenQuests = new HashSet<string>();
+                }
+            }
+
+            // Load collapsed quests (JSON array)
+            var collapsedJson = _userDataDb.GetSetting(KeyMapCollapsedQuests);
+            if (!string.IsNullOrEmpty(collapsedJson))
+            {
+                try
+                {
+                    var collapsedArray = JsonSerializer.Deserialize<string[]>(collapsedJson);
+                    _mapCollapsedQuests = collapsedArray != null ? new HashSet<string>(collapsedArray) : new HashSet<string>();
+                }
+                catch
+                {
+                    _mapCollapsedQuests = new HashSet<string>();
+                }
+            }
+
+            _mapLastSelectedMap = _userDataDb.GetSetting(KeyMapLastSelectedMap);
+            if (string.IsNullOrEmpty(_mapLastSelectedMap)) _mapLastSelectedMap = null;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapMarkerScale), out var markerScale))
+                _mapMarkerScale = markerScale;
+
+            // Load new map settings
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowTrail), out var showTrail))
+                _mapShowTrail = showTrail;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowMinimap), out var showMinimap))
+                _mapShowMinimap = showMinimap;
+
+            _mapMinimapSize = _userDataDb.GetSetting(KeyMapMinimapSize);
+            if (string.IsNullOrEmpty(_mapMinimapSize)) _mapMinimapSize = "M";
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapMarkerOpacity), out var markerOpacity))
+                _mapMarkerOpacity = markerOpacity;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapAutoHideCompleted), out var autoHideCompleted))
+                _mapAutoHideCompleted = autoHideCompleted;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapFadeCompleted), out var fadeCompleted))
+                _mapFadeCompleted = fadeCompleted;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowLabels), out var showLabels))
+                _mapShowLabels = showLabels;
+
+            _mapTrailColor = _userDataDb.GetSetting(KeyMapTrailColor);
+            if (string.IsNullOrEmpty(_mapTrailColor)) _mapTrailColor = "#00FF00";
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapTrailThickness), out var trailThickness))
+                _mapTrailThickness = trailThickness;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapAutoStartTracking), out var autoStartTracking))
+                _mapAutoStartTracking = autoStartTracking;
         }
         catch (Exception ex)
         {

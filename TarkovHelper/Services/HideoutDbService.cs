@@ -207,7 +207,7 @@ public sealed class HideoutDbService
         var sql = @"
             SELECT
                 StationId, Level, ItemId, ItemName, ItemNameKO, ItemNameJA,
-                ItemNormalizedName, IconLink, Count, FoundInRaid
+                IconLink, Count, FoundInRaid
             FROM HideoutItemRequirements";
 
         await using var cmd = new SqliteCommand(sql, connection);
@@ -220,16 +220,19 @@ public sealed class HideoutDbService
 
             if (levelLookup.TryGetValue((stationId, levelNum), out var level))
             {
+                var itemId = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                var itemName = reader.IsDBNull(3) ? "" : reader.GetString(3);
+
                 level.ItemRequirements.Add(new HideoutItemRequirement
                 {
-                    ItemId = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                    ItemName = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                    ItemId = itemId,
+                    ItemName = itemName,
                     ItemNameKo = reader.IsDBNull(4) ? null : reader.GetString(4),
                     ItemNameJa = reader.IsDBNull(5) ? null : reader.GetString(5),
-                    ItemNormalizedName = reader.IsDBNull(6) ? "" : reader.GetString(6),
-                    IconLink = reader.IsDBNull(7) ? null : reader.GetString(7),
-                    Count = reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
-                    FoundInRaid = !reader.IsDBNull(9) && reader.GetInt32(9) == 1
+                    ItemNormalizedName = NormalizedNameGenerator.Generate(itemName), // Generate from name
+                    IconLink = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    Count = reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
+                    FoundInRaid = !reader.IsDBNull(8) && reader.GetInt32(8) == 1
                 });
             }
         }
