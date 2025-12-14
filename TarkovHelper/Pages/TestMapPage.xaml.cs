@@ -94,6 +94,9 @@ public partial class TestMapPage : UserControl
     private Size _mapSize = Size.Empty;
     private bool _isMinimapDragging = false;
 
+    // Global hotkey service
+    private readonly GlobalHotkeyService _hotkeyService = GlobalHotkeyService.Instance;
+
     public TestMapPage()
     {
         InitializeComponent();
@@ -110,6 +113,9 @@ public partial class TestMapPage : UserControl
 
         // Subscribe to language changes
         _loc.LanguageChanged += OnLanguageChanged;
+
+        // Connect global hotkey service for floor switching when EFT is foreground
+        _hotkeyService.FloorHotkeyPressed += OnFloorHotkeyPressed;
 
         Loaded += TestMapPage_Loaded;
         Unloaded += TestMapPage_Unloaded;
@@ -157,6 +163,9 @@ public partial class TestMapPage : UserControl
 
         // Apply localization
         UpdateLocalization();
+
+        // Start global hotkey hook for floor switching when EFT is foreground
+        _hotkeyService.StartHook();
     }
 
     /// <summary>
@@ -3125,7 +3134,7 @@ public partial class TestMapPage : UserControl
                 e.Handled = true;
                 break;
 
-            // 넘패드 0~4: 층 변경
+            // 넘패드 0~5: 층 변경
             case Key.NumPad0:
                 SelectFloorByIndex(0);
                 e.Handled = true;
@@ -3144,6 +3153,10 @@ public partial class TestMapPage : UserControl
                 break;
             case Key.NumPad4:
                 SelectFloorByIndex(4);
+                e.Handled = true;
+                break;
+            case Key.NumPad5:
+                SelectFloorByIndex(5);
                 e.Handled = true;
                 break;
         }
@@ -3170,6 +3183,15 @@ public partial class TestMapPage : UserControl
         {
             StatusText.Text = $"층 {index}이(가) 없습니다 (0~{FloorSelector.Items.Count - 1} 사용 가능)";
         }
+    }
+
+    /// <summary>
+    /// Global hotkey handler for floor switching when EFT is in foreground
+    /// </summary>
+    private void OnFloorHotkeyPressed(object? sender, FloorHotkeyEventArgs e)
+    {
+        // Dispatch to UI thread
+        Dispatcher.BeginInvoke(() => SelectFloorByIndex(e.FloorIndex));
     }
 
     /// <summary>
@@ -3694,6 +3716,10 @@ public partial class TestMapPage : UserControl
         _trackerService.StatusMessage -= OnTrackerStatusMessage;
         _logMapWatcher.MapChanged -= OnLogMapChanged;
         _loc.LanguageChanged -= OnLanguageChanged;
+
+        // Stop global hotkey hook
+        _hotkeyService.FloorHotkeyPressed -= OnFloorHotkeyPressed;
+        _hotkeyService.StopHook();
     }
 
     /// <summary>
