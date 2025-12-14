@@ -115,7 +115,7 @@ public partial class MapEditorWindow : Window
         MarkerTypeSelector.SelectedIndex = 2; // Default to PMC Extraction
     }
 
-    private void MapEditorWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MapEditorWindow_Loaded(object sender, RoutedEventArgs e)
     {
         if (_objective != null)
         {
@@ -170,6 +170,36 @@ public partial class MapEditorWindow : Window
         _watcherService.PositionDetected += OnPositionDetected;
         _watcherService.StateChanged += OnWatcherStateChanged;
         UpdateWatcherStatus();
+
+        // Auto-start player tracking if not already running
+        if (!_watcherService.IsWatching)
+        {
+            await AutoStartWatcherAsync();
+        }
+    }
+
+    private async Task AutoStartWatcherAsync()
+    {
+        try
+        {
+            var settingsService = AppSettingsService.Instance;
+            var savedPath = await settingsService.GetAsync(AppSettingsService.ScreenshotWatcherPath, "");
+
+            if (string.IsNullOrEmpty(savedPath) || !Directory.Exists(savedPath))
+            {
+                savedPath = _watcherService.DetectDefaultScreenshotFolder();
+            }
+
+            if (!string.IsNullOrEmpty(savedPath) && Directory.Exists(savedPath))
+            {
+                _watcherService.StartWatching(savedPath);
+                UpdateWatcherStatus();
+            }
+        }
+        catch
+        {
+            // Silently ignore auto-start failures
+        }
     }
 
     private void MapEditorWindow_Closed(object? sender, EventArgs e)

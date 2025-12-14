@@ -178,6 +178,37 @@ namespace TarkovDBEditor.Models
             set { _questLocation = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasLocation)); OnPropertyChanged(nameof(EffectiveMapName)); }
         }
 
+        // 퀘스트 이름 정보 (JOIN으로 로드)
+        private string? _questName;
+        /// <summary>
+        /// 퀘스트 이름 (DB JOIN으로 로드됨)
+        /// </summary>
+        public string? QuestName
+        {
+            get => _questName;
+            set { _questName = value; OnPropertyChanged(); }
+        }
+
+        private string? _questNameEN;
+        /// <summary>
+        /// 퀘스트 영문 이름 (DB JOIN으로 로드됨)
+        /// </summary>
+        public string? QuestNameEN
+        {
+            get => _questNameEN;
+            set { _questNameEN = value; OnPropertyChanged(); }
+        }
+
+        private string? _wikiPageLink;
+        /// <summary>
+        /// 퀘스트 위키 페이지 링크 (DB JOIN으로 로드됨)
+        /// </summary>
+        public string? WikiPageLink
+        {
+            get => _wikiPageLink;
+            set { _wikiPageLink = value; OnPropertyChanged(); }
+        }
+
         /// <summary>
         /// 실제 사용할 맵 이름 (MapName이 있으면 MapName, 없으면 QuestLocation)
         /// </summary>

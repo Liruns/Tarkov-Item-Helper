@@ -10,6 +10,7 @@ namespace TarkovDBEditor.Views;
 
 /// <summary>
 /// Floor Setup Window - Y 좌표에 따른 자동 Floor 감지 설정
+/// 한 맵의 모든 층을 한 테이블에서 관리
 /// </summary>
 public partial class FloorSetupWindow : Window
 {
@@ -19,7 +20,6 @@ public partial class FloorSetupWindow : Window
     private readonly ObservableCollection<MapFloorLocation> _floorLocations = new();
     private MapConfigList? _mapConfigList;
     private MapConfig? _currentMapConfig;
-    private MapFloorConfig? _currentFloor;
 
     public FloorSetupWindow()
     {
@@ -41,6 +41,36 @@ public partial class FloorSetupWindow : Window
         _watcherService.StateChanged += OnWatcherStateChanged;
 
         UpdateWatcherStatus();
+
+        // Auto-start player tracking if not already running
+        if (!_watcherService.IsWatching)
+        {
+            await AutoStartWatcherAsync();
+        }
+    }
+
+    private async Task AutoStartWatcherAsync()
+    {
+        try
+        {
+            var settingsService = AppSettingsService.Instance;
+            var savedPath = await settingsService.GetAsync(AppSettingsService.ScreenshotWatcherPath, "");
+
+            if (string.IsNullOrEmpty(savedPath) || !Directory.Exists(savedPath))
+            {
+                savedPath = _watcherService.DetectDefaultScreenshotFolder();
+            }
+
+            if (!string.IsNullOrEmpty(savedPath) && Directory.Exists(savedPath))
+            {
+                _watcherService.StartWatching(savedPath);
+                UpdateWatcherStatus();
+            }
+        }
+        catch
+        {
+            // Silently ignore auto-start failures
+        }
     }
 
     private void FloorSetupWindow_Closed(object? sender, EventArgs e)
@@ -106,62 +136,38 @@ public partial class FloorSetupWindow : Window
         if (_currentMapConfig == null)
             return;
 
-        // Floor 콤보박스 업데이트
-        FloorSelector.Items.Clear();
+        // Floor 콤보박스 컬럼의 ItemsSource 설정
         if (_currentMapConfig.Floors != null)
         {
-            foreach (var floor in _currentMapConfig.Floors.OrderBy(f => f.Order))
-            {
-                var item = new ComboBoxItem
-                {
-                    Content = floor.DisplayName,
-                    Tag = floor.LayerId
-                };
-                FloorSelector.Items.Add(item);
-
-                if (floor.IsDefault)
-                {
-                    FloorSelector.SelectedItem = item;
-                }
-            }
+            var sortedFloors = _currentMapConfig.Floors.OrderBy(f => f.Order).ToList();
+            FloorColumn.ItemsSource = sortedFloors;
         }
-
-        if (FloorSelector.SelectedItem == null && FloorSelector.Items.Count > 0)
+        else
         {
-            FloorSelector.SelectedIndex = 0;
+            FloorColumn.ItemsSource = null;
         }
-    }
 
-    private async void FloorSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (FloorSelector.SelectedItem is not ComboBoxItem selectedItem)
-            return;
-
-        var floorId = selectedItem.Tag as string;
-        if (string.IsNullOrEmpty(floorId) || _currentMapConfig == null)
-            return;
-
-        _currentFloor = _currentMapConfig.Floors?.FirstOrDefault(f => f.LayerId == floorId);
-
-        // Floor Locations 로드
+        // 해당 맵의 모든 Floor Locations 로드
         await LoadFloorLocationsAsync();
     }
 
     private async Task LoadFloorLocationsAsync()
     {
-        if (_currentMapConfig == null || _currentFloor == null)
+        if (_currentMapConfig == null)
             return;
 
         try
         {
+            // 해당 맵의 모든 Floor Location 로드 (Floor 필터 없이)
             var allLocations = await _floorLocationService.LoadByMapAsync(_currentMapConfig.Key);
-            var filteredLocations = allLocations.Where(l => l.FloorId == _currentFloor.LayerId).ToList();
 
             _floorLocations.Clear();
-            foreach (var loc in filteredLocations.OrderByDescending(l => l.Priority))
+            foreach (var loc in allLocations.OrderBy(l => l.FloorId).ThenByDescending(l => l.Priority))
             {
                 _floorLocations.Add(loc);
             }
+
+            UpdateFloorCountText();
         }
         catch (Exception ex)
         {
@@ -169,18 +175,33 @@ public partial class FloorSetupWindow : Window
         }
     }
 
+    private void UpdateFloorCountText()
+    {
+        FloorCountText.Text = $"{_floorLocations.Count} regions";
+    }
+
     private async void AddButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentMapConfig == null || _currentFloor == null)
+        if (_currentMapConfig == null)
         {
-            MessageBox.Show("먼저 맵과 층을 선택해주세요.", "알림", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("먼저 맵을 선택해주세요.", "알림", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // 기본 Floor 선택 (default floor 또는 첫 번째 floor)
+        var defaultFloor = _currentMapConfig.Floors?.FirstOrDefault(f => f.IsDefault)
+                          ?? _currentMapConfig.Floors?.FirstOrDefault();
+
+        if (defaultFloor == null)
+        {
+            MessageBox.Show("이 맵에 설정된 층이 없습니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var newLocation = new MapFloorLocation
         {
             MapKey = _currentMapConfig.Key,
-            FloorId = _currentFloor.LayerId,
+            FloorId = defaultFloor.LayerId,
             RegionName = $"New Region {_floorLocations.Count + 1}",
             MinY = -10,
             MaxY = 10,
@@ -192,6 +213,7 @@ public partial class FloorSetupWindow : Window
             await _floorLocationService.SaveAsync(newLocation);
             _floorLocations.Add(newLocation);
             FloorLocationsGrid.SelectedItem = newLocation;
+            UpdateFloorCountText();
         }
         catch (Exception ex)
         {
@@ -220,6 +242,7 @@ public partial class FloorSetupWindow : Window
         {
             await _floorLocationService.DeleteAsync(selectedLocation.Id);
             _floorLocations.Remove(selectedLocation);
+            UpdateFloorCountText();
         }
         catch (Exception ex)
         {
@@ -254,6 +277,7 @@ public partial class FloorSetupWindow : Window
             await _floorLocationService.SaveAsync(newLocation);
             _floorLocations.Add(newLocation);
             FloorLocationsGrid.SelectedItem = newLocation;
+            UpdateFloorCountText();
         }
         catch (Exception ex)
         {
@@ -269,17 +293,25 @@ public partial class FloorSetupWindow : Window
             return;
         }
 
-        if (_currentMapConfig == null || _currentFloor == null)
+        if (_currentMapConfig == null)
         {
-            MessageBox.Show("맵과 층이 선택되어 있어야 합니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("맵이 선택되어 있어야 합니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // 선택된 행의 FloorId로 Floor 정보 가져오기
+        var floor = _currentMapConfig.Floors?.FirstOrDefault(f => f.LayerId == selectedLocation.FloorId);
+        if (floor == null)
+        {
+            MessageBox.Show("Floor 정보를 찾을 수 없습니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var editor = new FloorRangeEditorWindow(
             selectedLocation,
             _currentMapConfig.Key,
-            _currentFloor.LayerId,
-            _currentFloor.DisplayName)
+            floor.LayerId,
+            floor.DisplayName)
         {
             Owner = this
         };
@@ -341,15 +373,17 @@ public partial class FloorSetupWindow : Window
         CurrentPositionText.Text = $"Position: X:{position.X:F1}, Y:{position.Y:F1}, Z:{position.Z:F1}";
         DetectedFloorText.Text = detectedFloor ?? "(No match)";
 
-        // 감지된 Floor가 있으면 해당 Floor로 전환
+        // 감지된 Floor에 해당하는 행 하이라이트
         if (!string.IsNullOrEmpty(detectedFloor))
         {
-            var floorItem = FloorSelector.Items.Cast<ComboBoxItem>()
-                .FirstOrDefault(item => item.Tag as string == detectedFloor);
+            var matchingLocation = _floorLocations.FirstOrDefault(loc =>
+                loc.FloorId == detectedFloor &&
+                loc.Contains(position.X, position.Y, position.Z));
 
-            if (floorItem != null && FloorSelector.SelectedItem != floorItem)
+            if (matchingLocation != null)
             {
-                FloorSelector.SelectedItem = floorItem;
+                FloorLocationsGrid.SelectedItem = matchingLocation;
+                FloorLocationsGrid.ScrollIntoView(matchingLocation);
             }
         }
     }
