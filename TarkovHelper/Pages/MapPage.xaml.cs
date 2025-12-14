@@ -82,6 +82,7 @@ public partial class MapPage : UserControl
     // Map Tracker related
     private readonly MapTrackerService _trackerService;
     private readonly LogMapWatcherService _logMapWatcher = LogMapWatcherService.Instance;
+    private readonly GlobalHotkeyService _hotkeyService = GlobalHotkeyService.Instance;
     private Ellipse? _playerMarkerCircle;
     private Polygon? _playerMarkerArrow;
     private readonly List<Ellipse> _trailMarkers = new();
@@ -111,6 +112,9 @@ public partial class MapPage : UserControl
 
         // Subscribe to language changes
         _loc.LanguageChanged += OnLanguageChanged;
+
+        // Connect global hotkey service for floor switching when EFT is foreground
+        _hotkeyService.FloorHotkeyPressed += OnFloorHotkeyPressed;
 
         Loaded += MapPage_Loaded;
         Unloaded += MapPage_Unloaded;
@@ -158,6 +162,9 @@ public partial class MapPage : UserControl
 
         // Apply localization
         UpdateLocalization();
+
+        // Start global hotkey hook for floor switching when EFT is foreground
+        _hotkeyService.StartHook();
     }
 
     /// <summary>

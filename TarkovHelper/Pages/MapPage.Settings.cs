@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using TarkovHelper.Services;
 
 namespace TarkovHelper.Pages;
 
@@ -126,6 +127,14 @@ public partial class MapPage : UserControl
         {
             StatusText.Text = $"층 {index}이(가) 없습니다 (0~{FloorSelector.Items.Count - 1} 사용 가능)";
         }
+    }
+
+    /// <summary>
+    /// 글로벌 핫키 (EFT 활성 시 넘패드 0~4)로 층 변경
+    /// </summary>
+    private void OnFloorHotkeyPressed(object? sender, FloorHotkeyEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() => SelectFloorByIndex(e.FloorIndex));
     }
 
     /// <summary>

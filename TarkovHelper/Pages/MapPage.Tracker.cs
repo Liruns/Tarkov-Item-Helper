@@ -24,6 +24,10 @@ public partial class MapPage : UserControl
         _trackerService.StatusMessage -= OnTrackerStatusMessage;
         _logMapWatcher.MapChanged -= OnLogMapChanged;
         _loc.LanguageChanged -= OnLanguageChanged;
+
+        // Stop global hotkey hook
+        _hotkeyService.FloorHotkeyPressed -= OnFloorHotkeyPressed;
+        _hotkeyService.StopHook();
     }
 
     /// <summary>
