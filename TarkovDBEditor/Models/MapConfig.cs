@@ -89,6 +89,68 @@ public class MapConfig
     public double[]? PlayerMarkerTransform { get; set; }
 
     /// <summary>
+    /// Tarkov Market API의 SVG 좌표 범위 [minX, maxX, minY, maxY].
+    /// API 마커의 geometry.x, geometry.y를 화면 좌표로 변환할 때 사용합니다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? SvgBounds { get; set; }
+
+    /// <summary>
+    /// Tarkov Market API의 SVG 좌표를 맵 픽셀 좌표로 변환.
+    /// SvgBounds가 설정되어 있어야 합니다.
+    /// </summary>
+    public (double screenX, double screenY) SvgToScreen(double svgX, double svgY)
+    {
+        if (SvgBounds == null || SvgBounds.Length < 4)
+        {
+            // Fallback: 변환 없이 중앙 기준
+            return (ImageWidth / 2.0, ImageHeight / 2.0);
+        }
+
+        var minX = SvgBounds[0];
+        var maxX = SvgBounds[1];
+        var minY = SvgBounds[2];
+        var maxY = SvgBounds[3];
+
+        // SVG 좌표를 0~1 범위로 정규화
+        var normalizedX = (svgX - minX) / (maxX - minX);
+        var normalizedY = (svgY - minY) / (maxY - minY);
+
+        // 픽셀 좌표로 변환
+        var screenX = normalizedX * ImageWidth;
+        var screenY = normalizedY * ImageHeight;
+
+        return (screenX, screenY);
+    }
+
+    /// <summary>
+    /// 맵 픽셀 좌표를 Tarkov Market API의 SVG 좌표로 변환 (역변환).
+    /// SvgBounds가 설정되어 있어야 합니다.
+    /// </summary>
+    public (double svgX, double svgY) ScreenToSvg(double screenX, double screenY)
+    {
+        if (SvgBounds == null || SvgBounds.Length < 4)
+        {
+            return (0, 0);
+        }
+
+        var minX = SvgBounds[0];
+        var maxX = SvgBounds[1];
+        var minY = SvgBounds[2];
+        var maxY = SvgBounds[3];
+
+        // 픽셀 좌표를 0~1 범위로 정규화
+        var normalizedX = screenX / ImageWidth;
+        var normalizedY = screenY / ImageHeight;
+
+        // SVG 좌표로 변환
+        var svgX = normalizedX * (maxX - minX) + minX;
+        var svgY = normalizedY * (maxY - minY) + minY;
+
+        return (svgX, svgY);
+    }
+
+    /// <summary>
     /// 게임 좌표를 맵 픽셀 좌표로 변환
     /// </summary>
     public (double screenX, double screenY) GameToScreen(double gameX, double gameZ)
@@ -177,6 +239,50 @@ public class MapConfig
         var screenY = c * gameX + d * gameZ + ty;
 
         return (screenX, screenY);
+    }
+
+    /// <summary>
+    /// 맵 픽셀 좌표를 플레이어 좌표계 게임 좌표로 변환 (역행렬).
+    /// PlayerMarkerTransform이 있으면 사용하고, 없으면 CalibratedTransform 사용.
+    /// Floor 범위 설정 시 플레이어 좌표와 일치하는 좌표계로 저장할 때 사용.
+    /// </summary>
+    public (double gameX, double gameZ) ScreenToGameForPlayer(double screenX, double screenY)
+    {
+        var transform = PlayerMarkerTransform ?? CalibratedTransform;
+
+        if (transform == null || transform.Length < 6)
+        {
+            // Fallback: 단순 역변환
+            return (screenX - ImageWidth / 2.0, screenY - ImageHeight / 2.0);
+        }
+
+        var a = transform[0];
+        var b = transform[1];
+        var c = transform[2];
+        var d = transform[3];
+        var tx = transform[4];
+        var ty = transform[5];
+
+        // 역행렬 계산: [a b; c d]^-1 = 1/det * [d -b; -c a]
+        var det = a * d - b * c;
+        if (Math.Abs(det) < 1e-10)
+        {
+            return (0, 0);
+        }
+
+        var invA = d / det;
+        var invB = -b / det;
+        var invC = -c / det;
+        var invD = a / det;
+
+        // 평행이동 보정 후 역변환
+        var dx = screenX - tx;
+        var dy = screenY - ty;
+
+        var gameX = invA * dx + invB * dy;
+        var gameZ = invC * dx + invD * dy;
+
+        return (gameX, gameZ);
     }
 
     /// <summary>

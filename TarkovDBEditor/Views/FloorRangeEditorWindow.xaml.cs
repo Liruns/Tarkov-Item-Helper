@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -42,6 +43,10 @@ public partial class FloorRangeEditorWindow : Window
     // Polygon points (game coordinates)
     private readonly List<(double X, double Z)> _polygonPoints = new();
 
+    // Screenshot watcher for player position
+    private readonly ScreenshotWatcherService _watcherService = ScreenshotWatcherService.Instance;
+    private EftPosition? _lastPlayerPosition;
+
     // Input data
     private readonly MapFloorLocation _floorLocation;
     private readonly string _mapKey;
@@ -77,9 +82,10 @@ public partial class FloorRangeEditorWindow : Window
 
         LoadMapConfigs();
         Loaded += FloorRangeEditorWindow_Loaded;
+        Closed += FloorRangeEditorWindow_Closed;
     }
 
-    private void FloorRangeEditorWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void FloorRangeEditorWindow_Loaded(object sender, RoutedEventArgs e)
     {
         RegionNameText.Text = _floorLocation.RegionName;
         FloorNameText.Text = _floorDisplayName;
@@ -98,6 +104,48 @@ public partial class FloorRangeEditorWindow : Window
         }
 
         UpdateRangeDisplay();
+
+        // Subscribe to watcher events
+        _watcherService.PositionDetected += OnPositionDetected;
+        _watcherService.StateChanged += OnWatcherStateChanged;
+        UpdateWatcherStatus();
+
+        // Auto-start player tracking if not already running
+        if (!_watcherService.IsWatching)
+        {
+            await AutoStartWatcherAsync();
+        }
+    }
+
+    private void FloorRangeEditorWindow_Closed(object? sender, EventArgs e)
+    {
+        // Unsubscribe from watcher events
+        _watcherService.PositionDetected -= OnPositionDetected;
+        _watcherService.StateChanged -= OnWatcherStateChanged;
+    }
+
+    private async Task AutoStartWatcherAsync()
+    {
+        try
+        {
+            var settingsService = AppSettingsService.Instance;
+            var savedPath = await settingsService.GetAsync(AppSettingsService.ScreenshotWatcherPath, "");
+
+            if (string.IsNullOrEmpty(savedPath) || !Directory.Exists(savedPath))
+            {
+                savedPath = _watcherService.DetectDefaultScreenshotFolder();
+            }
+
+            if (!string.IsNullOrEmpty(savedPath) && Directory.Exists(savedPath))
+            {
+                _watcherService.StartWatching(savedPath);
+                UpdateWatcherStatus();
+            }
+        }
+        catch
+        {
+            // Silently ignore auto-start failures
+        }
     }
 
     private void LoadMapConfigs()
@@ -200,7 +248,8 @@ public partial class FloorRangeEditorWindow : Window
     {
         if (_currentMapConfig == null) return;
 
-        var (gameX, gameZ) = _currentMapConfig.ScreenToGame(screenX, screenY);
+        // Use ScreenToGameForPlayer to match player coordinate system
+        var (gameX, gameZ) = _currentMapConfig.ScreenToGameForPlayer(screenX, screenY);
         _polygonPoints.Add((gameX, gameZ));
 
         UpdateRangeDisplay();
@@ -263,7 +312,8 @@ public partial class FloorRangeEditorWindow : Window
 
             foreach (var point in _polygonPoints)
             {
-                var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+                // Use GameToScreenForPlayer to match player coordinate system
+                var (sx, sy) = _currentMapConfig.GameToScreenForPlayer(point.X, point.Z);
                 polygon.Points.Add(new Point(sx, sy));
             }
 
@@ -275,8 +325,9 @@ public partial class FloorRangeEditorWindow : Window
         // Draw line if 2 points
         else if (_polygonPoints.Count == 2)
         {
-            var (sx1, sy1) = _currentMapConfig.GameToScreen(_polygonPoints[0].X, _polygonPoints[0].Z);
-            var (sx2, sy2) = _currentMapConfig.GameToScreen(_polygonPoints[1].X, _polygonPoints[1].Z);
+            // Use GameToScreenForPlayer to match player coordinate system
+            var (sx1, sy1) = _currentMapConfig.GameToScreenForPlayer(_polygonPoints[0].X, _polygonPoints[0].Z);
+            var (sx2, sy2) = _currentMapConfig.GameToScreenForPlayer(_polygonPoints[1].X, _polygonPoints[1].Z);
 
             var line = new Line
             {
@@ -296,7 +347,8 @@ public partial class FloorRangeEditorWindow : Window
         var index = 1;
         foreach (var point in _polygonPoints)
         {
-            var (sx, sy) = _currentMapConfig.GameToScreen(point.X, point.Z);
+            // Use GameToScreenForPlayer to match player coordinate system
+            var (sx, sy) = _currentMapConfig.GameToScreenForPlayer(point.X, point.Z);
 
             var ellipse = new Ellipse
             {
@@ -339,15 +391,15 @@ public partial class FloorRangeEditorWindow : Window
 
         var inverseScale = 1.0 / _zoomLevel;
 
-        // Convert corners to screen coordinates
-        var (sMinX, sMinZ) = _currentMapConfig.GameToScreen(minX, minZ);
-        var (sMaxX, sMaxZ) = _currentMapConfig.GameToScreen(maxX, maxZ);
+        // Convert corners to screen coordinates using PlayerMarkerTransform
+        var (sMinX, sMinZ) = _currentMapConfig.GameToScreenForPlayer(minX, minZ);
+        var (sMaxX, sMaxZ) = _currentMapConfig.GameToScreenForPlayer(maxX, maxZ);
 
-        // Get all 4 corners
-        var (sTopLeftX, sTopLeftY) = _currentMapConfig.GameToScreen(minX, minZ);
-        var (sTopRightX, sTopRightY) = _currentMapConfig.GameToScreen(maxX, minZ);
-        var (sBottomRightX, sBottomRightY) = _currentMapConfig.GameToScreen(maxX, maxZ);
-        var (sBottomLeftX, sBottomLeftY) = _currentMapConfig.GameToScreen(minX, maxZ);
+        // Get all 4 corners using PlayerMarkerTransform
+        var (sTopLeftX, sTopLeftY) = _currentMapConfig.GameToScreenForPlayer(minX, minZ);
+        var (sTopRightX, sTopRightY) = _currentMapConfig.GameToScreenForPlayer(maxX, minZ);
+        var (sBottomRightX, sBottomRightY) = _currentMapConfig.GameToScreenForPlayer(maxX, maxZ);
+        var (sBottomLeftX, sBottomLeftY) = _currentMapConfig.GameToScreenForPlayer(minX, maxZ);
 
         // Draw bounding box as polygon (handles rotation from transform)
         var boundingBox = new Polygon
@@ -541,11 +593,11 @@ public partial class FloorRangeEditorWindow : Window
 
     private void MapViewer_MouseMove(object sender, MouseEventArgs e)
     {
-        // Update coordinate display
+        // Update coordinate display using PlayerMarkerTransform for player coordinate system
         if (_currentMapConfig != null)
         {
             var canvasPos = e.GetPosition(MapCanvas);
-            var (gameX, gameZ) = _currentMapConfig.ScreenToGame(canvasPos.X, canvasPos.Y);
+            var (gameX, gameZ) = _currentMapConfig.ScreenToGameForPlayer(canvasPos.X, canvasPos.Y);
             GameCoordsText.Text = $"X: {gameX:F1}, Z: {gameZ:F1}";
             ScreenCoordsText.Text = $"X: {canvasPos.X:F0}, Y: {canvasPos.Y:F0}";
         }
@@ -578,6 +630,136 @@ public partial class FloorRangeEditorWindow : Window
 
         ZoomToPoint(newZoom, mousePos);
         e.Handled = true;
+    }
+
+    #endregion
+
+    #region Player Position Display
+
+    private void OnPositionDetected(object? sender, PositionDetectedEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _lastPlayerPosition = e.Position;
+            UpdatePlayerPositionText(e.Position);
+            DrawPlayerMarker(e.Position);
+        });
+    }
+
+    private void OnWatcherStateChanged(object? sender, WatcherStateChangedEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            UpdateWatcherStatus();
+        });
+    }
+
+    private void UpdateWatcherStatus()
+    {
+        if (_watcherService.IsWatching)
+        {
+            WatcherIndicator.Fill = new SolidColorBrush(Color.FromRgb(0x70, 0xA8, 0x00));
+        }
+        else
+        {
+            WatcherIndicator.Fill = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66));
+        }
+
+        var position = _watcherService.CurrentPosition;
+        if (position != null)
+        {
+            UpdatePlayerPositionText(position);
+            DrawPlayerMarker(position);
+        }
+        else
+        {
+            PlayerPositionText.Text = "Player: --";
+        }
+    }
+
+    private void UpdatePlayerPositionText(EftPosition position)
+    {
+        var angleStr = position.Angle.HasValue ? $" {position.Angle:F0}°" : "";
+        PlayerPositionText.Text = $"Player: X:{position.X:F0}, Y:{position.Y:F1}, Z:{position.Z:F0}{angleStr}";
+    }
+
+    private void DrawPlayerMarker(EftPosition position)
+    {
+        if (_currentMapConfig == null) return;
+
+        PlayerCanvas.Children.Clear();
+
+        // Convert game coords to screen coords
+        var (screenX, screenY) = _currentMapConfig.GameToScreenForPlayer(position.X, position.Z);
+
+        // Scale for current zoom level
+        double inverseScale = 1.0 / _zoomLevel;
+        double markerSize = 16 * inverseScale;
+
+        // Draw player circle (cyan)
+        var playerCircle = new Ellipse
+        {
+            Width = markerSize,
+            Height = markerSize,
+            Fill = new SolidColorBrush(Color.FromRgb(0x00, 0xBC, 0xD4)),
+            Stroke = Brushes.White,
+            StrokeThickness = 2 * inverseScale
+        };
+
+        Canvas.SetLeft(playerCircle, screenX - markerSize / 2);
+        Canvas.SetTop(playerCircle, screenY - markerSize / 2);
+        PlayerCanvas.Children.Add(playerCircle);
+
+        // Draw direction arrow if angle is available
+        if (position.Angle.HasValue)
+        {
+            double arrowLength = 24 * inverseScale;
+            double angleRad = (position.Angle.Value - 90) * Math.PI / 180.0;
+
+            double endX = screenX + Math.Cos(angleRad) * arrowLength;
+            double endY = screenY + Math.Sin(angleRad) * arrowLength;
+
+            var arrowLine = new Line
+            {
+                X1 = screenX,
+                Y1 = screenY,
+                X2 = endX,
+                Y2 = endY,
+                Stroke = new SolidColorBrush(Color.FromRgb(0x00, 0xBC, 0xD4)),
+                StrokeThickness = 3 * inverseScale,
+                StrokeEndLineCap = PenLineCap.Triangle
+            };
+            PlayerCanvas.Children.Add(arrowLine);
+
+            double headSize = 8 * inverseScale;
+            double headAngle1 = angleRad + 2.5;
+            double headAngle2 = angleRad - 2.5;
+
+            var arrowHead = new Polygon
+            {
+                Points = new PointCollection
+                {
+                    new Point(endX, endY),
+                    new Point(endX - Math.Cos(headAngle1) * headSize, endY - Math.Sin(headAngle1) * headSize),
+                    new Point(endX - Math.Cos(headAngle2) * headSize, endY - Math.Sin(headAngle2) * headSize)
+                },
+                Fill = new SolidColorBrush(Color.FromRgb(0x00, 0xBC, 0xD4))
+            };
+            PlayerCanvas.Children.Add(arrowHead);
+        }
+
+        // Draw "P" label
+        var label = new TextBlock
+        {
+            Text = "P",
+            Foreground = Brushes.White,
+            FontSize = 10 * inverseScale,
+            FontWeight = FontWeights.Bold
+        };
+
+        Canvas.SetLeft(label, screenX - 4 * inverseScale);
+        Canvas.SetTop(label, screenY - 5 * inverseScale);
+        PlayerCanvas.Children.Add(label);
     }
 
     #endregion

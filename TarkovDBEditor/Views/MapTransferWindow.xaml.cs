@@ -750,6 +750,7 @@ public partial class MapTransferWindow : Window
         }
 
         UpdateCounts();
+        UpdateButtonStates();
         RedrawAll();
     }
 
@@ -757,21 +758,21 @@ public partial class MapTransferWindow : Window
     {
         if (_currentMapConfig == null || _selectedApiMarkers.Count == 0) return;
 
-        // 좌표가 있는 마커만 필터링 (MarkerType 제한 없음 - ApiMarkers는 참조용)
+        // 원본 SVG 좌표(Geometry)가 있는 마커만 필터링
+        // 변환 없이 원본 SVG 좌표를 그대로 저장하고, 표시 시 SvgToScreen으로 변환
         var markersToImport = _apiMarkers
-            .Where(m => _selectedApiMarkers.Contains(m.Uid) &&
-                       m.GameX.HasValue && m.GameZ.HasValue)
+            .Where(m => _selectedApiMarkers.Contains(m.Uid) && m.Geometry != null)
             .ToList();
 
         if (markersToImport.Count == 0)
         {
-            MessageBox.Show("No valid markers to import. Make sure transform is applied.",
+            MessageBox.Show("No valid markers to import. Selected markers have no geometry data.",
                 "Nothing to Import", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var result = MessageBox.Show(
-            $"Import {markersToImport.Count} markers to ApiMarkers table (reference data)?\n\nThese markers will be used as reference in Quest Validator and Map Preview.",
+            $"Import {markersToImport.Count} markers to ApiMarkers table?\n\nSVG coordinates will be saved directly and converted to screen coordinates during display.",
             "Confirm Import",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -780,11 +781,15 @@ public partial class MapTransferWindow : Window
 
         try
         {
-            // ApiMarker 목록 생성
+            // ApiMarker 목록 생성 - 원본 SVG 좌표 사용
             var apiMarkersToSave = markersToImport.Select(m =>
             {
                 // 퀘스트 정보 가져오기
                 var quest = _marketService.FindQuestByUid(m.QuestUid);
+
+                // Floor ID 매핑 (level -> floorId)
+                var floorId = MarkerMatchingService.MapLevelToFloorId(
+                    m.Level, _currentMapConfig.Key, _currentMapConfig.Floors);
 
                 return new ApiMarker
                 {
@@ -795,13 +800,13 @@ public partial class MapTransferWindow : Window
                     Category = m.Category,
                     SubCategory = m.SubCategory,
                     MapKey = _currentMapConfig.Key,
-                    X = m.GameX!.Value,
-                    Y = 0,
-                    Z = m.GameZ!.Value,
-                    FloorId = m.FloorId,
+                    X = m.Geometry!.X,  // 원본 SVG X 좌표
+                    Y = m.Level ?? 0,   // Level 값 저장 (층 정보)
+                    Z = m.Geometry!.Y,  // 원본 SVG Y 좌표
+                    FloorId = floorId,
                     QuestBsgId = quest?.BsgId,
                     QuestNameEn = quest?.NameEn,
-                    ObjectiveDescription = m.Name, // 마커명을 objective description으로 사용
+                    ObjectiveDescription = m.Name,
                     ImportedAt = DateTime.UtcNow
                 };
             }).ToList();
@@ -1198,10 +1203,9 @@ public partial class MapTransferWindow : Window
             }
             else
             {
-                // 변환 전이면 SVG 좌표를 임시로 화면에 표시 (스케일 조정)
-                // 이 경우 대략적인 위치만 표시
-                sx = marker.Geometry.X * 10 + _currentMapConfig.ImageWidth / 2;
-                sy = marker.Geometry.Y * 10 + _currentMapConfig.ImageHeight / 2;
+                // 변환 전: API geometry 좌표를 PlayerMarkerTransform으로 직접 변환
+                // API geometry.y = gameX, geometry.x = gameZ (tarkov-market 좌표 체계)
+                (sx, sy) = _currentMapConfig.GameToScreenForPlayer(marker.Geometry.Y, marker.Geometry.X);
             }
 
             // Floor opacity 계산
@@ -1413,8 +1417,8 @@ public partial class MapTransferWindow : Window
             }
             else
             {
-                apiSx = match.ApiMarker.Geometry.X * 10 + _currentMapConfig.ImageWidth / 2;
-                apiSy = match.ApiMarker.Geometry.Y * 10 + _currentMapConfig.ImageHeight / 2;
+                // 변환 전: API geometry 좌표를 PlayerMarkerTransform으로 직접 변환
+                (apiSx, apiSy) = _currentMapConfig.GameToScreenForPlayer(match.ApiMarker.Geometry.Y, match.ApiMarker.Geometry.X);
             }
 
             // Reference point: yellow, others: orange

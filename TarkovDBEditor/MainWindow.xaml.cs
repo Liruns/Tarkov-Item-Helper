@@ -751,6 +751,22 @@ public partial class MainWindow : Window
         window.Show();
     }
 
+    private void OpenQuestObjectiveEditor_Click(object sender, RoutedEventArgs e)
+    {
+        if (!DatabaseService.Instance.IsConnected)
+        {
+            MessageBox.Show(
+                "Please open or create a database first.\n\nRun 'Debug > Refresh Data...' to initialize the database with quest data.",
+                "No Database",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var window = new QuestObjectiveEditorWindow { Owner = this };
+        window.Show();
+    }
+
     private void OpenMapPreview_Click(object sender, RoutedEventArgs e)
     {
         var window = new MapPreviewWindow { Owner = this };

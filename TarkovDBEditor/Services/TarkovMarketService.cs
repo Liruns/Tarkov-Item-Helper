@@ -29,7 +29,7 @@ public class TarkovMarketService : IDisposable
         { "Customs", "customs" },
         { "Factory", "factory" },
         { "Interchange", "interchange" },
-        { "Labs", "labs" },
+        { "Labs", "lab" },
         { "Lighthouse", "lighthouse" },
         { "Reserve", "reserve" },
         { "Shoreline", "shoreline" },

@@ -60,6 +60,7 @@
             </MenuItem>
             <MenuItem Header="Tools">
                 <MenuItem Header="Quest Requirements Validator..." Click="OpenQuestRequirementsValidator_Click"/>
+                <MenuItem Header="Quest Objective Editor..." Click="OpenQuestObjectiveEditor_Click"/>
                 <MenuItem Header="Map Preview..." Click="OpenMapPreview_Click"/>
                 <MenuItem Header="Map Transfer..." Click="OpenMapTransfer_Click"/>
             </MenuItem>

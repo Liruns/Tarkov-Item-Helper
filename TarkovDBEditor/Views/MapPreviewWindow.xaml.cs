@@ -1036,7 +1036,10 @@ public partial class MapPreviewWindow : Window
 
         foreach (var marker in apiMarkersForMap)
         {
-            var (sx, sy) = _currentMapConfig.GameToScreen(marker.X, marker.Z);
+            // API 마커의 geometry.y는 gameX, geometry.x는 gameZ에 대응
+            // 저장 시: marker.X = geometry.x (gameZ), marker.Z = geometry.y (gameX)
+            // 따라서 GameToScreenForPlayer(gameX, gameZ) = GameToScreenForPlayer(marker.Z, marker.X)
+            var (sx, sy) = _currentMapConfig.GameToScreenForPlayer(marker.Z, marker.X);
 
             // Determine opacity based on floor
             double opacity = 1.0;
