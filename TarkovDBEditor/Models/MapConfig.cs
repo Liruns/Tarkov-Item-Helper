@@ -44,6 +44,8 @@ public class MapConfig
         { "lab", "labs" },
         { "thelabs", "labs" },
         { "thelab", "labs" },
+        // Labyrinth 변형
+        { "thelabyrinth", "labyrinth" },
         // Streets 변형
         { "streets", "streetsoftarkov" },
         { "tarkovstreets", "streetsoftarkov" },
