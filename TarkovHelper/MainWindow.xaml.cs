@@ -26,7 +26,7 @@ public partial class MainWindow : Window
     private HideoutPage? _hideoutPage;
     private ItemsPage? _itemsPage;
     private CollectorPage? _collectorPage;
-    private TestMapPage? _testMapPage;
+    private MapPage? _mapPage;
     private List<HideoutModule>? _hideoutModules;
     private ObservableCollection<QuestChangeInfo>? _pendingSyncChanges;
     private bool _isFullScreen;
@@ -176,6 +176,17 @@ public partial class MainWindow : Window
         {
             ShowLoadingOverlay("데이터 마이그레이션 준비 중...");
             userDataDb.MigrationProgress += OnMigrationProgress;
+
+            try
+            {
+                // 마이그레이션을 먼저 수행 (UI 업데이트가 가능하도록 await)
+                await userDataDb.MigrateFromJsonAsync();
+            }
+            finally
+            {
+                userDataDb.MigrationProgress -= OnMigrationProgress;
+                HideLoadingOverlay();
+            }
         }
 
         try
@@ -187,13 +198,9 @@ public partial class MainWindow : Window
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] Loaded {tasks.Count} quests from DB");
             }
         }
-        finally
+        catch (Exception ex)
         {
-            if (needsMigration)
-            {
-                userDataDb.MigrationProgress -= OnMigrationProgress;
-                HideLoadingOverlay();
-            }
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] Failed to load quests: {ex.Message}");
         }
 
         // Load hideout data from DB
@@ -257,7 +264,7 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine($"[MainWindow] HideoutPage created: {_hideoutPage != null}");
             _itemsPage = new ItemsPage();
             _collectorPage = new CollectorPage();
-            // TestMapPage is created lazily when the tab is selected
+            // MapPage is created lazily when the tab is selected
 
             // Show tab area with Quests selected
             TxtWelcome.Visibility = Visibility.Collapsed;
@@ -311,11 +318,11 @@ public partial class MainWindow : Window
         {
             PageContent.Content = _collectorPage;
         }
-        else if (sender == TabTestMap)
+        else if (sender == TabMap)
         {
-            // Lazy creation of TestMapPage
-            _testMapPage ??= new TestMapPage();
-            PageContent.Content = _testMapPage;
+            // Lazy creation of MapPage
+            _mapPage ??= new MapPage();
+            PageContent.Content = _mapPage;
         }
     }
 
@@ -906,6 +913,19 @@ public partial class MainWindow : Window
 
         // Request item selection
         _itemsPage?.SelectItem(itemNormalizedName);
+    }
+
+    /// <summary>
+    /// Navigate to Hideout tab and select a specific module
+    /// </summary>
+    public void NavigateToHideout(string stationId)
+    {
+        // Switch to Hideout tab
+        TabHideout.IsChecked = true;
+        PageContent.Content = _hideoutPage;
+
+        // Request module selection
+        _hideoutPage?.SelectModule(stationId);
     }
 
     #endregion
