@@ -138,6 +138,9 @@ public partial class MapTrackerPage : UserControl
     // Settings panel state
     private bool _settingsPanelOpen = false;
 
+    // Initialization flag to prevent events during XAML loading
+    private bool _isInitialized = false;
+
     // Display settings
     private double _markerScale = 1.0;
     private double _labelShowZoomThreshold = 0.5;
@@ -220,6 +223,9 @@ public partial class MapTrackerPage : UserControl
 
         // Load settings from SettingsService
         LoadMapSettings();
+
+        // Mark initialization complete - events will now save settings
+        _isInitialized = true;
 
         // Subscribe to language changes
         _loc.LanguageChanged += OnLanguageChanged;
@@ -500,7 +506,7 @@ public partial class MapTrackerPage : UserControl
     private void ChkAutoFloor_CheckedChanged(object sender, RoutedEventArgs e)
     {
         _autoFloorEnabled = ChkAutoFloor.IsChecked == true;
-        _settings.MapAutoFloorEnabled = _autoFloorEnabled;  // Save to settings
+        if (_isInitialized) _settings.MapAutoFloorEnabled = _autoFloorEnabled;  // Save to settings
         // Floor will be auto-detected on next position update
     }
 
@@ -739,14 +745,14 @@ public partial class MapTrackerPage : UserControl
         if (TxtMarkerSize == null) return;
         _markerScale = SliderMarkerSize.Value / 100.0;
         TxtMarkerSize.Text = $"{SliderMarkerSize.Value:F0}%";
-        _settings.MapMarkerScale = _markerScale;  // Save to settings
+        if (_isInitialized) _settings.MapMarkerScale = _markerScale;  // Save to settings
         RedrawMarkers();
     }
 
     private void ChkShowLabels_Changed(object sender, RoutedEventArgs e)
     {
         _showMarkerLabels = ChkShowLabels.IsChecked == true;
-        _settings.MapShowLabels = _showMarkerLabels;  // Save to settings
+        if (_isInitialized) _settings.MapShowLabels = _showMarkerLabels;  // Save to settings
         RedrawMarkers();
         RedrawObjectives();
     }
@@ -754,7 +760,7 @@ public partial class MapTrackerPage : UserControl
     private void ChkEnableClustering_Changed(object sender, RoutedEventArgs e)
     {
         _clusteringEnabled = ChkEnableClustering.IsChecked == true;
-        _settings.MapClusteringEnabled = _clusteringEnabled;  // Save to settings
+        if (_isInitialized) _settings.MapClusteringEnabled = _clusteringEnabled;  // Save to settings
         RedrawMarkers();
     }
 
@@ -763,7 +769,7 @@ public partial class MapTrackerPage : UserControl
         if (TxtClusterZoom == null) return;
         _clusterZoomThreshold = SliderClusterZoom.Value / 100.0;
         TxtClusterZoom.Text = $"{SliderClusterZoom.Value:F0}%";
-        _settings.MapClusterZoomThreshold = SliderClusterZoom.Value;  // Save to settings (0-100)
+        if (_isInitialized) _settings.MapClusterZoomThreshold = SliderClusterZoom.Value;  // Save to settings (0-100)
         RedrawMarkers();
     }
 
@@ -1262,7 +1268,7 @@ public partial class MapTrackerPage : UserControl
     private void SaveLayerSettings()
     {
         // Guard against calls during XAML initialization
-        if (ChipBoss == null || _settings == null) return;
+        if (!_isInitialized) return;
 
         _settings.MapShowBosses = ChipBoss.IsChecked == true;
         _settings.MapShowExtracts = ChipExtract.IsChecked == true;
