@@ -51,6 +51,13 @@ public class SettingsService
     private const string KeyMapTrailColor = "map.trailColor";
     private const string KeyMapTrailThickness = "map.trailThickness";
     private const string KeyMapAutoStartTracking = "map.autoStartTracking";
+    private const string KeyMapClusteringEnabled = "map.clusteringEnabled";
+    private const string KeyMapClusterZoomThreshold = "map.clusterZoomThreshold";
+    private const string KeyMapAutoFloorEnabled = "map.autoFloorEnabled";
+    private const string KeyMapShowBosses = "map.showBosses";
+    private const string KeyMapShowSpawns = "map.showSpawns";
+    private const string KeyMapShowLevers = "map.showLevers";
+    private const string KeyMapShowKeys = "map.showKeys";
 
     private bool _settingsLoaded;
     private string? _detectionMethod;
@@ -89,6 +96,13 @@ public class SettingsService
     private string? _mapTrailColor;
     private double? _mapTrailThickness;
     private bool? _mapAutoStartTracking;
+    private bool? _mapClusteringEnabled;
+    private double? _mapClusterZoomThreshold;
+    private bool? _mapAutoFloorEnabled;
+    private bool? _mapShowBosses;
+    private bool? _mapShowSpawns;
+    private bool? _mapShowLevers;
+    private bool? _mapShowKeys;
 
     public event EventHandler<string?>? LogFolderChanged;
     public event EventHandler<int>? PlayerLevelChanged;
@@ -807,6 +821,147 @@ public class SettingsService
     }
 
     /// <summary>
+    /// Enable marker clustering
+    /// </summary>
+    public bool MapClusteringEnabled
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapClusteringEnabled ?? true;
+        }
+        set
+        {
+            if (_mapClusteringEnabled != value)
+            {
+                _mapClusteringEnabled = value;
+                SaveSetting(KeyMapClusteringEnabled, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Zoom threshold for clustering (0-100)
+    /// </summary>
+    public double MapClusterZoomThreshold
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapClusterZoomThreshold ?? 50;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 0, 100);
+            if (Math.Abs((_mapClusterZoomThreshold ?? 50) - clampedValue) > 0.5)
+            {
+                _mapClusterZoomThreshold = clampedValue;
+                SaveSetting(KeyMapClusterZoomThreshold, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enable auto floor detection
+    /// </summary>
+    public bool MapAutoFloorEnabled
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapAutoFloorEnabled ?? true;
+        }
+        set
+        {
+            if (_mapAutoFloorEnabled != value)
+            {
+                _mapAutoFloorEnabled = value;
+                SaveSetting(KeyMapAutoFloorEnabled, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show boss markers on map
+    /// </summary>
+    public bool MapShowBosses
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowBosses ?? true;
+        }
+        set
+        {
+            if (_mapShowBosses != value)
+            {
+                _mapShowBosses = value;
+                SaveSetting(KeyMapShowBosses, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show spawn markers on map
+    /// </summary>
+    public bool MapShowSpawns
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowSpawns ?? true;
+        }
+        set
+        {
+            if (_mapShowSpawns != value)
+            {
+                _mapShowSpawns = value;
+                SaveSetting(KeyMapShowSpawns, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show lever markers on map
+    /// </summary>
+    public bool MapShowLevers
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowLevers ?? true;
+        }
+        set
+        {
+            if (_mapShowLevers != value)
+            {
+                _mapShowLevers = value;
+                SaveSetting(KeyMapShowLevers, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Show key markers on map
+    /// </summary>
+    public bool MapShowKeys
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapShowKeys ?? true;
+        }
+        set
+        {
+            if (_mapShowKeys != value)
+            {
+                _mapShowKeys = value;
+                SaveSetting(KeyMapShowKeys, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
     /// Add a quest to hidden list
     /// </summary>
     public void AddHiddenQuest(string questId)
@@ -1204,6 +1359,28 @@ public class SettingsService
 
             if (bool.TryParse(_userDataDb.GetSetting(KeyMapAutoStartTracking), out var autoStartTracking))
                 _mapAutoStartTracking = autoStartTracking;
+
+            // Load clustering and layer settings
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapClusteringEnabled), out var clusteringEnabled))
+                _mapClusteringEnabled = clusteringEnabled;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapClusterZoomThreshold), out var clusterZoomThreshold))
+                _mapClusterZoomThreshold = clusterZoomThreshold;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapAutoFloorEnabled), out var autoFloorEnabled))
+                _mapAutoFloorEnabled = autoFloorEnabled;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowBosses), out var showBosses))
+                _mapShowBosses = showBosses;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowSpawns), out var showSpawns))
+                _mapShowSpawns = showSpawns;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowLevers), out var showLevers))
+                _mapShowLevers = showLevers;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowKeys), out var showKeys))
+                _mapShowKeys = showKeys;
         }
         catch (Exception ex)
         {

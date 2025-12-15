@@ -123,6 +123,9 @@ public partial class MapTrackerPage : UserControl
     // Localization service
     private readonly LocalizationService _loc = LocalizationService.Instance;
 
+    // Settings service
+    private readonly SettingsService _settings = SettingsService.Instance;
+
     // Floor detection service
     private readonly FloorDetectionService _floorDetectionService = FloorDetectionService.Instance;
     private bool _autoFloorEnabled = true;
@@ -215,13 +218,34 @@ public partial class MapTrackerPage : UserControl
         // Load floor detection data
         await _floorDetectionService.LoadFloorRangesAsync();
 
+        // Load settings from SettingsService
+        LoadMapSettings();
+
         // Subscribe to language changes
         _loc.LanguageChanged += OnLanguageChanged;
         UpdateUIStrings();
 
         if (MapSelector.Items.Count > 0)
         {
-            MapSelector.SelectedIndex = 0;
+            // Try to restore last selected map
+            var lastMap = _settings.MapLastSelectedMap;
+            if (!string.IsNullOrEmpty(lastMap))
+            {
+                var mapIndex = -1;
+                for (int i = 0; i < MapSelector.Items.Count; i++)
+                {
+                    if (MapSelector.Items[i] is MapConfig config && config.Key == lastMap)
+                    {
+                        mapIndex = i;
+                        break;
+                    }
+                }
+                MapSelector.SelectedIndex = mapIndex >= 0 ? mapIndex : 0;
+            }
+            else
+            {
+                MapSelector.SelectedIndex = 0;
+            }
         }
 
         // Subscribe to watcher events
@@ -235,6 +259,35 @@ public partial class MapTrackerPage : UserControl
         {
             window.PreviewKeyDown += Window_PreviewKeyDown;
         }
+    }
+
+    /// <summary>
+    /// Load settings from SettingsService and apply to UI
+    /// </summary>
+    private void LoadMapSettings()
+    {
+        // Display settings
+        _markerScale = _settings.MapMarkerScale;
+        _showMarkerLabels = _settings.MapShowLabels;
+        _clusteringEnabled = _settings.MapClusteringEnabled;
+        _clusterZoomThreshold = _settings.MapClusterZoomThreshold / 100.0;  // Convert from 0-100 to 0-1
+        _autoFloorEnabled = _settings.MapAutoFloorEnabled;
+
+        // Layer visibility - apply to chips (checkboxes will sync via handler)
+        ChipBoss.IsChecked = _settings.MapShowBosses;
+        ChipExtract.IsChecked = _settings.MapShowExtracts;
+        ChipTransit.IsChecked = _settings.MapShowTransits;
+        ChipSpawn.IsChecked = _settings.MapShowSpawns;
+        ChipLever.IsChecked = _settings.MapShowLevers;
+        ChipKeys.IsChecked = _settings.MapShowKeys;
+        ChipQuest.IsChecked = _settings.MapShowQuests;
+
+        // Sync with checkboxes and update status text
+        SyncLayerCheckboxes();
+        UpdateChipStatusText();
+
+        // Update settings UI
+        SyncSettingsUI();
     }
 
     private void MapTrackerPage_Unloaded(object sender, RoutedEventArgs e)
@@ -337,6 +390,9 @@ public partial class MapTrackerPage : UserControl
             UpdateCounts();
             RedrawMarkers();
             RedrawObjectives();
+
+            // Save last selected map
+            _settings.MapLastSelectedMap = config.Key;
         }
     }
 
@@ -444,6 +500,7 @@ public partial class MapTrackerPage : UserControl
     private void ChkAutoFloor_CheckedChanged(object sender, RoutedEventArgs e)
     {
         _autoFloorEnabled = ChkAutoFloor.IsChecked == true;
+        _settings.MapAutoFloorEnabled = _autoFloorEnabled;  // Save to settings
         // Floor will be auto-detected on next position update
     }
 
@@ -682,12 +739,14 @@ public partial class MapTrackerPage : UserControl
         if (TxtMarkerSize == null) return;
         _markerScale = SliderMarkerSize.Value / 100.0;
         TxtMarkerSize.Text = $"{SliderMarkerSize.Value:F0}%";
+        _settings.MapMarkerScale = _markerScale;  // Save to settings
         RedrawMarkers();
     }
 
     private void ChkShowLabels_Changed(object sender, RoutedEventArgs e)
     {
         _showMarkerLabels = ChkShowLabels.IsChecked == true;
+        _settings.MapShowLabels = _showMarkerLabels;  // Save to settings
         RedrawMarkers();
         RedrawObjectives();
     }
@@ -695,6 +754,7 @@ public partial class MapTrackerPage : UserControl
     private void ChkEnableClustering_Changed(object sender, RoutedEventArgs e)
     {
         _clusteringEnabled = ChkEnableClustering.IsChecked == true;
+        _settings.MapClusteringEnabled = _clusteringEnabled;  // Save to settings
         RedrawMarkers();
     }
 
@@ -703,6 +763,7 @@ public partial class MapTrackerPage : UserControl
         if (TxtClusterZoom == null) return;
         _clusterZoomThreshold = SliderClusterZoom.Value / 100.0;
         TxtClusterZoom.Text = $"{SliderClusterZoom.Value:F0}%";
+        _settings.MapClusterZoomThreshold = SliderClusterZoom.Value;  // Save to settings (0-100)
         RedrawMarkers();
     }
 
@@ -1172,6 +1233,9 @@ public partial class MapTrackerPage : UserControl
         // Update chip status text
         UpdateChipStatusText();
 
+        // Save layer visibility to settings
+        SaveLayerSettings();
+
         // Redraw
         RedrawMarkers();
         RedrawObjectives();
@@ -1183,10 +1247,30 @@ public partial class MapTrackerPage : UserControl
         // Sync context panel checkboxes with layer chips
         SyncLayerChips();
 
+        // Save layer visibility to settings
+        SaveLayerSettings();
+
         // Redraw
         RedrawMarkers();
         RedrawObjectives();
         UpdateCounts();
+    }
+
+    /// <summary>
+    /// Save layer visibility settings to SettingsService
+    /// </summary>
+    private void SaveLayerSettings()
+    {
+        // Guard against calls during XAML initialization
+        if (ChipBoss == null) return;
+
+        _settings.MapShowBosses = ChipBoss.IsChecked == true;
+        _settings.MapShowExtracts = ChipExtract.IsChecked == true;
+        _settings.MapShowTransits = ChipTransit.IsChecked == true;
+        _settings.MapShowSpawns = ChipSpawn.IsChecked == true;
+        _settings.MapShowLevers = ChipLever.IsChecked == true;
+        _settings.MapShowKeys = ChipKeys.IsChecked == true;
+        _settings.MapShowQuests = ChipQuest.IsChecked == true;
     }
 
     private void SyncLayerCheckboxes()
