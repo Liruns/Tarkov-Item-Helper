@@ -140,6 +140,56 @@ public partial class MapTrackerPage : UserControl
     private double _labelShowZoomThreshold = 0.5;
     private bool _showMarkerLabels = true;
 
+    // LOD thresholds
+    private const double LOD_CLUSTER_ONLY_THRESHOLD = 0.3;
+    private const double LOD_SMALL_ICON_THRESHOLD = 0.6;
+    private const double LOD_FULL_DETAIL_THRESHOLD = 1.0;
+
+    /// <summary>
+    /// Get LOD-based marker size multiplier
+    /// </summary>
+    private double GetLodSizeMultiplier()
+    {
+        return _zoomLevel switch
+        {
+            < LOD_CLUSTER_ONLY_THRESHOLD => 0.7,   // Very small at extreme zoom out
+            < LOD_SMALL_ICON_THRESHOLD => 0.85,    // Small icons
+            < LOD_FULL_DETAIL_THRESHOLD => 1.0,    // Normal size
+            _ => 1.15                               // Larger when zoomed in
+        };
+    }
+
+    /// <summary>
+    /// Get dynamic cluster grid size based on zoom level
+    /// </summary>
+    private double GetDynamicClusterSize()
+    {
+        return _zoomLevel switch
+        {
+            < 0.3 => 100.0,  // Large clusters at extreme zoom out
+            < 0.5 => 80.0,
+            < 0.7 => 60.0,
+            < 1.0 => 40.0,
+            _ => 25.0        // Small clusters when zoomed in
+        };
+    }
+
+    /// <summary>
+    /// Check if labels should be shown based on LOD
+    /// </summary>
+    private bool ShouldShowLabelsLod()
+    {
+        return _showMarkerLabels && _zoomLevel >= LOD_CLUSTER_ONLY_THRESHOLD;
+    }
+
+    /// <summary>
+    /// Check if clustering should be active based on zoom level
+    /// </summary>
+    private bool ShouldCluster()
+    {
+        return _clusteringEnabled && _zoomLevel < _clusterZoomThreshold;
+    }
+
     // Clustering settings
     private bool _clusteringEnabled = true;
     private double _clusterZoomThreshold = 0.5;  // Cluster when zoom < this value
@@ -459,6 +509,28 @@ public partial class MapTrackerPage : UserControl
             case Key.D9:
             case Key.NumPad9:
                 BtnAllLayersOff_Click(this, new RoutedEventArgs());
+                e.Handled = true;
+                return;
+
+            // Escape - clear selection, close popups
+            case Key.Escape:
+                if (_selectedMarker != null)
+                {
+                    ShowContextDefault();
+                    _selectedMarker = null;
+                }
+                else if (ShortcutsPopup.Visibility == Visibility.Visible)
+                {
+                    ShortcutsPopup.Visibility = Visibility.Collapsed;
+                }
+                else if (_settingsPanelOpen)
+                {
+                    CloseSettingsPanel();
+                }
+                else if (!string.IsNullOrEmpty(TxtSearch.Text))
+                {
+                    TxtSearch.Text = "";
+                }
                 e.Handled = true;
                 return;
 
@@ -1278,11 +1350,14 @@ public partial class MapTrackerPage : UserControl
         var inverseScale = 1.0 / _zoomLevel;
         var hasFloors = _sortedFloors != null && _sortedFloors.Count > 0;
 
-        // Determine if labels should be shown based on zoom level and user setting
-        bool showLabels = _showMarkerLabels && _zoomLevel >= _labelShowZoomThreshold;
+        // Determine if labels should be shown based on LOD
+        bool showLabels = ShouldShowLabelsLod();
 
         // Check if clustering should be active
-        bool shouldCluster = _clusteringEnabled && _zoomLevel < _clusterZoomThreshold;
+        bool shouldCluster = ShouldCluster();
+
+        // Get dynamic cluster size based on zoom level
+        double clusterGridSize = GetDynamicClusterSize() * inverseScale;
 
         var markers = MapMarkerDbService.Instance.GetMarkersForMap(_currentMapConfig.Key);
 
@@ -1302,8 +1377,8 @@ public partial class MapTrackerPage : UserControl
         // Use clustering or individual markers based on zoom level
         if (shouldCluster && visibleMarkersWithCoords.Count > 1)
         {
-            // Compute clusters
-            var clusters = ComputeClusters(visibleMarkersWithCoords, ClusterGridSize * inverseScale);
+            // Compute clusters with dynamic grid size
+            var clusters = ComputeClusters(visibleMarkersWithCoords, clusterGridSize);
 
             foreach (var cluster in clusters)
             {
@@ -1483,11 +1558,18 @@ public partial class MapTrackerPage : UserControl
             opacity = string.Equals(marker.FloorId, _currentFloorId, StringComparison.OrdinalIgnoreCase) ? 1.0 : 0.3;
         }
 
+        // Apply additional opacity reduction at extreme zoom out for LOD
+        if (_zoomLevel < LOD_CLUSTER_ONLY_THRESHOLD)
+        {
+            opacity *= 0.8;  // Reduce opacity at extreme zoom out
+        }
+
         var (r, g, b) = MapMarker.GetMarkerColor(marker.Type);
         var markerColor = Color.FromArgb((byte)(opacity * 255), r, g, b);
 
-        // Calculate marker size with min/max constraints and user scale
-        var rawMarkerSize = 48 * inverseScale * _markerScale;
+        // Calculate marker size with min/max constraints, user scale, and LOD multiplier
+        var lodMultiplier = GetLodSizeMultiplier();
+        var rawMarkerSize = 48 * inverseScale * _markerScale * lodMultiplier;
         var markerSize = Math.Clamp(rawMarkerSize, MinMarkerSize * inverseScale, MaxMarkerSize * inverseScale * _markerScale);
 
         var iconImage = GetMarkerIcon(marker.Type);
@@ -1997,9 +2079,49 @@ public partial class MapTrackerPage : UserControl
 
     private void MapViewer_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        var wasDragging = _isDragging;
         _isDragging = false;
         MapViewerGrid.ReleaseMouseCapture();
         MapCanvas.Cursor = Cursors.Arrow;
+
+        // Only handle click selection if we weren't dragging
+        if (!wasDragging || (_dragStartPoint != default &&
+            Math.Abs(e.GetPosition(MapViewerGrid).X - _dragStartPoint.X) < 5 &&
+            Math.Abs(e.GetPosition(MapViewerGrid).Y - _dragStartPoint.Y) < 5))
+        {
+            // Check if we clicked on a marker
+            var canvasPos = e.GetPosition(MapCanvas);
+            foreach (var region in _markerHitRegions)
+            {
+                if (region.Contains(canvasPos.X, canvasPos.Y))
+                {
+                    if (region.IsCluster && region.ClusterMarkers != null)
+                    {
+                        // For clusters, select the first marker for now
+                        // TODO: Implement Spiderfy to expand clusters
+                        ShowContextSelected(region.ClusterMarkers.First());
+                    }
+                    else
+                    {
+                        ShowContextSelected(region.Marker);
+                    }
+
+                    // Open context panel if closed
+                    if (!_contextPanelOpen)
+                    {
+                        ToggleContextPanel();
+                    }
+                    return;
+                }
+            }
+
+            // Clicked empty space - clear selection
+            if (_selectedMarker != null)
+            {
+                ShowContextDefault();
+                _selectedMarker = null;
+            }
+        }
     }
 
     private void MapViewer_MouseMove(object sender, MouseEventArgs e)
