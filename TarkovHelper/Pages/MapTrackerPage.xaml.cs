@@ -8,6 +8,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using TarkovHelper.Models;
 using TarkovHelper.Services;
+using SharpVectors.Converters;
+using SharpVectors.Renderers.Wpf;
 
 // Type aliases for WPF disambiguation
 using Point = System.Windows.Point;
@@ -18,8 +20,30 @@ using Brushes = System.Windows.Media.Brushes;
 using Image = System.Windows.Controls.Image;
 using Color = System.Windows.Media.Color;
 using Cursors = System.Windows.Input.Cursors;
+using System.Globalization;
+using System.Windows.Data;
 
 namespace TarkovHelper.Pages;
+
+/// <summary>
+/// Converts progress percent (0.0-1.0) to width for progress bar (0-40px)
+/// </summary>
+public class ProgressToWidthConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is double percent)
+        {
+            return percent * 40.0; // Max width is 40px
+        }
+        return 0.0;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
 
 /// <summary>
 /// Hit region for marker tooltip detection
@@ -154,6 +178,96 @@ internal sealed class QuestObjectiveCluster
 }
 
 /// <summary>
+/// Display model for quest cards in the floating quest panel (grouped by quest)
+/// </summary>
+internal sealed class QuestCardDisplay : System.ComponentModel.INotifyPropertyChanged
+{
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    public string QuestId { get; set; } = "";
+    public string QuestName { get; set; } = "";
+    public string TraderName { get; set; } = "";
+    public bool IsKappaRequired { get; set; }
+
+    private bool _isExpanded;
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set
+        {
+            if (_isExpanded != value)
+            {
+                _isExpanded = value;
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(IsExpanded)));
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(ObjectivesVisibility)));
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(ExpandIcon)));
+            }
+        }
+    }
+
+    public Visibility ObjectivesVisibility => IsExpanded ? Visibility.Visible : Visibility.Collapsed;
+    public string ExpandIcon => IsExpanded ? "\u25B2" : "\u25BC";  // ▲ or ▼
+
+    // Progress tracking
+    public int CompletedCount { get; set; }
+    public int TotalCount { get; set; }
+    public double ProgressPercent => TotalCount > 0 ? (double)CompletedCount / TotalCount : 0;
+    public string ProgressText => $"{CompletedCount}/{TotalCount}";
+
+    // Objectives
+    public List<QuestObjectiveItem> Objectives { get; set; } = new();
+
+    // Primary type (first incomplete objective's type)
+    public QuestObjectiveType PrimaryType { get; set; }
+    public DrawingImage? TypeIcon { get; set; }
+
+    public SolidColorBrush TypeColorBrush => PrimaryType switch
+    {
+        QuestObjectiveType.Mark => new SolidColorBrush(Color.FromRgb(0x4E, 0xC9, 0xB0)),      // Teal
+        QuestObjectiveType.Visit => new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)),     // Blue
+        QuestObjectiveType.Stash => new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xAA)),     // Yellow
+        QuestObjectiveType.Kill => new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78)),      // Salmon
+        QuestObjectiveType.Survive => new SolidColorBrush(Color.FromRgb(0xB5, 0xCE, 0xA8)),   // Light green
+        QuestObjectiveType.HandOver => new SolidColorBrush(Color.FromRgb(0xC5, 0x86, 0xC0)), // Purple
+        QuestObjectiveType.Collect => new SolidColorBrush(Color.FromRgb(0xFF, 0xA5, 0x00)),  // Orange
+        _ => new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80))                             // Gray
+    };
+}
+
+/// <summary>
+/// Display model for individual quest objectives within a quest card
+/// </summary>
+internal sealed class QuestObjectiveItem
+{
+    public string ObjectiveId { get; set; } = "";
+    public string Description { get; set; } = "";
+    public QuestObjectiveType ObjectiveType { get; set; }
+    public bool IsCompleted { get; set; }
+    public double X { get; set; }
+    public double Z { get; set; }
+    public string? FloorId { get; set; }
+    public QuestObjective? SourceObjective { get; set; }
+    public DrawingImage? TypeIcon { get; set; }
+
+    public SolidColorBrush TypeColorBrush => ObjectiveType switch
+    {
+        QuestObjectiveType.Mark => new SolidColorBrush(Color.FromRgb(0x4E, 0xC9, 0xB0)),
+        QuestObjectiveType.Visit => new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)),
+        QuestObjectiveType.Stash => new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xAA)),
+        QuestObjectiveType.Kill => new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78)),
+        QuestObjectiveType.Survive => new SolidColorBrush(Color.FromRgb(0xB5, 0xCE, 0xA8)),
+        QuestObjectiveType.HandOver => new SolidColorBrush(Color.FromRgb(0xC5, 0x86, 0xC0)),
+        QuestObjectiveType.Collect => new SolidColorBrush(Color.FromRgb(0xFF, 0xA5, 0x00)),
+        _ => new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80))
+    };
+
+    public string CompletionIcon => IsCompleted ? "\u2713" : "\u25CB";  // ✓ or ○
+    public SolidColorBrush CompletionColor => IsCompleted
+        ? new SolidColorBrush(Color.FromRgb(0x4E, 0xC9, 0xB0))  // Teal for completed
+        : new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80)); // Gray for pending
+}
+
+/// <summary>
 /// Map Tracker Page - displays map with markers and real-time player position tracking
 /// </summary>
 public partial class MapTrackerPage : UserControl
@@ -214,9 +328,14 @@ public partial class MapTrackerPage : UserControl
     private QuestObjective? _hoveredOptionalGroupObjective;  // For highlighting all optional points in same group
     private const double QuestClusterDistance = 40.0;  // Screen pixels to cluster quests
 
-    // Quest panel data
-    private List<QuestObjectiveDisplay> _questPanelItems = new();
-    private QuestObjectiveDisplay? _highlightedQuestItem;  // Currently highlighted quest item
+    // Quest cards data (grouped by quest)
+    private List<QuestCardDisplay> _questCards = new();
+    private QuestCardDisplay? _highlightedQuestCard;  // Currently highlighted quest card
+    private string? _hoveredPanelQuestId;   // Quest ID being hovered in panel
+    private string? _hoveredMapQuestId;     // Quest ID being hovered on map
+
+    // Quest objective icon cache
+    private readonly Dictionary<QuestObjectiveType, DrawingImage?> _questIconCache = new();
 
     // Settings panel state
     private bool _settingsPanelOpen = false;
@@ -515,7 +634,7 @@ public partial class MapTrackerPage : UserControl
             UpdateCounts();
             RedrawMarkers();
             RedrawObjectives();
-            RefreshQuestList();
+            RefreshQuestCards();
 
             // Save last selected map
             _settings.MapLastSelectedMap = config.Key;
@@ -911,7 +1030,7 @@ public partial class MapTrackerPage : UserControl
         if (_isInitialized) _settings.MapHideCompletedQuests = _hideCompletedQuests;
         RedrawObjectives();
         UpdateCounts();
-        RefreshQuestList();
+        RefreshQuestCards();
     }
 
     private void ChkShowActiveOnly_Changed(object sender, RoutedEventArgs e)
@@ -920,7 +1039,7 @@ public partial class MapTrackerPage : UserControl
         if (_isInitialized) _settings.MapShowActiveOnly = _showActiveQuestsOnly;
         RedrawObjectives();
         UpdateCounts();
-        RefreshQuestList();
+        RefreshQuestCards();
     }
 
     private void ChkShowKappaHighlight_Changed(object sender, RoutedEventArgs e)
@@ -938,7 +1057,7 @@ public partial class MapTrackerPage : UserControl
             if (_isInitialized) _settings.MapTraderFilter = _traderFilter;
             RedrawObjectives();
             UpdateCounts();
-            RefreshQuestList();
+            RefreshQuestCards();
         }
     }
 
@@ -1107,7 +1226,7 @@ public partial class MapTrackerPage : UserControl
     private void QuestFilter_Changed(object sender, RoutedEventArgs e)
     {
         if (!_isInitialized) return;
-        RefreshQuestList();
+        RefreshQuestCards();
     }
 
     private void QuestItem_Click(object sender, MouseButtonEventArgs e)
@@ -1132,35 +1251,52 @@ public partial class MapTrackerPage : UserControl
         // Pan to quest objective location
         if (_currentMapConfig != null && (quest.X != 0 || quest.Z != 0))
         {
-            var (sx, sy) = _currentMapConfig.GameToScreen(quest.X, quest.Z);
-            var viewCenter = new Point(MapViewerGrid.ActualWidth / 2, MapViewerGrid.ActualHeight / 2);
-            MapTranslate.X = viewCenter.X - sx * _zoomLevel;
-            MapTranslate.Y = viewCenter.Y - sy * _zoomLevel;
+            FocusOnCoordinates(quest.X, quest.Z);
         }
     }
 
-    private void RefreshQuestList()
+    /// <summary>
+    /// Focus the map view on given game coordinates
+    /// </summary>
+    private void FocusOnCoordinates(double gameX, double gameZ)
     {
-        _questPanelItems.Clear();
+        if (_currentMapConfig == null) return;
 
-        if (_currentMapConfig == null)
+        var (sx, sy) = _currentMapConfig.GameToScreen(gameX, gameZ);
+        var viewCenter = new Point(MapViewerGrid.ActualWidth / 2, MapViewerGrid.ActualHeight / 2);
+        MapTranslate.X = viewCenter.X - sx * _zoomLevel;
+        MapTranslate.Y = viewCenter.Y - sy * _zoomLevel;
+    }
+
+    /// <summary>
+    /// Refresh quest list with grouped quest cards (used for new card-based UI)
+    /// </summary>
+    private void RefreshQuestCards()
+    {
+        try
         {
-            QuestList.ItemsSource = null;
-            return;
-        }
+            _questCards.Clear();
 
-        var objectives = QuestObjectiveDbService.Instance.GetObjectivesForMap(_currentMapConfig.Key, _currentMapConfig);
+            if (_currentMapConfig == null)
+            {
+                QuestList.ItemsSource = null;
+                return;
+            }
+
+            var objectives = QuestObjectiveDbService.Instance.GetObjectivesForMap(_currentMapConfig.Key, _currentMapConfig);
+            var progressService = QuestProgressService.Instance;
+
+        // Group objectives by quest
+        var questGroups = new Dictionary<string, List<QuestObjective>>();
 
         foreach (var objective in objectives)
         {
-            // Apply quest status filtering based on panel checkboxes
+            // Apply quest status filtering
             var questStatus = GetQuestStatusForObjective(objective);
 
             // "Incomplete only" filter
             if (ChkIncompleteOnly.IsChecked == true && questStatus == QuestStatus.Done)
                 continue;
-
-            // "This map only" is already applied by GetObjectivesForMap
 
             // Apply trader filter
             if (!string.IsNullOrEmpty(_traderFilter) && !MatchesTraderFilter(objective))
@@ -1172,36 +1308,154 @@ public partial class MapTrackerPage : UserControl
             if (_showActiveQuestsOnly && questStatus != QuestStatus.Active)
                 continue;
 
-            // Get coordinates from first location point if available
-            double x = 0, z = 0;
-            string? floorId = null;
-            if (objective.HasCoordinates && objective.LocationPoints.Count > 0)
+            if (!questGroups.ContainsKey(objective.QuestId))
+                questGroups[objective.QuestId] = new List<QuestObjective>();
+            questGroups[objective.QuestId].Add(objective);
+        }
+
+        // Create quest cards
+        foreach (var (questId, questObjectives) in questGroups)
+        {
+            var firstObj = questObjectives[0];
+            var questName = GetLocalizedQuestName(firstObj);
+            var isKappa = IsKappaRequired(firstObj);
+
+            // Count completions
+            int completedCount = 0;
+            int totalCount = questObjectives.Count;
+            foreach (var obj in questObjectives)
             {
-                x = objective.LocationPoints[0].X;
-                z = objective.LocationPoints[0].Z;
-                floorId = objective.LocationPoints[0].FloorId;
+                if (progressService.IsObjectiveCompletedById(obj.Id))
+                    completedCount++;
             }
 
-            var display = new QuestObjectiveDisplay
+            // Determine primary type (first incomplete objective's type)
+            var primaryType = QuestObjectiveType.Custom;
+            foreach (var obj in questObjectives)
             {
-                QuestId = objective.QuestId,
-                QuestName = GetLocalizedQuestName(objective),
-                ObjectiveDescription = objective.Description ?? "",
-                X = x,
-                Z = z,
-                FloorId = floorId,
-                SourceObjective = objective
+                if (!progressService.IsObjectiveCompletedById(obj.Id))
+                {
+                    primaryType = obj.ObjectiveType;
+                    break;
+                }
+            }
+            if (primaryType == QuestObjectiveType.Custom && questObjectives.Count > 0)
+                primaryType = questObjectives[0].ObjectiveType;
+
+            // Create objective items
+            var objItems = new List<QuestObjectiveItem>();
+            foreach (var obj in questObjectives)
+            {
+                double x = 0, z = 0;
+                string? floorId = null;
+                if (obj.HasCoordinates && obj.LocationPoints.Count > 0)
+                {
+                    x = obj.LocationPoints[0].X;
+                    z = obj.LocationPoints[0].Z;
+                    floorId = obj.LocationPoints[0].FloorId;
+                }
+
+                objItems.Add(new QuestObjectiveItem
+                {
+                    ObjectiveId = obj.Id,
+                    Description = obj.Description ?? "",
+                    ObjectiveType = obj.ObjectiveType,
+                    IsCompleted = progressService.IsObjectiveCompletedById(obj.Id),
+                    X = x,
+                    Z = z,
+                    FloorId = floorId,
+                    SourceObjective = obj,
+                    TypeIcon = GetQuestObjectiveIcon(obj.ObjectiveType)
+                });
+            }
+
+            var card = new QuestCardDisplay
+            {
+                QuestId = questId,
+                QuestName = questName,
+                TraderName = firstObj.TraderName ?? "",
+                IsKappaRequired = isKappa,
+                CompletedCount = completedCount,
+                TotalCount = totalCount,
+                PrimaryType = primaryType,
+                TypeIcon = GetQuestObjectiveIcon(primaryType),
+                Objectives = objItems
             };
-            _questPanelItems.Add(display);
+            _questCards.Add(card);
         }
 
         // Sort by quest name
-        _questPanelItems = _questPanelItems.OrderBy(q => q.QuestName).ToList();
-        QuestList.ItemsSource = _questPanelItems;
+        _questCards = _questCards.OrderBy(c => c.QuestName).ToList();
+        QuestList.ItemsSource = _questCards;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"RefreshQuestCards error: {ex}");
+            MessageBox.Show($"Error refreshing quest cards: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     /// <summary>
-    /// Highlight a quest in the panel by scrolling to it and applying visual highlight
+    /// Get SVG icon for quest objective type
+    /// </summary>
+    private DrawingImage? GetQuestObjectiveIcon(QuestObjectiveType type)
+    {
+        if (_questIconCache.TryGetValue(type, out var cached))
+            return cached;
+
+        var iconName = type switch
+        {
+            QuestObjectiveType.Mark => "Quest_Mark",
+            QuestObjectiveType.Visit => "Quest_Visit",
+            QuestObjectiveType.Stash => "Quest_Stash",
+            QuestObjectiveType.Kill => "Quest_Kill",
+            QuestObjectiveType.Survive => "Quest_Survive",
+            QuestObjectiveType.HandOver => "Quest_HandOver",
+            QuestObjectiveType.Collect => "Quest_Collect",
+            QuestObjectiveType.Build => "Quest_Build",
+            QuestObjectiveType.Task => "Quest_Task",
+            _ => "Quest_Custom"
+        };
+
+        var iconPath = System.IO.Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "Assets", "DB", "Icons", $"{iconName}.svg");
+
+        if (!System.IO.File.Exists(iconPath))
+        {
+            _questIconCache[type] = null;
+            return null;
+        }
+
+        try
+        {
+            var settings = new WpfDrawingSettings
+            {
+                IncludeRuntime = true,
+                TextAsGeometry = false
+            };
+
+            using var reader = new FileSvgReader(settings);
+            var drawing = reader.Read(iconPath);
+            if (drawing != null)
+            {
+                var image = new DrawingImage(drawing);
+                image.Freeze();
+                _questIconCache[type] = image;
+                return image;
+            }
+        }
+        catch
+        {
+            // Ignore SVG loading errors
+        }
+
+        _questIconCache[type] = null;
+        return null;
+    }
+
+    /// <summary>
+    /// Highlight a quest card in the panel by scrolling to it and applying visual highlight
     /// </summary>
     private void HighlightQuestInPanel(string questId, string? objectiveDescription = null)
     {
@@ -1211,27 +1465,18 @@ public partial class MapTrackerPage : UserControl
             ToggleQuestPanel();
         }
 
-        // Find the quest in the panel
-        var questItem = _questPanelItems.FirstOrDefault(q =>
-            q.QuestId == questId &&
-            (objectiveDescription == null || q.ObjectiveDescription == objectiveDescription));
-
-        if (questItem == null)
-        {
-            // Fallback: find by quest ID only
-            questItem = _questPanelItems.FirstOrDefault(q => q.QuestId == questId);
-        }
-
-        if (questItem == null) return;
+        // Find the quest card in the panel
+        var questCard = _questCards.FirstOrDefault(c => c.QuestId == questId);
+        if (questCard == null) return;
 
         // Clear previous highlight
         ClearQuestHighlight();
 
         // Set new highlight
-        _highlightedQuestItem = questItem;
+        _highlightedQuestCard = questCard;
 
         // Find the container in the ItemsControl
-        var index = _questPanelItems.IndexOf(questItem);
+        var index = _questCards.IndexOf(questCard);
         if (index >= 0)
         {
             // Scroll to the item
@@ -1269,8 +1514,201 @@ public partial class MapTrackerPage : UserControl
 
     private void ClearQuestHighlight()
     {
-        _highlightedQuestItem = null;
+        _highlightedQuestCard = null;
     }
+
+    #region Quest Card Event Handlers
+
+    /// <summary>
+    /// Handle quest card click to toggle expand/collapse
+    /// </summary>
+    private void QuestCard_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.Tag is QuestCardDisplay card)
+        {
+            card.IsExpanded = !card.IsExpanded;
+        }
+    }
+
+    /// <summary>
+    /// Handle quest card mouse enter for bidirectional hover
+    /// </summary>
+    private void QuestCard_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.Tag is QuestCardDisplay card)
+        {
+            _hoveredPanelQuestId = card.QuestId;
+            HighlightMapMarkersForQuest(card.QuestId);
+        }
+    }
+
+    /// <summary>
+    /// Handle quest card mouse leave
+    /// </summary>
+    private void QuestCard_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _hoveredPanelQuestId = null;
+        ClearMapMarkerHighlights();
+    }
+
+    /// <summary>
+    /// Handle objective item click to focus on that location
+    /// </summary>
+    private void ObjectiveItem_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.Tag is QuestObjectiveItem objItem)
+        {
+            if (objItem.X != 0 || objItem.Z != 0)
+            {
+                FocusOnCoordinates(objItem.X, objItem.Z);
+            }
+            e.Handled = true;  // Prevent card click
+        }
+    }
+
+    /// <summary>
+    /// Handle focus button click on objective
+    /// </summary>
+    private void BtnFocusObjective_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is QuestObjectiveItem objItem)
+        {
+            if (objItem.X != 0 || objItem.Z != 0)
+            {
+                FocusOnCoordinates(objItem.X, objItem.Z);
+            }
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Handle click on quest item in tooltip cluster list
+    /// </summary>
+    private void TooltipQuestItem_Click(object sender, MouseButtonEventArgs e)
+    {
+        // Currently the tooltip cluster list shows quest names as strings
+        // This handler is a placeholder for future enhancement
+        // when we bind proper quest objects to the list
+    }
+
+    #endregion
+
+    #region Bidirectional Hover Highlighting
+
+    /// <summary>
+    /// Highlight map markers for a specific quest (when panel card is hovered)
+    /// </summary>
+    private void HighlightMapMarkersForQuest(string questId)
+    {
+        // Clear any previous highlights first
+        ClearMapMarkerHighlights();
+
+        // Find all hit regions for this quest and draw highlight rings
+        foreach (var region in _questHitRegions.Where(r => r.Objective.QuestId == questId))
+        {
+            DrawMarkerHighlightRing(region.ScreenX, region.ScreenY);
+        }
+    }
+
+    /// <summary>
+    /// Draw a highlight ring around a map marker
+    /// </summary>
+    private void DrawMarkerHighlightRing(double x, double y)
+    {
+        var ring = new Ellipse
+        {
+            Width = 24,
+            Height = 24,
+            Stroke = new SolidColorBrush(Color.FromRgb(0x00, 0xB4, 0xD8)),  // Accent color
+            StrokeThickness = 2,
+            Fill = Brushes.Transparent,
+            Opacity = 0.8,
+            Tag = "HighlightRing"
+        };
+
+        Canvas.SetLeft(ring, x - 12);
+        Canvas.SetTop(ring, y - 12);
+        ObjectivesCanvas.Children.Add(ring);
+    }
+
+    /// <summary>
+    /// Clear all map marker highlight rings
+    /// </summary>
+    private void ClearMapMarkerHighlights()
+    {
+        var ringsToRemove = ObjectivesCanvas.Children.OfType<Ellipse>()
+            .Where(e => e.Tag as string == "HighlightRing")
+            .ToList();
+
+        foreach (var ring in ringsToRemove)
+        {
+            ObjectivesCanvas.Children.Remove(ring);
+        }
+    }
+
+    /// <summary>
+    /// Highlight quest card in panel when map marker is hovered
+    /// </summary>
+    private void HighlightQuestCardOnHover(string questId)
+    {
+        if (_hoveredMapQuestId == questId) return;
+
+        _hoveredMapQuestId = questId;
+
+        // Find the quest card and highlight it
+        var card = _questCards.FirstOrDefault(c => c.QuestId == questId);
+        if (card == null) return;
+
+        // Find and highlight the container
+        var index = _questCards.IndexOf(card);
+        if (index >= 0)
+        {
+            QuestList.UpdateLayout();
+            var container = QuestList.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement;
+            if (container is ContentPresenter presenter)
+            {
+                var border = FindVisualChild<Border>(presenter);
+                if (border != null)
+                {
+                    border.Background = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x3A));
+                }
+            }
+
+            // Scroll to the item
+            container?.BringIntoView();
+        }
+    }
+
+    /// <summary>
+    /// Clear quest card hover highlight
+    /// </summary>
+    private void ClearQuestCardHoverHighlight()
+    {
+        if (_hoveredMapQuestId == null) return;
+
+        var previousId = _hoveredMapQuestId;
+        _hoveredMapQuestId = null;
+
+        // Find and restore the container
+        var card = _questCards.FirstOrDefault(c => c.QuestId == previousId);
+        if (card == null) return;
+
+        var index = _questCards.IndexOf(card);
+        if (index >= 0)
+        {
+            var container = QuestList.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement;
+            if (container is ContentPresenter presenter)
+            {
+                var border = FindVisualChild<Border>(presenter);
+                if (border != null)
+                {
+                    border.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0x2E, 0x2E));  // BgL3
+                }
+            }
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Find a child element of a specific type in the visual tree
@@ -2932,6 +3370,10 @@ public partial class MapTrackerPage : UserControl
                 // Update tooltip position
                 PositionTooltip(questViewerPos);
             }
+
+            // Bidirectional hover: highlight quest card in panel
+            HighlightQuestCardOnHover(foundQuestRegion.Objective.QuestId);
+
             MapCanvas.Cursor = Cursors.Hand;
         }
         else
@@ -2950,6 +3392,9 @@ public partial class MapTrackerPage : UserControl
                 _hoveredOptionalGroupObjective = null;
                 UpdateOptionalGroupHighlight(null);
             }
+
+            // Clear bidirectional hover highlight
+            ClearQuestCardHoverHighlight();
 
             MapCanvas.Cursor = Cursors.Arrow;
         }

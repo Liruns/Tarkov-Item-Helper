@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:svgc="http://sharpvectors.codeplex.com/svgc/"
+             xmlns:local="clr-namespace:TarkovHelper.Pages"
              mc:Ignorable="d"
              d:DesignHeight="700" d:DesignWidth="1200"
              Background="#0D0D0D"
@@ -27,6 +28,10 @@
         <SolidColorBrush x:Key="Success" Color="#10B981"/>
         <SolidColorBrush x:Key="Warning" Color="#F59E0B"/>
         <SolidColorBrush x:Key="Danger" Color="#EF4444"/>
+
+        <!-- Converters -->
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <local:ProgressToWidthConverter x:Key="ProgressToWidthConverter"/>
 
         <!-- Marker Colors -->
         <SolidColorBrush x:Key="MarkerExtract" Color="#22C55E"/>
@@ -154,6 +159,52 @@
                     <Setter Property="Background" Value="{StaticResource BgHover}"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <!-- Quest Card Style (for grouped quest cards) -->
+        <Style x:Key="QuestCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource BgL3}"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource BgHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Objective Item Style (for expanded objectives) -->
+        <Style x:Key="ObjectiveItemStyle" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="4,3"/>
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#20FFFFFF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Progress Bar Style -->
+        <Style x:Key="QuestProgressBarStyle" TargetType="ProgressBar">
+            <Setter Property="Height" Value="3"/>
+            <Setter Property="Background" Value="{StaticResource BgL1}"/>
+            <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}" CornerRadius="1.5"/>
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="1.5"
+                                    Background="{TemplateBinding Foreground}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </UserControl.Resources>
 
@@ -294,33 +345,83 @@
                                   Checked="QuestFilter_Changed" Unchecked="QuestFilter_Changed"/>
                     </StackPanel>
 
-                    <!-- Quest List -->
+                    <!-- Quest List (Card-based) -->
                     <ScrollViewer x:Name="QuestListScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto"
                                   Padding="8,0" MaxHeight="280">
                         <ItemsControl x:Name="QuestList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Style="{StaticResource QuestItemStyle}"
-                                            MouseLeftButtonDown="QuestItem_Click" Tag="{Binding}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding QuestName}" FontSize="11" FontWeight="SemiBold"
-                                                           Foreground="{StaticResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Text="{Binding ObjectiveDescription}" FontSize="9"
-                                                           Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis"
-                                                           Margin="0,2,0,0"/>
-                                            </StackPanel>
-                                            <Button Grid.Column="1" Width="22" Height="22"
-                                                    Style="{StaticResource IconButtonStyle}"
-                                                    Click="BtnFocusQuest_Click" Tag="{Binding}"
-                                                    ToolTip="Focus on map">
-                                                <TextBlock Text="&#x1F3AF;" FontSize="10"/>
-                                            </Button>
-                                        </Grid>
+                                    <Border x:Name="CardBorder" Background="#242424" CornerRadius="4" Padding="8,6" Margin="0,0,0,4"
+                                            MouseLeftButtonDown="QuestCard_Click"
+                                            MouseEnter="QuestCard_MouseEnter"
+                                            MouseLeave="QuestCard_MouseLeave"
+                                            Tag="{Binding}">
+                                        <StackPanel>
+                                            <!-- Card Header -->
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="18"/>   <!-- Icon -->
+                                                    <ColumnDefinition Width="*"/>    <!-- Name -->
+                                                    <ColumnDefinition Width="Auto"/> <!-- Progress -->
+                                                    <ColumnDefinition Width="20"/>   <!-- Expand -->
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Type Icon -->
+                                                <Image Grid.Column="0" Source="{Binding TypeIcon}" Width="14" Height="14"
+                                                       VerticalAlignment="Center" Margin="0,0,4,0"/>
+
+                                                <!-- Quest Name -->
+                                                <TextBlock Grid.Column="1" Text="{Binding QuestName}" FontSize="10"
+                                                           Foreground="#E8E8E8" TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center"/>
+
+                                                <!-- Progress Bar + Text -->
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
+                                                    <Grid Width="40" Height="3" Margin="0,0,6,0">
+                                                        <Border Background="#141414" CornerRadius="1.5"/>
+                                                        <Border Background="#00B4D8" CornerRadius="1.5" HorizontalAlignment="Left"
+                                                                Width="{Binding ProgressPercent, Converter={StaticResource ProgressToWidthConverter}}"/>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding ProgressText}" FontSize="9" Foreground="#888888"/>
+                                                </StackPanel>
+
+                                                <!-- Expand/Collapse Icon -->
+                                                <TextBlock Grid.Column="3" Text="{Binding ExpandIcon}" FontSize="8"
+                                                           Foreground="#666666" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Grid>
+
+                                            <!-- Objectives List (Expandable) -->
+                                            <ItemsControl ItemsSource="{Binding Objectives}"
+                                                          Visibility="{Binding ObjectivesVisibility}"
+                                                          Margin="18,6,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Padding="4,3" Margin="0,1" CornerRadius="2"
+                                                                Background="#1A1A1A" Cursor="Hand"
+                                                                MouseLeftButtonDown="ObjectiveItem_Click"
+                                                                Tag="{Binding}">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="14"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                </Grid.ColumnDefinitions>
+
+                                                                <!-- Objective Icon -->
+                                                                <Image Grid.Column="0" Source="{Binding TypeIcon}" Width="10" Height="10"
+                                                                       VerticalAlignment="Center"/>
+
+                                                                <!-- Objective Description -->
+                                                                <TextBlock Grid.Column="1" Text="{Binding Description}" FontSize="9"
+                                                                           Foreground="{Binding CompletedForeground}"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           TextDecorations="{Binding CompletedDecoration}"
+                                                                           Margin="4,0,0,0"/>
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -475,11 +576,23 @@
                         <ItemsControl x:Name="TooltipClusterList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Orientation="Horizontal" Margin="0,2">
-                                        <Ellipse Width="6" Height="6" Fill="{StaticResource MarkerQuest}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="{Binding}" FontSize="10" Foreground="{StaticResource TextPrimary}"
-                                                   TextTrimming="CharacterEllipsis" MaxWidth="200"/>
-                                    </StackPanel>
+                                    <Border Background="Transparent" Cursor="Hand" Margin="0,2"
+                                            MouseLeftButtonDown="TooltipQuestItem_Click" Tag="{Binding}">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="#30FFFFFF"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel Orientation="Horizontal" Margin="4,2">
+                                            <Ellipse Width="6" Height="6" Fill="{Binding TypeColorBrush}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding QuestName}" FontSize="10" Foreground="{StaticResource TextPrimary}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="200"/>
+                                        </StackPanel>
+                                    </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
