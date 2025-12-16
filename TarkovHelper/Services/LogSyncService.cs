@@ -578,15 +578,19 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
-        /// Apply quest changes after user confirmation
+        /// Apply quest changes after user confirmation (batch processing for performance)
         /// </summary>
-        public void ApplyQuestChanges(List<QuestChangeInfo> changes)
+        public async Task ApplyQuestChangesAsync(List<QuestChangeInfo> changes)
         {
             var progressService = QuestProgressService.Instance;
+            var selectedChanges = changes.Where(c => c.IsSelected).ToList();
 
-            System.Diagnostics.Debug.WriteLine($"[LogSyncService] ApplyQuestChanges: {changes.Count} total changes, {changes.Count(c => c.IsSelected)} selected");
+            System.Diagnostics.Debug.WriteLine($"[LogSyncService] ApplyQuestChangesAsync: {changes.Count} total changes, {selectedChanges.Count} selected");
 
-            foreach (var change in changes.Where(c => c.IsSelected))
+            // Build batch of changes
+            var batchChanges = new List<(TarkovTask Task, QuestStatus Status)>();
+
+            foreach (var change in selectedChanges)
             {
                 var task = progressService.GetTask(change.NormalizedName);
                 if (task == null)
@@ -595,22 +599,37 @@ namespace TarkovHelper.Services
                     continue;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"[LogSyncService] Applying change: {change.NormalizedName} -> {change.ChangeType}");
-
-                switch (change.ChangeType)
+                var status = change.ChangeType switch
                 {
-                    case QuestEventType.Completed:
-                        progressService.CompleteQuest(task, completePrerequisites: false);
-                        System.Diagnostics.Debug.WriteLine($"[LogSyncService] Completed quest: {task.Name}");
-                        break;
-                    case QuestEventType.Failed:
-                        progressService.FailQuest(task);
-                        System.Diagnostics.Debug.WriteLine($"[LogSyncService] Failed quest: {task.Name}");
-                        break;
+                    QuestEventType.Completed => QuestStatus.Done,
+                    QuestEventType.Failed => QuestStatus.Failed,
+                    _ => QuestStatus.Active
+                };
+
+                if (status != QuestStatus.Active)
+                {
+                    batchChanges.Add((task, status));
+                    System.Diagnostics.Debug.WriteLine($"[LogSyncService] Queued change: {change.NormalizedName} -> {change.ChangeType}");
                 }
             }
 
-            System.Diagnostics.Debug.WriteLine("[LogSyncService] ApplyQuestChanges completed");
+            // Apply all changes in one batch (single DB transaction, single UI update)
+            if (batchChanges.Count > 0)
+            {
+                await progressService.ApplyQuestChangesBatchAsync(batchChanges);
+                System.Diagnostics.Debug.WriteLine($"[LogSyncService] Batch applied {batchChanges.Count} quest changes");
+            }
+
+            System.Diagnostics.Debug.WriteLine("[LogSyncService] ApplyQuestChangesAsync completed");
+        }
+
+        /// <summary>
+        /// Apply quest changes after user confirmation (legacy sync method, calls async internally)
+        /// </summary>
+        [Obsolete("Use ApplyQuestChangesAsync for better performance")]
+        public void ApplyQuestChanges(List<QuestChangeInfo> changes)
+        {
+            Task.Run(async () => await ApplyQuestChangesAsync(changes)).GetAwaiter().GetResult();
         }
 
         /// <summary>

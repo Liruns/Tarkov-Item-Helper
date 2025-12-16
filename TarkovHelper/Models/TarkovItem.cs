@@ -60,5 +60,11 @@ namespace TarkovHelper.Models
         /// </summary>
         [JsonPropertyName("wikiLink")]
         public string? WikiLink { get; set; }
+
+        /// <summary>
+        /// Item category (e.g., "Barter item", "Quest item", etc.)
+        /// </summary>
+        [JsonPropertyName("category")]
+        public string? Category { get; set; }
     }
 }

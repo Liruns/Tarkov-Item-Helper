@@ -184,7 +184,8 @@ public sealed class ItemDbService
                 NameJa = reader.IsDBNull(5) ? null : reader.GetString(5),
                 ShortName = reader.IsDBNull(6) ? null : reader.GetString(6),
                 WikiLink = reader.IsDBNull(9) ? null : reader.GetString(9),
-                IconLink = reader.IsDBNull(10) ? null : reader.GetString(10)
+                IconLink = reader.IsDBNull(10) ? null : reader.GetString(10),
+                Category = reader.IsDBNull(11) ? null : reader.GetString(11)
             };
 
             items.Add(item);

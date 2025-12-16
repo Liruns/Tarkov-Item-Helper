@@ -44,6 +44,9 @@ public partial class MainWindow : Window
         _settingsService.PlayerLevelChanged += OnPlayerLevelChanged;
         _settingsService.ScavRepChanged += OnScavRepChanged;
         _settingsService.DspDecodeCountChanged += OnDspDecodeCountChanged;
+        _settingsService.HasEodEditionChanged += OnEditionChanged;
+        _settingsService.HasUnheardEditionChanged += OnEditionChanged;
+        _settingsService.PrestigeLevelChanged += OnPrestigeLevelChanged;
 
         // Apply dark title bar
         SourceInitialized += (s, e) => EnableDarkTitleBar();
@@ -100,6 +103,10 @@ public partial class MainWindow : Window
 
         // Initialize DSP Decode Count UI
         UpdateDspDecodeUI();
+
+        // Initialize Edition and Prestige Level UI
+        UpdateEditionUI();
+        UpdatePrestigeLevelUI();
 
         UpdateAllLocalizedText();
 
@@ -581,6 +588,97 @@ public partial class MainWindow : Window
 
     #endregion
 
+    #region Edition Settings
+
+    /// <summary>
+    /// Update Edition UI checkboxes
+    /// </summary>
+    private void UpdateEditionUI()
+    {
+        ChkEodEdition.IsChecked = _settingsService.HasEodEdition;
+        ChkUnheardEdition.IsChecked = _settingsService.HasUnheardEdition;
+    }
+
+    /// <summary>
+    /// Handle edition checkbox change
+    /// </summary>
+    private void ChkEdition_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading) return;
+
+        if (sender == ChkEodEdition)
+        {
+            _settingsService.HasEodEdition = ChkEodEdition.IsChecked == true;
+        }
+        else if (sender == ChkUnheardEdition)
+        {
+            _settingsService.HasUnheardEdition = ChkUnheardEdition.IsChecked == true;
+        }
+    }
+
+    /// <summary>
+    /// Handle edition change from settings service
+    /// </summary>
+    private void OnEditionChanged(object? sender, bool value)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            UpdateEditionUI();
+
+            // Refresh quest list if visible
+            _questListPage?.RefreshDisplay();
+        });
+    }
+
+    #endregion
+
+    #region Prestige Level
+
+    /// <summary>
+    /// Update Prestige Level UI
+    /// </summary>
+    private void UpdatePrestigeLevelUI()
+    {
+        var prestigeLevel = _settingsService.PrestigeLevel;
+        TxtPrestigeLevel.Text = prestigeLevel.ToString();
+
+        // Disable buttons at min/max prestige level
+        BtnPrestigeDown.IsEnabled = prestigeLevel > SettingsService.MinPrestigeLevel;
+        BtnPrestigeUp.IsEnabled = prestigeLevel < SettingsService.MaxPrestigeLevel;
+    }
+
+    /// <summary>
+    /// Handle prestige level decrease
+    /// </summary>
+    private void BtnPrestigeDown_Click(object sender, RoutedEventArgs e)
+    {
+        _settingsService.PrestigeLevel--;
+    }
+
+    /// <summary>
+    /// Handle prestige level increase
+    /// </summary>
+    private void BtnPrestigeUp_Click(object sender, RoutedEventArgs e)
+    {
+        _settingsService.PrestigeLevel++;
+    }
+
+    /// <summary>
+    /// Handle prestige level change from settings service
+    /// </summary>
+    private void OnPrestigeLevelChanged(object? sender, int newLevel)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            UpdatePrestigeLevelUI();
+
+            // Refresh quest list if visible
+            _questListPage?.RefreshDisplay();
+        });
+    }
+
+    #endregion
+
     /// <summary>
     /// Open Buy me a coffee page
     /// </summary>
@@ -629,6 +727,22 @@ public partial class MainWindow : Window
                 MessageBoxImage.Information);
         }
     }
+
+    #region Profile Drawer
+
+    private bool _isProfileDrawerOpen = false;
+
+    /// <summary>
+    /// Toggle profile drawer visibility
+    /// </summary>
+    private void BtnProfile_Click(object sender, RoutedEventArgs e)
+    {
+        _isProfileDrawerOpen = !_isProfileDrawerOpen;
+        ProfileDrawer.Visibility = _isProfileDrawerOpen ? Visibility.Visible : Visibility.Collapsed;
+        BtnProfile.Content = _isProfileDrawerOpen ? "▲ Profile" : "▼ Profile";
+    }
+
+    #endregion
 
     #region Settings
 
@@ -1503,10 +1617,7 @@ public partial class MainWindow : Window
             _ => "Updating quest progress..."
         });
 
-        await Task.Run(() =>
-        {
-            _logSyncService.ApplyQuestChanges(selectedChanges);
-        });
+        await _logSyncService.ApplyQuestChangesAsync(selectedChanges);
 
         HideLoadingOverlay();
 

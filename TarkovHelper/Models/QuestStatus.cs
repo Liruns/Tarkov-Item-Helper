@@ -28,6 +28,11 @@ namespace TarkovHelper.Models
         /// <summary>
         /// Prerequisites met but player level too low
         /// </summary>
-        LevelLocked
+        LevelLocked,
+
+        /// <summary>
+        /// Quest is not available due to edition or prestige level requirements
+        /// </summary>
+        Unavailable
     }
 }

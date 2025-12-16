@@ -120,6 +120,30 @@ namespace TarkovHelper.Models
         public string? Faction { get; set; }
 
         /// <summary>
+        /// Required game edition for this quest (e.g., "eod", "unheard")
+        /// </summary>
+        [JsonPropertyName("requiredEdition")]
+        public string? RequiredEdition { get; set; }
+
+        /// <summary>
+        /// Excluded game edition for this quest (e.g., "unheard")
+        /// </summary>
+        [JsonPropertyName("excludedEdition")]
+        public string? ExcludedEdition { get; set; }
+
+        /// <summary>
+        /// Required prestige level for this quest (0-5)
+        /// </summary>
+        [JsonPropertyName("requiredPrestigeLevel")]
+        public int? RequiredPrestigeLevel { get; set; }
+
+        /// <summary>
+        /// Required DSP decode count for this quest (for Make Amends quest branches)
+        /// </summary>
+        [JsonPropertyName("requiredDecodeCount")]
+        public int? RequiredDecodeCount { get; set; }
+
+        /// <summary>
         /// Alternative quests (mutually exclusive - completing one fails the others)
         /// These are "Other choices" quests from wiki's |related field
         /// </summary>
@@ -147,7 +171,13 @@ namespace TarkovHelper.Models
     public class TaskRequirement
     {
         /// <summary>
-        /// Normalized name of the required task
+        /// Database ID of the required task (primary identifier)
+        /// </summary>
+        [JsonPropertyName("taskId")]
+        public string TaskId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Normalized name of the required task (deprecated, kept for backwards compatibility)
         /// </summary>
         [JsonPropertyName("taskNormalizedName")]
         public string TaskNormalizedName { get; set; } = string.Empty;
@@ -158,6 +188,14 @@ namespace TarkovHelper.Models
         /// </summary>
         [JsonPropertyName("status")]
         public List<string>? Status { get; set; }
+
+        /// <summary>
+        /// OR group ID for prerequisite requirements.
+        /// GroupId = 0: AND condition (must be completed)
+        /// GroupId > 0: OR condition (any one in the same group must be satisfied)
+        /// </summary>
+        [JsonPropertyName("groupId")]
+        public int GroupId { get; set; }
     }
 
     /// <summary>

@@ -164,6 +164,10 @@ public sealed class QuestDbService
         // 동적으로 존재하는 컬럼 확인
         var hasNormalizedName = await ColumnExistsAsync(connection, "Quests", "NormalizedName");
         var hasBsgId = await ColumnExistsAsync(connection, "Quests", "BsgId");
+        var hasRequiredEdition = await ColumnExistsAsync(connection, "Quests", "RequiredEdition");
+        var hasExcludedEdition = await ColumnExistsAsync(connection, "Quests", "ExcludedEdition");
+        var hasRequiredPrestigeLevel = await ColumnExistsAsync(connection, "Quests", "RequiredPrestigeLevel");
+        var hasRequiredDecodeCount = await ColumnExistsAsync(connection, "Quests", "RequiredDecodeCount");
         System.Diagnostics.Debug.WriteLine($"[QuestDbService] BsgId column exists: {hasBsgId}");
 
         // NormalizedName이 없으면 Name에서 생성
@@ -178,7 +182,11 @@ public sealed class QuestDbService
                 Name, NameKO, NameJA,
                 Trader, Location, MinLevel, MinScavKarma,
                 KappaRequired, Faction,
-                {normalizedNameExpr} as NormalizedName
+                {normalizedNameExpr} as NormalizedName,
+                {(hasRequiredEdition ? "RequiredEdition" : "NULL")} as RequiredEdition,
+                {(hasExcludedEdition ? "ExcludedEdition" : "NULL")} as ExcludedEdition,
+                {(hasRequiredPrestigeLevel ? "RequiredPrestigeLevel" : "NULL")} as RequiredPrestigeLevel,
+                {(hasRequiredDecodeCount ? "RequiredDecodeCount" : "NULL")} as RequiredDecodeCount
             FROM Quests
             ORDER BY Name";
 
@@ -202,7 +210,11 @@ public sealed class QuestDbService
                 RequiredScavKarma = reader.IsDBNull(8) ? null : reader.GetDouble(8),
                 ReqKappa = !reader.IsDBNull(9) && reader.GetInt32(9) == 1,
                 Faction = reader.IsDBNull(10) ? null : reader.GetString(10),
-                NormalizedName = reader.IsDBNull(11) ? GenerateNormalizedName(reader.GetString(2)) : reader.GetString(11)
+                NormalizedName = reader.IsDBNull(11) ? GenerateNormalizedName(reader.GetString(2)) : reader.GetString(11),
+                RequiredEdition = reader.IsDBNull(12) ? null : reader.GetString(12),
+                ExcludedEdition = reader.IsDBNull(13) ? null : reader.GetString(13),
+                RequiredPrestigeLevel = reader.IsDBNull(14) ? null : reader.GetInt32(14),
+                RequiredDecodeCount = reader.IsDBNull(15) ? null : reader.GetInt32(15)
             };
 
             // BsgId가 있으면 Ids에 추가
@@ -309,17 +321,19 @@ public sealed class QuestDbService
                 quest.Previous.Add(requiredNormalizedName);
             }
 
-            // TaskRequirements에 상세 정보 추가
+            // TaskRequirements에 상세 정보 추가 (GroupId 포함)
             quest.TaskRequirements ??= new List<TaskRequirement>();
             var existing = quest.TaskRequirements.FirstOrDefault(r =>
-                r.TaskNormalizedName.Equals(requiredNormalizedName, StringComparison.OrdinalIgnoreCase));
+                r.TaskId.Equals(requiredQuestId, StringComparison.OrdinalIgnoreCase));
 
             if (existing == null)
             {
                 quest.TaskRequirements.Add(new TaskRequirement
                 {
-                    TaskNormalizedName = requiredNormalizedName,
-                    Status = new List<string> { requirementType.ToLowerInvariant() }
+                    TaskId = requiredQuestId,
+                    TaskNormalizedName = requiredNormalizedName ?? "",
+                    Status = new List<string> { requirementType.ToLowerInvariant() },
+                    GroupId = groupId
                 });
             }
         }

@@ -27,6 +27,9 @@ public class SettingsService
     private const string KeyBaseFontSize = "app.baseFontSize";
     private const string KeyDspDecodeCount = "app.dspDecodeCount";
     private const string KeyPlayerFaction = "app.playerFaction";
+    private const string KeyHasEodEdition = "app.hasEodEdition";
+    private const string KeyHasUnheardEdition = "app.hasUnheardEdition";
+    private const string KeyPrestigeLevel = "app.prestigeLevel";
 
     // Map settings keys
     private const string KeyMapDrawerOpen = "map.drawerOpen";
@@ -84,6 +87,9 @@ public class SettingsService
     private double? _baseFontSize;
     private int? _dspDecodeCount;
     private string? _playerFaction;
+    private bool? _hasEodEdition;
+    private bool? _hasUnheardEdition;
+    private int? _prestigeLevel;
 
     // Map cached values
     private bool? _mapDrawerOpen;
@@ -129,6 +135,9 @@ public class SettingsService
     public event EventHandler<double>? BaseFontSizeChanged;
     public event EventHandler<int>? DspDecodeCountChanged;
     public event EventHandler<string?>? PlayerFactionChanged;
+    public event EventHandler<bool>? HasEodEditionChanged;
+    public event EventHandler<bool>? HasUnheardEditionChanged;
+    public event EventHandler<int>? PrestigeLevelChanged;
 
     private SettingsService()
     {
@@ -163,6 +172,13 @@ public class SettingsService
     public const int MinDspDecodeCount = 0;
     public const int MaxDspDecodeCount = 3;
     public const int DefaultDspDecodeCount = 0;
+
+    /// <summary>
+    /// Prestige level constants
+    /// </summary>
+    public const int MinPrestigeLevel = 0;
+    public const int MaxPrestigeLevel = 5;
+    public const int DefaultPrestigeLevel = 0;
 
     /// <summary>
     /// Player level for quest filtering
@@ -387,6 +403,70 @@ public class SettingsService
             return true;
 
         return string.Equals(taskFaction, playerFaction, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Whether player has Edge of Darkness edition
+    /// </summary>
+    public bool HasEodEdition
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _hasEodEdition ?? false;
+        }
+        set
+        {
+            if (_hasEodEdition != value)
+            {
+                _hasEodEdition = value;
+                SaveSetting(KeyHasEodEdition, value.ToString());
+                HasEodEditionChanged?.Invoke(this, value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether player has The Unheard edition
+    /// </summary>
+    public bool HasUnheardEdition
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _hasUnheardEdition ?? false;
+        }
+        set
+        {
+            if (_hasUnheardEdition != value)
+            {
+                _hasUnheardEdition = value;
+                SaveSetting(KeyHasUnheardEdition, value.ToString());
+                HasUnheardEditionChanged?.Invoke(this, value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Player's prestige level (0-5)
+    /// </summary>
+    public int PrestigeLevel
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _prestigeLevel ?? DefaultPrestigeLevel;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, MinPrestigeLevel, MaxPrestigeLevel);
+            if (_prestigeLevel != clampedValue)
+            {
+                _prestigeLevel = clampedValue;
+                SaveSetting(KeyPrestigeLevel, clampedValue.ToString());
+                PrestigeLevelChanged?.Invoke(this, clampedValue);
+            }
+        }
     }
 
     #region Map Settings
@@ -1520,6 +1600,15 @@ public class SettingsService
 
             _playerFaction = _userDataDb.GetSetting(KeyPlayerFaction);
             if (string.IsNullOrEmpty(_playerFaction)) _playerFaction = null;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyHasEodEdition), out var hasEod))
+                _hasEodEdition = hasEod;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyHasUnheardEdition), out var hasUnheard))
+                _hasUnheardEdition = hasUnheard;
+
+            if (int.TryParse(_userDataDb.GetSetting(KeyPrestigeLevel), out var prestige))
+                _prestigeLevel = prestige;
 
             // Load Map settings
             if (bool.TryParse(_userDataDb.GetSetting(KeyMapDrawerOpen), out var drawerOpen))

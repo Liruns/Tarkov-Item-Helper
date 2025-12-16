@@ -241,6 +241,49 @@ public sealed class UserDataDbService
     }
 
     /// <summary>
+    /// 여러 퀘스트 진행 상태를 배치로 저장 (트랜잭션 사용)
+    /// </summary>
+    public async Task SaveQuestProgressBatchAsync(IEnumerable<(string Id, string? NormalizedName, QuestStatus Status)> progressItems)
+    {
+        await InitializeAsync();
+
+        var connectionString = $"Data Source={_databasePath}";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+
+        await using var transaction = await connection.BeginTransactionAsync();
+        try
+        {
+            var sql = @"
+                INSERT INTO QuestProgress (Id, NormalizedName, Status, UpdatedAt)
+                VALUES (@id, @normalizedName, @status, @updatedAt)
+                ON CONFLICT(Id) DO UPDATE SET
+                    NormalizedName = @normalizedName,
+                    Status = @status,
+                    UpdatedAt = @updatedAt";
+
+            var updatedAt = DateTime.UtcNow.ToString("o");
+
+            foreach (var item in progressItems)
+            {
+                await using var cmd = new SqliteCommand(sql, connection, (SqliteTransaction)transaction);
+                cmd.Parameters.AddWithValue("@id", item.Id);
+                cmd.Parameters.AddWithValue("@normalizedName", item.NormalizedName ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@status", item.Status.ToString());
+                cmd.Parameters.AddWithValue("@updatedAt", updatedAt);
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// 퀘스트 진행 상태 삭제 (리셋)
     /// </summary>
     public async Task DeleteQuestProgressAsync(string id)
