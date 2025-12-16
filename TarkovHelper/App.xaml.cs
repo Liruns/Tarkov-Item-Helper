@@ -24,6 +24,21 @@ namespace TarkovHelper
         {
             base.OnStartup(e);
 
+            // 전역 예외 처리 - 에러 로그 파일에 기록
+            AppDomain.CurrentDomain.UnhandledException += (s, args) =>
+            {
+                var ex = args.ExceptionObject as Exception;
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash_log.txt");
+                File.WriteAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Unhandled Exception:\n{ex}\n\nStack trace:\n{ex?.StackTrace}");
+            };
+
+            DispatcherUnhandledException += (s, args) =>
+            {
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash_log.txt");
+                File.WriteAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Dispatcher Exception:\n{args.Exception}\n\nStack trace:\n{args.Exception.StackTrace}");
+                args.Handled = false; // 앱 종료 허용
+            };
+
             // 버전 변경 시 캐시 데이터 초기화 (사용자 진행 상황은 유지)
             CheckAndRefreshDataOnVersionChange();
 

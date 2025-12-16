@@ -113,9 +113,157 @@ namespace TarkovHelper.Models
         public List<TarkovTask> CompletedQuests { get; set; } = new();
 
         /// <summary>
+        /// Groups of alternative quests (mutually exclusive) that need user selection
+        /// Each group contains quests where one must be chosen as completed
+        /// </summary>
+        public List<AlternativeQuestGroup> AlternativeQuestGroups { get; set; } = new();
+
+        /// <summary>
+        /// Count of alternative quest groups that need user selection
+        /// </summary>
+        public int AlternativeQuestCount => AlternativeQuestGroups.Count;
+
+        /// <summary>
         /// Whether the sync was successful overall
         /// </summary>
         public bool Success => Errors.Count == 0 || TotalEventsFound > 0;
+    }
+
+    /// <summary>
+    /// A group of mutually exclusive quests where user must select one
+    /// </summary>
+    public class AlternativeQuestGroup
+    {
+        /// <summary>
+        /// List of quests in this group (user selects one)
+        /// </summary>
+        public List<AlternativeQuestChoice> Choices { get; set; } = new();
+
+        /// <summary>
+        /// Whether any quest in this group needs to be selected
+        /// (true if at least one is a prerequisite for a started/completed quest)
+        /// </summary>
+        public bool IsRequired { get; set; }
+    }
+
+    /// <summary>
+    /// A choice within an alternative quest group
+    /// </summary>
+    public class AlternativeQuestChoice
+    {
+        /// <summary>
+        /// The quest
+        /// </summary>
+        public TarkovTask Task { get; set; } = null!;
+
+        /// <summary>
+        /// Whether this choice is selected
+        /// </summary>
+        public bool IsSelected { get; set; }
+
+        /// <summary>
+        /// Whether this quest is already completed
+        /// </summary>
+        public bool IsCompleted { get; set; }
+
+        /// <summary>
+        /// Whether this quest is already failed
+        /// </summary>
+        public bool IsFailed { get; set; }
+    }
+
+    /// <summary>
+    /// ViewModel for alternative quest group display in sync dialog
+    /// </summary>
+    public class AlternativeQuestGroupViewModel
+    {
+        private static int _groupCounter = 0;
+
+        /// <summary>
+        /// Unique group name for RadioButton grouping
+        /// </summary>
+        public string GroupName { get; set; }
+
+        /// <summary>
+        /// Display label for the group
+        /// </summary>
+        public string GroupLabel { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Choices in this group
+        /// </summary>
+        public List<AlternativeQuestChoiceViewModel> Choices { get; set; } = new();
+
+        /// <summary>
+        /// Original group data
+        /// </summary>
+        public AlternativeQuestGroup OriginalGroup { get; set; } = null!;
+
+        public AlternativeQuestGroupViewModel()
+        {
+            GroupName = $"AltQuestGroup_{++_groupCounter}";
+        }
+
+        /// <summary>
+        /// Reset group counter (call before creating new set of ViewModels)
+        /// </summary>
+        public static void ResetCounter() => _groupCounter = 0;
+    }
+
+    /// <summary>
+    /// ViewModel for alternative quest choice display in sync dialog
+    /// </summary>
+    public class AlternativeQuestChoiceViewModel : System.ComponentModel.INotifyPropertyChanged
+    {
+        private bool _isSelected;
+
+        /// <summary>
+        /// Quest name for display
+        /// </summary>
+        public string QuestName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Group name for RadioButton grouping
+        /// </summary>
+        public string GroupName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether this choice is selected
+        /// </summary>
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                if (_isSelected != value)
+                {
+                    _isSelected = value;
+                    PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(IsSelected)));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether this quest is already completed
+        /// </summary>
+        public bool IsCompleted { get; set; }
+
+        /// <summary>
+        /// Whether this quest is already failed
+        /// </summary>
+        public bool IsFailed { get; set; }
+
+        /// <summary>
+        /// Whether this choice can be selected (not failed)
+        /// </summary>
+        public bool IsEnabled => !IsFailed;
+
+        /// <summary>
+        /// Original choice data
+        /// </summary>
+        public AlternativeQuestChoice OriginalChoice { get; set; } = null!;
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     }
 
     /// <summary>

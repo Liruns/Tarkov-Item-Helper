@@ -613,7 +613,7 @@
             <Border Background="{StaticResource BackgroundDarkBrush}"
                     CornerRadius="8" Padding="24"
                     HorizontalAlignment="Center" VerticalAlignment="Center"
-                    MinWidth="700" MaxWidth="850" MaxHeight="550">
+                    MinWidth="700" MaxWidth="850" MaxHeight="650">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.5"/>
                 </Border.Effect>
@@ -621,6 +621,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
@@ -740,8 +741,78 @@
                         </Border>
                     </Grid>
 
+                    <!-- Alternative Quests Selection (Mutually Exclusive) -->
+                    <Border x:Name="AlternativeQuestsSection" Grid.Row="2"
+                            Background="{StaticResource BackgroundMediumBrush}"
+                            CornerRadius="4" Margin="0,0,0,12"
+                            Visibility="Collapsed">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="#44FFA726"
+                                    CornerRadius="4,4,0,0" Padding="12,8">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="⚠" FontSize="{DynamicResource FontSizeSmall}"
+                                               Foreground="#FFA726" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="TxtAlternativeQuestsHeader"
+                                               Text="Optional Quests - Choose One Per Group"
+                                               FontSize="{DynamicResource FontSizeSmall}" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                                </StackPanel>
+                            </Border>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="120">
+                                <ItemsControl x:Name="AlternativeQuestsList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderThickness="0,0,0,1" BorderBrush="{StaticResource BorderBrush}"
+                                                    Padding="12,8">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding GroupLabel}"
+                                                               FontSize="{DynamicResource FontSizeTiny}"
+                                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                                               Margin="0,0,0,6"/>
+                                                    <ItemsControl ItemsSource="{Binding Choices}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <RadioButton GroupName="{Binding GroupName}"
+                                                                             IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                             Margin="0,0,16,0"
+                                                                             IsEnabled="{Binding IsEnabled}">
+                                                                    <StackPanel Orientation="Horizontal">
+                                                                        <TextBlock Text="{Binding QuestName}"
+                                                                                   FontSize="{DynamicResource FontSizeXSmall}"
+                                                                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                                        <TextBlock Text=" (Done)"
+                                                                                   FontSize="{DynamicResource FontSizeTiny}"
+                                                                                   Foreground="{StaticResource AccentBrush}"
+                                                                                   Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                                                        <TextBlock Text=" (Failed)"
+                                                                                   FontSize="{DynamicResource FontSizeTiny}"
+                                                                                   Foreground="#EF5350"
+                                                                                   Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                                                    </StackPanel>
+                                                                </RadioButton>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+
                     <!-- Summary Stats -->
-                    <Border Grid.Row="2" Background="{StaticResource BackgroundMediumBrush}"
+                    <Border Grid.Row="3" Background="{StaticResource BackgroundMediumBrush}"
                             CornerRadius="4" Padding="12,8" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock x:Name="TxtSyncSummary"
@@ -758,7 +829,7 @@
                     </Border>
 
                     <!-- Action Buttons -->
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button x:Name="BtnCancelSync" Content="Cancel"
                                 Padding="16,8" Margin="0,0,8,0"
                                 Click="BtnCancelSync_Click"/>

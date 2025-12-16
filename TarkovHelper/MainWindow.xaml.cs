@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private MapTrackerPage? _mapTrackerPage;
     private List<HideoutModule>? _hideoutModules;
     private ObservableCollection<QuestChangeInfo>? _pendingSyncChanges;
+    private List<AlternativeQuestGroupViewModel>? _pendingAlternativeGroups;
     private bool _isFullScreen;
 
     // Windows API for dark title bar
@@ -188,6 +189,13 @@ public partial class MainWindow : Window
             {
                 // 마이그레이션을 먼저 수행 (UI 업데이트가 가능하도록 await)
                 await userDataDb.MigrateFromJsonAsync();
+            }
+            catch (Exception ex)
+            {
+                // 마이그레이션 실패 시 로그 파일에 기록
+                var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "migration_error.log");
+                File.WriteAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Migration failed:\n{ex}\n\nStack trace:\n{ex.StackTrace}");
+                throw;
             }
             finally
             {
@@ -1449,17 +1457,19 @@ public partial class MainWindow : Window
                         progressService.FailQuest(task);
                         break;
                     case QuestEventType.Started:
-                        // For started quests, complete all prerequisites
+                        // For started quests, complete all prerequisites in batch
                         var graphService = QuestGraphService.Instance;
                         if (!string.IsNullOrEmpty(task.NormalizedName))
                         {
                             var prereqs = graphService.GetAllPrerequisites(task.NormalizedName);
-                            foreach (var prereq in prereqs)
+                            var prereqsToComplete = prereqs
+                                .Where(p => progressService.GetStatus(p) != QuestStatus.Done)
+                                .ToList();
+
+                            if (prereqsToComplete.Count > 0)
                             {
-                                if (progressService.GetStatus(prereq) != QuestStatus.Done)
-                                {
-                                    progressService.CompleteQuest(prereq, completePrerequisites: false);
-                                }
+                                // Use batch completion for better performance
+                                progressService.CompleteQuestsBatch(prereqsToComplete);
                             }
                         }
                         break;
@@ -1559,10 +1569,73 @@ public partial class MainWindow : Window
         SyncQuestList.ItemsSource = _pendingSyncChanges;
         InProgressQuestList.ItemsSource = result.InProgressQuests;
 
+        // Handle Alternative Quests section
+        if (result.AlternativeQuestGroups.Count > 0)
+        {
+            AlternativeQuestGroupViewModel.ResetCounter();
+            _pendingAlternativeGroups = result.AlternativeQuestGroups
+                .Select(g => CreateAlternativeGroupViewModel(g))
+                .ToList();
+
+            TxtAlternativeQuestsHeader.Text = _loc.CurrentLanguage switch
+            {
+                AppLanguage.KO => $"선택 필요 퀘스트 - 그룹당 하나 선택 ({result.AlternativeQuestGroups.Count}개 그룹)",
+                AppLanguage.JA => $"選択が必要なクエスト - グループごとに1つ選択 ({result.AlternativeQuestGroups.Count}グループ)",
+                _ => $"Optional Quests - Choose One Per Group ({result.AlternativeQuestGroups.Count} groups)"
+            };
+
+            AlternativeQuestsList.ItemsSource = _pendingAlternativeGroups;
+            AlternativeQuestsSection.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            _pendingAlternativeGroups = null;
+            AlternativeQuestsSection.Visibility = Visibility.Collapsed;
+        }
+
         SyncResultOverlay.Visibility = Visibility.Visible;
 
         var blurAnimation = new DoubleAnimation(0, 8, TimeSpan.FromMilliseconds(200));
         BlurEffect.BeginAnimation(System.Windows.Media.Effects.BlurEffect.RadiusProperty, blurAnimation);
+    }
+
+    /// <summary>
+    /// Create ViewModel for alternative quest group
+    /// </summary>
+    private AlternativeQuestGroupViewModel CreateAlternativeGroupViewModel(AlternativeQuestGroup group)
+    {
+        var vm = new AlternativeQuestGroupViewModel
+        {
+            OriginalGroup = group,
+            GroupLabel = _loc.CurrentLanguage switch
+            {
+                AppLanguage.KO => $"선택 그룹: {string.Join(" / ", group.Choices.Select(c => c.Task.Name))}",
+                AppLanguage.JA => $"選択グループ: {string.Join(" / ", group.Choices.Select(c => c.Task.Name))}",
+                _ => $"Choose one: {string.Join(" / ", group.Choices.Select(c => c.Task.Name))}"
+            }
+        };
+
+        foreach (var choice in group.Choices)
+        {
+            var choiceVm = new AlternativeQuestChoiceViewModel
+            {
+                GroupName = vm.GroupName,
+                QuestName = choice.Task.Name,
+                IsCompleted = choice.IsCompleted,
+                IsFailed = choice.IsFailed,
+                IsSelected = choice.IsSelected,
+                OriginalChoice = choice
+            };
+            vm.Choices.Add(choiceVm);
+        }
+
+        // If none selected, select first enabled one
+        if (!vm.Choices.Any(c => c.IsSelected) && vm.Choices.Any(c => c.IsEnabled))
+        {
+            vm.Choices.First(c => c.IsEnabled).IsSelected = true;
+        }
+
+        return vm;
     }
 
     /// <summary>
@@ -1603,6 +1676,45 @@ public partial class MainWindow : Window
 
         var selectedChanges = _pendingSyncChanges.Where(c => c.IsSelected).ToList();
 
+        // Add selected alternative quests to the changes list
+        if (_pendingAlternativeGroups != null)
+        {
+            foreach (var group in _pendingAlternativeGroups)
+            {
+                var selectedChoice = group.Choices.FirstOrDefault(c => c.IsSelected && c.IsEnabled);
+                if (selectedChoice != null)
+                {
+                    var task = selectedChoice.OriginalChoice.Task;
+                    selectedChanges.Add(new QuestChangeInfo
+                    {
+                        QuestName = task.Name,
+                        NormalizedName = task.NormalizedName ?? "",
+                        Trader = task.Trader,
+                        IsPrerequisite = true,
+                        ChangeType = QuestEventType.Completed,
+                        IsSelected = true,
+                        Timestamp = DateTime.Now
+                    });
+
+                    // Fail the other alternatives
+                    foreach (var otherChoice in group.Choices.Where(c => c != selectedChoice && !c.IsCompleted))
+                    {
+                        var otherTask = otherChoice.OriginalChoice.Task;
+                        selectedChanges.Add(new QuestChangeInfo
+                        {
+                            QuestName = otherTask.Name,
+                            NormalizedName = otherTask.NormalizedName ?? "",
+                            Trader = otherTask.Trader,
+                            IsPrerequisite = true,
+                            ChangeType = QuestEventType.Failed,
+                            IsSelected = true,
+                            Timestamp = DateTime.Now
+                        });
+                    }
+                }
+            }
+        }
+
         if (selectedChanges.Count == 0)
         {
             HideSyncResultDialog();
@@ -1624,12 +1736,21 @@ public partial class MainWindow : Window
         // Refresh quest list
         await LoadAndShowQuestListAsync();
 
+        var alternativeCount = _pendingAlternativeGroups?.Count ?? 0;
+        var totalUpdated = selectedChanges.Count;
+
         MessageBox.Show(
             _loc.CurrentLanguage switch
             {
-                AppLanguage.KO => $"{selectedChanges.Count}개의 퀘스트가 업데이트되었습니다.",
-                AppLanguage.JA => $"{selectedChanges.Count}件のクエストが更新されました。",
-                _ => $"{selectedChanges.Count} quests have been updated."
+                AppLanguage.KO => alternativeCount > 0
+                    ? $"{totalUpdated}개의 퀘스트가 업데이트되었습니다.\n(선택 퀘스트 {alternativeCount}개 그룹 포함)"
+                    : $"{totalUpdated}개의 퀘스트가 업데이트되었습니다.",
+                AppLanguage.JA => alternativeCount > 0
+                    ? $"{totalUpdated}件のクエストが更新されました。\n(選択クエスト {alternativeCount}グループ含む)"
+                    : $"{totalUpdated}件のクエストが更新されました。",
+                _ => alternativeCount > 0
+                    ? $"{totalUpdated} quests have been updated.\n(Including {alternativeCount} optional quest groups)"
+                    : $"{totalUpdated} quests have been updated."
             },
             _loc.CurrentLanguage switch { AppLanguage.KO => "동기화 완료", AppLanguage.JA => "同期完了", _ => "Sync Complete" },
             MessageBoxButton.OK,

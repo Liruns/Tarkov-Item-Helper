@@ -200,6 +200,56 @@ namespace TarkovHelper.Services
             return _tasksByBsgId.TryGetValue(bsgId, out var task) ? task : null;
         }
 
+        /// <summary>
+        /// Check if a task has alternative quests (mutually exclusive choices)
+        /// These quests should not be auto-completed as user must choose one
+        /// </summary>
+        public bool HasAlternativeQuests(TarkovTask task)
+        {
+            return task.AlternativeQuests != null && task.AlternativeQuests.Count > 0;
+        }
+
+        /// <summary>
+        /// Get all alternative quest groups (for sync selection UI)
+        /// Returns groups of mutually exclusive quests that need user selection
+        /// </summary>
+        public List<List<TarkovTask>> GetAlternativeQuestGroups()
+        {
+            var groups = new List<List<TarkovTask>>();
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var task in _allTasks)
+            {
+                if (task.NormalizedName == null) continue;
+                if (processed.Contains(task.NormalizedName)) continue;
+                if (!HasAlternativeQuests(task)) continue;
+
+                // Build a group of mutually exclusive quests
+                var group = new List<TarkovTask> { task };
+                processed.Add(task.NormalizedName);
+
+                foreach (var altName in task.AlternativeQuests!)
+                {
+                    if (processed.Contains(altName)) continue;
+
+                    var altTask = GetTask(altName) ?? GetTaskById(altName);
+                    if (altTask != null)
+                    {
+                        group.Add(altTask);
+                        if (altTask.NormalizedName != null)
+                            processed.Add(altTask.NormalizedName);
+                    }
+                }
+
+                if (group.Count > 1)
+                {
+                    groups.Add(group);
+                }
+            }
+
+            return groups;
+        }
+
         // Thread-local visited set for GetStatus to prevent circular reference during status check
         [ThreadStatic]
         private static HashSet<string>? _getStatusVisited;
@@ -556,7 +606,9 @@ namespace TarkovHelper.Services
             System.Diagnostics.Debug.WriteLine($"[QuestProgressService] CompleteQuest: {taskId} ({task.Name}), prerequisites: {completePrerequisites}");
 
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            bool anyChanged = CompleteQuestInternal(task, completePrerequisites, visited);
+            var changedQuests = new List<(string Id, string? NormalizedName, QuestStatus Status)>();
+
+            CompleteQuestInternalOptimized(task, completePrerequisites, visited, changedQuests);
 
             // Fail alternative quests (mutually exclusive)
             if (task.AlternativeQuests != null && task.AlternativeQuests.Count > 0)
@@ -574,7 +626,7 @@ namespace TarkovHelper.Services
                             var altId = altTask.Ids?.FirstOrDefault();
                             var altKey = altId ?? altQuestName;
                             _questProgress[altKey] = QuestStatus.Failed;
-                            anyChanged = true;
+                            changedQuests.Add((altId ?? altKey, altTask.NormalizedName, QuestStatus.Failed));
                             System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Auto-failed alternative quest: {altKey} ({altTask.Name})");
                         }
                     }
@@ -582,16 +634,144 @@ namespace TarkovHelper.Services
             }
 
             // Save and notify only once after all recursive completions
-            if (anyChanged)
+            if (changedQuests.Count > 0)
             {
-                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Saving progress, {_questProgress.Count} entries");
-                SaveProgress();
-                System.Diagnostics.Debug.WriteLine("[QuestProgressService] Progress saved");
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Saving {changedQuests.Count} changed quests (batch)");
+                // Fire-and-forget async save - don't block UI
+                _ = SaveProgressBatchAsync(changedQuests);
+                System.Diagnostics.Debug.WriteLine("[QuestProgressService] Progress save initiated");
                 ProgressChanged?.Invoke(this, EventArgs.Empty);
             }
             else
             {
                 System.Diagnostics.Debug.WriteLine("[QuestProgressService] No changes to save");
+            }
+        }
+
+        /// <summary>
+        /// Optimized internal method to complete quest - collects changes without saving
+        /// Skips alternative quests (mutually exclusive) when completing prerequisites
+        /// </summary>
+        private void CompleteQuestInternalOptimized(TarkovTask task, bool completePrerequisites,
+            HashSet<string> visited, List<(string Id, string? NormalizedName, QuestStatus Status)> changedQuests,
+            bool skipAlternativeQuests = true)
+        {
+            var taskId = task.Ids?.FirstOrDefault();
+            var taskKey = taskId ?? task.NormalizedName;
+
+            if (string.IsNullOrEmpty(taskKey)) return;
+
+            // Prevent circular reference - if already visiting this quest, skip
+            if (!visited.Add(taskKey)) return;
+
+            // Skip if already done (check by both Id and NormalizedName)
+            if (_questProgress.TryGetValue(taskKey, out var currentStatus) && currentStatus == QuestStatus.Done)
+                return;
+            if (!string.IsNullOrEmpty(task.NormalizedName) &&
+                _questProgress.TryGetValue(task.NormalizedName, out var statusByName) && statusByName == QuestStatus.Done)
+                return;
+
+            // Complete prerequisites first (recursive) using TaskRequirements
+            if (completePrerequisites && task.TaskRequirements != null)
+            {
+                foreach (var req in task.TaskRequirements)
+                {
+                    var prevTask = !string.IsNullOrEmpty(req.TaskId)
+                        ? GetTaskById(req.TaskId)
+                        : GetTask(req.TaskNormalizedName);
+
+                    if (prevTask != null && GetStatus(prevTask) != QuestStatus.Done)
+                    {
+                        // Skip alternative quests - user must choose which one to complete
+                        if (skipAlternativeQuests && HasAlternativeQuests(prevTask))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Skipping alternative quest: {prevTask.Name}");
+                            continue;
+                        }
+                        CompleteQuestInternalOptimized(prevTask, true, visited, changedQuests, skipAlternativeQuests);
+                    }
+                }
+            }
+            // Fallback to Previous list
+            else if (completePrerequisites && task.Previous != null)
+            {
+                foreach (var prevName in task.Previous)
+                {
+                    var prevTask = GetTask(prevName);
+                    if (prevTask != null && GetStatus(prevTask) != QuestStatus.Done)
+                    {
+                        // Skip alternative quests - user must choose which one to complete
+                        if (skipAlternativeQuests && HasAlternativeQuests(prevTask))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Skipping alternative quest: {prevTask.Name}");
+                            continue;
+                        }
+                        CompleteQuestInternalOptimized(prevTask, true, visited, changedQuests, skipAlternativeQuests);
+                    }
+                }
+            }
+
+            _questProgress[taskKey] = QuestStatus.Done;
+            changedQuests.Add((taskId ?? taskKey, task.NormalizedName, QuestStatus.Done));
+        }
+
+        /// <summary>
+        /// Save changed quests in batch (fire-and-forget, doesn't block UI)
+        /// </summary>
+        private async Task SaveProgressBatchAsync(List<(string Id, string? NormalizedName, QuestStatus Status)> changedQuests)
+        {
+            try
+            {
+                await _userDataDb.SaveQuestProgressBatchAsync(changedQuests);
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Batch saved {changedQuests.Count} quest changes");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Batch save failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Complete multiple quests in batch (for log sync - started quest prerequisites)
+        /// Single DB transaction, single UI update
+        /// Skips alternative quests (mutually exclusive) by default
+        /// </summary>
+        public void CompleteQuestsBatch(IEnumerable<TarkovTask> tasks, bool skipAlternativeQuests = true)
+        {
+            var changedQuests = new List<(string Id, string? NormalizedName, QuestStatus Status)>();
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var task in tasks)
+            {
+                var taskId = task.Ids?.FirstOrDefault();
+                var taskKey = taskId ?? task.NormalizedName;
+
+                if (string.IsNullOrEmpty(taskKey)) continue;
+                if (!visited.Add(taskKey)) continue;
+
+                // Skip alternative quests - user must choose which one to complete
+                if (skipAlternativeQuests && HasAlternativeQuests(task))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Skipping alternative quest in batch: {task.Name}");
+                    continue;
+                }
+
+                // Skip if already done
+                if (_questProgress.TryGetValue(taskKey, out var currentStatus) && currentStatus == QuestStatus.Done)
+                    continue;
+                if (!string.IsNullOrEmpty(task.NormalizedName) &&
+                    _questProgress.TryGetValue(task.NormalizedName, out var statusByName) && statusByName == QuestStatus.Done)
+                    continue;
+
+                _questProgress[taskKey] = QuestStatus.Done;
+                changedQuests.Add((taskId ?? taskKey, task.NormalizedName, QuestStatus.Done));
+            }
+
+            if (changedQuests.Count > 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Batch completing {changedQuests.Count} quests");
+                _ = SaveProgressBatchAsync(changedQuests);
+                ProgressChanged?.Invoke(this, EventArgs.Empty);
             }
         }
 
@@ -745,7 +925,18 @@ namespace TarkovHelper.Services
             if (string.IsNullOrEmpty(taskKey)) return;
 
             _questProgress[taskKey] = QuestStatus.Failed;
-            SaveProgress();
+            // Fire-and-forget async save - don't block UI
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _userDataDb.SaveQuestProgressAsync(taskId ?? taskKey, task.NormalizedName, QuestStatus.Failed);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save failed quest: {ex.Message}");
+                }
+            });
             ProgressChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -766,7 +957,23 @@ namespace TarkovHelper.Services
                 _questProgress.Remove(task.NormalizedName);
             }
 
-            SaveProgress();
+            // Fire-and-forget async delete - don't block UI
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _userDataDb.DeleteQuestProgressAsync(taskId ?? taskKey);
+                    // Also delete by NormalizedName for clean migration
+                    if (!string.IsNullOrEmpty(task.NormalizedName) && task.NormalizedName != taskKey)
+                    {
+                        await _userDataDb.DeleteQuestProgressAsync(task.NormalizedName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to delete quest progress: {ex.Message}");
+                }
+            });
             ProgressChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -922,27 +1129,33 @@ namespace TarkovHelper.Services
         public void SetObjectiveCompleted(string questNormalizedName, int objectiveIndex, bool completed, string? objectiveId = null)
         {
             var indexKey = $"{questNormalizedName}:{objectiveIndex}";
+            var keysToSave = new List<(string Key, string? QuestId, bool IsCompleted)>();
 
             if (completed)
             {
                 _objectiveProgress[indexKey] = true;
+                keysToSave.Add((indexKey, questNormalizedName, true));
                 // ObjectiveId도 함께 저장 (동기화)
                 if (!string.IsNullOrEmpty(objectiveId))
                 {
                     _objectiveProgress[$"id:{objectiveId}"] = true;
+                    keysToSave.Add(($"id:{objectiveId}", null, true));
                 }
             }
             else
             {
                 _objectiveProgress.Remove(indexKey);
+                keysToSave.Add((indexKey, questNormalizedName, false));
                 // ObjectiveId도 함께 제거 (동기화)
                 if (!string.IsNullOrEmpty(objectiveId))
                 {
                     _objectiveProgress.Remove($"id:{objectiveId}");
+                    keysToSave.Add(($"id:{objectiveId}", null, false));
                 }
             }
 
-            SaveObjectiveProgress();
+            // Fire-and-forget async save - don't block UI
+            _ = SaveObjectiveProgressBatchAsync(keysToSave);
             ObjectiveProgressChanged?.Invoke(this, new ObjectiveProgressChangedEventArgs(questNormalizedName, objectiveIndex, completed));
         }
 
@@ -953,28 +1166,59 @@ namespace TarkovHelper.Services
         public void SetObjectiveCompletedById(string objectiveId, bool completed, string? questNormalizedName = null, int objectiveIndex = -1)
         {
             var idKey = $"id:{objectiveId}";
+            var keysToSave = new List<(string Key, string? QuestId, bool IsCompleted)>();
 
             if (completed)
             {
                 _objectiveProgress[idKey] = true;
+                keysToSave.Add((idKey, null, true));
                 // Index 기반 키도 함께 저장 (동기화)
                 if (!string.IsNullOrEmpty(questNormalizedName) && objectiveIndex >= 0)
                 {
                     _objectiveProgress[$"{questNormalizedName}:{objectiveIndex}"] = true;
+                    keysToSave.Add(($"{questNormalizedName}:{objectiveIndex}", questNormalizedName, true));
                 }
             }
             else
             {
                 _objectiveProgress.Remove(idKey);
+                keysToSave.Add((idKey, null, false));
                 // Index 기반 키도 함께 제거 (동기화)
                 if (!string.IsNullOrEmpty(questNormalizedName) && objectiveIndex >= 0)
                 {
                     _objectiveProgress.Remove($"{questNormalizedName}:{objectiveIndex}");
+                    keysToSave.Add(($"{questNormalizedName}:{objectiveIndex}", questNormalizedName, false));
                 }
             }
 
-            SaveObjectiveProgress();
+            // Fire-and-forget async save - don't block UI
+            _ = SaveObjectiveProgressBatchAsync(keysToSave);
             ObjectiveProgressChanged?.Invoke(this, new ObjectiveProgressChangedEventArgs(objectiveId, objectiveIndex, completed));
+        }
+
+        /// <summary>
+        /// Save objective progress in batch (fire-and-forget, doesn't block UI)
+        /// </summary>
+        private async Task SaveObjectiveProgressBatchAsync(List<(string Key, string? QuestId, bool IsCompleted)> items)
+        {
+            try
+            {
+                foreach (var item in items)
+                {
+                    if (item.IsCompleted)
+                    {
+                        await _userDataDb.SaveObjectiveProgressAsync(item.Key, item.QuestId, true);
+                    }
+                    else
+                    {
+                        await _userDataDb.DeleteObjectiveProgressAsync(item.Key);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Failed to save objective progress: {ex.Message}");
+            }
         }
 
         /// <summary>

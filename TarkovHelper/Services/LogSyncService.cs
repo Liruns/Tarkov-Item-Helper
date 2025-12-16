@@ -497,6 +497,7 @@ namespace TarkovHelper.Services
 
                 // STEP 3: Complete prerequisites for ANY quest that was started/completed/failed
                 // (If a quest was started, failed, or completed, its prerequisites must be done)
+                // Skip alternative quests (mutually exclusive) - collect them separately for user selection
                 var prereqs = graphService.GetAllPrerequisites(normalizedName);
                 foreach (var prereq in prereqs)
                 {
@@ -513,6 +514,13 @@ namespace TarkovHelper.Services
                     var prereqStatus = progressService.GetStatus(prereq);
                     if (prereqStatus != QuestStatus.Done)
                     {
+                        // Skip alternative quests - will be collected separately
+                        if (progressService.HasAlternativeQuests(prereq))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[LogSyncService] Skipping alternative quest prereq: {prereq.Name}");
+                            continue;
+                        }
+
                         questsToComplete.Add(new QuestChangeInfo
                         {
                             QuestName = prereq.Name,
@@ -530,6 +538,10 @@ namespace TarkovHelper.Services
 
             // Sort by timestamp (oldest first) for chronological display
             result.QuestsToComplete = questsToComplete.OrderBy(q => q.Timestamp).ToList();
+
+            // STEP 4: Collect alternative quest groups that need user selection
+            // These are mutually exclusive quests where user must choose which one they completed
+            result.AlternativeQuestGroups = CollectAlternativeQuestGroups(progressService, questFinalStates, terminalStateQuests);
 
             // Build InProgressQuests list: quests whose final state is Started (not Completed/Failed)
             foreach (var kvp in questFinalStates)
@@ -662,6 +674,97 @@ namespace TarkovHelper.Services
         private TarkovTask? FindTaskByQuestId(Dictionary<string, TarkovTask> lookup, string questId)
         {
             return lookup.TryGetValue(questId, out var task) ? task : null;
+        }
+
+        /// <summary>
+        /// Collect alternative quest groups that need user selection
+        /// </summary>
+        private List<AlternativeQuestGroup> CollectAlternativeQuestGroups(
+            QuestProgressService progressService,
+            Dictionary<string, (QuestEventType EventType, DateTime Timestamp, TarkovTask Task)> questFinalStates,
+            HashSet<string> terminalStateQuests)
+        {
+            var groups = new List<AlternativeQuestGroup>();
+            var processedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var graphService = QuestGraphService.Instance;
+
+            // Find all alternative quest groups that are prerequisites for started/completed quests
+            foreach (var kvp in questFinalStates)
+            {
+                var normalizedName = kvp.Key;
+                var task = kvp.Value.Task;
+
+                // Get all prerequisites
+                var prereqs = graphService.GetAllPrerequisites(normalizedName);
+
+                foreach (var prereq in prereqs)
+                {
+                    if (prereq.NormalizedName == null) continue;
+                    if (!progressService.HasAlternativeQuests(prereq)) continue;
+
+                    // Skip if already processed this group
+                    var groupKey = GetAlternativeGroupKey(prereq, progressService);
+                    if (processedGroups.Contains(groupKey)) continue;
+                    processedGroups.Add(groupKey);
+
+                    // Build the group
+                    var group = new AlternativeQuestGroup { IsRequired = true };
+
+                    // Add the main quest
+                    var mainStatus = progressService.GetStatus(prereq);
+                    group.Choices.Add(new AlternativeQuestChoice
+                    {
+                        Task = prereq,
+                        IsCompleted = mainStatus == QuestStatus.Done,
+                        IsFailed = mainStatus == QuestStatus.Failed,
+                        IsSelected = mainStatus == QuestStatus.Done
+                    });
+
+                    // Add alternative quests
+                    if (prereq.AlternativeQuests != null)
+                    {
+                        foreach (var altName in prereq.AlternativeQuests)
+                        {
+                            var altTask = progressService.GetTask(altName) ?? progressService.GetTaskById(altName);
+                            if (altTask != null)
+                            {
+                                var altStatus = progressService.GetStatus(altTask);
+                                group.Choices.Add(new AlternativeQuestChoice
+                                {
+                                    Task = altTask,
+                                    IsCompleted = altStatus == QuestStatus.Done,
+                                    IsFailed = altStatus == QuestStatus.Failed,
+                                    IsSelected = altStatus == QuestStatus.Done
+                                });
+                            }
+                        }
+                    }
+
+                    // Only add if there are multiple choices and none are completed yet
+                    if (group.Choices.Count > 1 && !group.Choices.Any(c => c.IsCompleted))
+                    {
+                        groups.Add(group);
+                    }
+                }
+            }
+
+            return groups;
+        }
+
+        /// <summary>
+        /// Get a unique key for an alternative quest group
+        /// </summary>
+        private string GetAlternativeGroupKey(TarkovTask task, QuestProgressService progressService)
+        {
+            var names = new List<string> { task.NormalizedName ?? "" };
+
+            if (task.AlternativeQuests != null)
+            {
+                names.AddRange(task.AlternativeQuests);
+            }
+
+            names.Sort(StringComparer.OrdinalIgnoreCase);
+            return string.Join("|", names);
         }
 
         #endregion

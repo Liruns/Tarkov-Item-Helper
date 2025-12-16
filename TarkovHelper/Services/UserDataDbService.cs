@@ -785,13 +785,35 @@ public sealed class UserDataDbService
         try
         {
             var json = await File.ReadAllTextAsync(filePath);
-            var data = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+            Dictionary<string, int>? modules = null;
 
-            if (data != null)
+            // Try new format first: {"version": 1, "lastUpdated": "...", "modules": {...}}
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("modules", out var modulesElement))
+                {
+                    modules = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var prop in modulesElement.EnumerateObject())
+                    {
+                        if (prop.Value.TryGetInt32(out var level))
+                        {
+                            modules[prop.Name] = level;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Fall back to old format: {"stationId": level, ...}
+                modules = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+            }
+
+            if (modules != null && modules.Count > 0)
             {
                 await InitializeAsync();
 
-                foreach (var kvp in data)
+                foreach (var kvp in modules)
                 {
                     await SaveHideoutProgressAsync(kvp.Key, kvp.Value);
                 }
