@@ -219,7 +219,7 @@ public sealed class QuestDbService
         System.Diagnostics.Debug.WriteLine($"[QuestDbService] Quests with BsgId: {questsWithBsgId}/{quests.Count}");
         if (quests.Count > 0 && quests[0].Ids != null)
         {
-            System.Diagnostics.Debug.WriteLine($"[QuestDbService] Sample quest IDs: {string.Join(", ", quests[0].Ids)} - {quests[0].Name}");
+            System.Diagnostics.Debug.WriteLine($"[QuestDbService] Sample quest IDs: {string.Join(", ", quests[0].Ids ?? [])} - {quests[0].Name}");
         }
 
         return quests;
