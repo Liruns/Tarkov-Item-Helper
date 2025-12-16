@@ -2822,18 +2822,37 @@ public partial class MapTrackerPage : UserControl
             var opacity = firstItem.Opacity;
             var objectiveColor = GetObjectiveTypeColor(primary.Objective.ObjectiveType, opacity);
 
-            // Draw circular marker
-            var circle = new Ellipse
+            // Draw marker using SVG icon or fallback to circle
+            var icon = GetQuestObjectiveIcon(primary.Objective.ObjectiveType);
+            if (icon != null)
             {
-                Width = markerSize,
-                Height = markerSize,
-                Fill = new SolidColorBrush(Color.FromArgb((byte)(opacity * 220), objectiveColor.R, objectiveColor.G, objectiveColor.B)),
-                Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 0xFF, 0xFF, 0xFF)),
-                StrokeThickness = 2 * inverseScale
-            };
-            Canvas.SetLeft(circle, sx - markerSize / 2);
-            Canvas.SetTop(circle, sy - markerSize / 2);
-            ObjectivesCanvas.Children.Add(circle);
+                // SVG icon marker
+                var iconImage = new Image
+                {
+                    Source = icon,
+                    Width = markerSize,
+                    Height = markerSize,
+                    Opacity = opacity
+                };
+                Canvas.SetLeft(iconImage, sx - markerSize / 2);
+                Canvas.SetTop(iconImage, sy - markerSize / 2);
+                ObjectivesCanvas.Children.Add(iconImage);
+            }
+            else
+            {
+                // Fallback: circular marker
+                var circle = new Ellipse
+                {
+                    Width = markerSize,
+                    Height = markerSize,
+                    Fill = new SolidColorBrush(Color.FromArgb((byte)(opacity * 220), objectiveColor.R, objectiveColor.G, objectiveColor.B)),
+                    Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 0xFF, 0xFF, 0xFF)),
+                    StrokeThickness = 2 * inverseScale
+                };
+                Canvas.SetLeft(circle, sx - markerSize / 2);
+                Canvas.SetTop(circle, sy - markerSize / 2);
+                ObjectivesCanvas.Children.Add(circle);
+            }
 
             // Draw Kappa star badge if enabled and cluster has Kappa quest
             if (_showKappaHighlight && cluster.HasKappaItem())
@@ -3046,24 +3065,44 @@ public partial class MapTrackerPage : UserControl
 
             var color = Color.FromArgb((byte)(opacity * 255), optionalColor.R, optionalColor.G, optionalColor.B);
             var (sx, sy) = _currentMapConfig!.GameToScreen(point.X, point.Z);
-            var markerSize = 28 * inverseScale;  // Size for diamond shape
+            var markerSize = 28 * inverseScale;  // Size for marker
             var halfSize = markerSize / 2;
 
-            // Diamond shape marker (rotated square)
-            var diamond = new Polygon
+            // Draw marker using SVG icon or fallback to diamond
+            var icon = GetQuestObjectiveIcon(objective.ObjectiveType);
+            if (icon != null)
             {
-                Points = new PointCollection
+                // SVG icon marker (slightly smaller for optional points)
+                var iconSize = markerSize * 0.85;
+                var iconImage = new Image
                 {
-                    new Point(sx, sy - halfSize),        // Top
-                    new Point(sx + halfSize, sy),        // Right
-                    new Point(sx, sy + halfSize),        // Bottom
-                    new Point(sx - halfSize, sy)         // Left
-                },
-                Fill = new SolidColorBrush(Color.FromArgb((byte)(opacity * 200), optionalColor.R, optionalColor.G, optionalColor.B)),
-                Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 0xFF, 0xFF, 0xFF)),  // White border
-                StrokeThickness = 2 * inverseScale
-            };
-            ObjectivesCanvas.Children.Add(diamond);
+                    Source = icon,
+                    Width = iconSize,
+                    Height = iconSize,
+                    Opacity = opacity * 0.8  // Slightly transparent for optional
+                };
+                Canvas.SetLeft(iconImage, sx - iconSize / 2);
+                Canvas.SetTop(iconImage, sy - iconSize / 2);
+                ObjectivesCanvas.Children.Add(iconImage);
+            }
+            else
+            {
+                // Fallback: Diamond shape marker (rotated square)
+                var diamond = new Polygon
+                {
+                    Points = new PointCollection
+                    {
+                        new Point(sx, sy - halfSize),        // Top
+                        new Point(sx + halfSize, sy),        // Right
+                        new Point(sx, sy + halfSize),        // Bottom
+                        new Point(sx - halfSize, sy)         // Left
+                    },
+                    Fill = new SolidColorBrush(Color.FromArgb((byte)(opacity * 200), optionalColor.R, optionalColor.G, optionalColor.B)),
+                    Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 0xFF, 0xFF, 0xFF)),  // White border
+                    StrokeThickness = 2 * inverseScale
+                };
+                ObjectivesCanvas.Children.Add(diamond);
+            }
 
             // Number format label inside the marker (e.g., "1/8")
             var numberText = $"{i + 1}/{totalPoints}";
