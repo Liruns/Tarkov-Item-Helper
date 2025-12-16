@@ -351,7 +351,7 @@
                         <ItemsControl x:Name="QuestList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border x:Name="CardBorder" Background="#242424" CornerRadius="4" Padding="8,6" Margin="0,0,0,4"
+                                    <Border x:Name="CardBorder" Background="#2A2A2A" CornerRadius="4" Padding="10,8" Margin="0,0,0,5"
                                             MouseLeftButtonDown="QuestCard_Click"
                                             MouseEnter="QuestCard_MouseEnter"
                                             MouseLeave="QuestCard_MouseLeave"
@@ -360,62 +360,62 @@
                                             <!-- Card Header -->
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="18"/>   <!-- Icon -->
+                                                    <ColumnDefinition Width="22"/>   <!-- Icon -->
                                                     <ColumnDefinition Width="*"/>    <!-- Name -->
                                                     <ColumnDefinition Width="Auto"/> <!-- Progress -->
-                                                    <ColumnDefinition Width="20"/>   <!-- Expand -->
+                                                    <ColumnDefinition Width="18"/>   <!-- Expand -->
                                                 </Grid.ColumnDefinitions>
 
                                                 <!-- Type Icon -->
-                                                <Image Grid.Column="0" Source="{Binding TypeIcon}" Width="14" Height="14"
-                                                       VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                                <Image Grid.Column="0" Source="{Binding TypeIcon}" Width="16" Height="16"
+                                                       VerticalAlignment="Center" Margin="0,0,6,0"/>
 
                                                 <!-- Quest Name -->
-                                                <TextBlock Grid.Column="1" Text="{Binding QuestName}" FontSize="10"
-                                                           Foreground="#E8E8E8" TextTrimming="CharacterEllipsis"
+                                                <TextBlock Grid.Column="1" Text="{Binding QuestName}" FontSize="11" FontWeight="Medium"
+                                                           Foreground="#F0F0F0" TextTrimming="CharacterEllipsis"
                                                            VerticalAlignment="Center"/>
 
                                                 <!-- Progress Bar + Text -->
                                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
-                                                    <Grid Width="40" Height="3" Margin="0,0,6,0">
-                                                        <Border Background="#141414" CornerRadius="1.5"/>
-                                                        <Border Background="#00B4D8" CornerRadius="1.5" HorizontalAlignment="Left"
+                                                    <Grid Width="36" Height="4" Margin="0,0,6,0">
+                                                        <Border Background="#1A1A1A" CornerRadius="2"/>
+                                                        <Border Background="#00B4D8" CornerRadius="2" HorizontalAlignment="Left"
                                                                 Width="{Binding ProgressPercent, Converter={StaticResource ProgressToWidthConverter}}"/>
                                                     </Grid>
-                                                    <TextBlock Text="{Binding ProgressText}" FontSize="9" Foreground="#888888"/>
+                                                    <TextBlock Text="{Binding ProgressText}" FontSize="10" Foreground="#A0A0A0"/>
                                                 </StackPanel>
 
                                                 <!-- Expand/Collapse Icon -->
-                                                <TextBlock Grid.Column="3" Text="{Binding ExpandIcon}" FontSize="8"
-                                                           Foreground="#666666" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="3" Text="{Binding ExpandIcon}" FontSize="9"
+                                                           Foreground="#888888" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Grid>
 
                                             <!-- Objectives List (Expandable) -->
                                             <ItemsControl ItemsSource="{Binding Objectives}"
                                                           Visibility="{Binding ObjectivesVisibility}"
-                                                          Margin="18,6,0,0">
+                                                          Margin="22,8,0,0">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Border Padding="4,3" Margin="0,1" CornerRadius="2"
-                                                                Background="#1A1A1A" Cursor="Hand"
+                                                        <Border Padding="6,4" Margin="0,2" CornerRadius="3"
+                                                                Background="#222222" Cursor="Hand"
                                                                 MouseLeftButtonDown="ObjectiveItem_Click"
                                                                 Tag="{Binding}">
                                                             <Grid>
                                                                 <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="14"/>
+                                                                    <ColumnDefinition Width="16"/>
                                                                     <ColumnDefinition Width="*"/>
                                                                 </Grid.ColumnDefinitions>
 
                                                                 <!-- Objective Icon -->
-                                                                <Image Grid.Column="0" Source="{Binding TypeIcon}" Width="10" Height="10"
+                                                                <Image Grid.Column="0" Source="{Binding TypeIcon}" Width="12" Height="12"
                                                                        VerticalAlignment="Center"/>
 
                                                                 <!-- Objective Description -->
-                                                                <TextBlock Grid.Column="1" Text="{Binding Description}" FontSize="9"
+                                                                <TextBlock Grid.Column="1" Text="{Binding Description}" FontSize="10"
                                                                            Foreground="{Binding CompletedForeground}"
                                                                            TextTrimming="CharacterEllipsis"
                                                                            TextDecorations="{Binding CompletedDecoration}"
-                                                                           Margin="4,0,0,0"/>
+                                                                           Margin="6,0,0,0"/>
                                                             </Grid>
                                                         </Border>
                                                     </DataTemplate>
@@ -484,7 +484,7 @@
                     <ToggleButton x:Name="ChipQuest" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="True" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="10" Height="10" Fill="{StaticResource MarkerQuest}" Margin="0,0,5,0"/>
+                            <svgc:SvgViewbox Source="Assets/DB/Icons/Quest_Mark.svg" Width="14" Height="14" Margin="0,0,5,0"/>
                             <TextBlock Text="Quest" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>

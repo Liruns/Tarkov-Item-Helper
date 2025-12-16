@@ -34,7 +34,7 @@ public class ProgressToWidthConverter : IValueConverter
     {
         if (value is double percent)
         {
-            return percent * 40.0; // Max width is 40px
+            return percent * 36.0; // Max width is 36px
         }
         return 0.0;
     }
@@ -3002,27 +3002,36 @@ public partial class MapTrackerPage : UserControl
     }
 
     /// <summary>
-    /// Draw quest name label with semi-transparent background for readability
+    /// Draw quest name label with dark background and drop shadow for readability
     /// </summary>
     private void DrawQuestNameLabel(double x, double y, string questName, Color color, double fontSize, double opacity, bool centerText = false)
     {
-        // Create background border for readability
+        // Create text with high contrast
         var label = new TextBlock
         {
             Text = questName,
             Foreground = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), color.R, color.G, color.B)),
             FontSize = fontSize,
-            FontWeight = FontWeights.SemiBold
+            FontWeight = FontWeights.SemiBold,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 2,
+                ShadowDepth = 1,
+                Opacity = 0.8
+            }
         };
         label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
 
-        // Background for better readability
-        var bgPadding = 4.0;
+        // Dark background for better readability
+        var bgPadding = 5.0;
         var bgRect = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb((byte)(opacity * 180), 0x1A, 0x1A, 0x1A)),
-            CornerRadius = new CornerRadius(3),
-            Padding = new Thickness(bgPadding, 2, bgPadding, 2),
+            Background = new SolidColorBrush(Color.FromArgb((byte)(opacity * 220), 0x10, 0x10, 0x10)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb((byte)(opacity * 100), 0x40, 0x40, 0x40)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(bgPadding, 3, bgPadding, 3),
             Child = label
         };
         bgRect.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
