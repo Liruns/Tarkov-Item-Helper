@@ -2566,9 +2566,9 @@ public partial class MapTrackerPage : UserControl
 
             var color = Color.FromArgb((byte)(opacity * 255), optionalColor.R, optionalColor.G, optionalColor.B);
             var (sx, sy) = _currentMapConfig!.GameToScreen(point.X, point.Z);
-            var markerSize = 20 * inverseScale;  // Smaller than required objectives
+            var markerSize = 24 * inverseScale;  // Slightly larger to fit "OR" text
 
-            // Clean circular marker with white border (no "OR#" label)
+            // Circular marker with "OR" text inside
             var circle = new Ellipse
             {
                 Width = markerSize,
@@ -2581,7 +2581,34 @@ public partial class MapTrackerPage : UserControl
             Canvas.SetTop(circle, sy - markerSize / 2);
             ObjectivesCanvas.Children.Add(circle);
 
-            // Quest name label (only for first optional point)
+            // "OR" text label inside the marker
+            var orFontSize = Math.Max(8, 12 * inverseScale);
+            var orLabel = new TextBlock
+            {
+                Text = "OR",
+                FontSize = orFontSize,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 0xFF, 0xFF, 0xFF)),
+                TextAlignment = TextAlignment.Center
+            };
+            orLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Canvas.SetLeft(orLabel, sx - orLabel.DesiredSize.Width / 2);
+            Canvas.SetTop(orLabel, sy - orLabel.DesiredSize.Height / 2);
+            ObjectivesCanvas.Children.Add(orLabel);
+
+            // Add hit region for tooltip and click (same as regular quest markers)
+            _questHitRegions.Add(new QuestHitRegion
+            {
+                Objective = objective,
+                ClusterObjectives = null,
+                ScreenX = sx,
+                ScreenY = sy,
+                Radius = markerSize / 2 + 5,
+                LocalizedQuestName = questName,
+                Priority = 0  // Lower priority than required objectives
+            });
+
+            // Quest name label (only for first optional point when zoomed in)
             if (showLabels && i == 0 && !string.IsNullOrEmpty(questName))
             {
                 var fontSize = Math.Max(10, 24 * inverseScale * _labelScale);
