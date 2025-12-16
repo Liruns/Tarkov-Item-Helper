@@ -442,49 +442,49 @@
                     <ToggleButton x:Name="ChipBoss" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="True" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#x1F480;" FontSize="11" Foreground="{StaticResource MarkerBoss}" Margin="0,0,5,0"/>
+                            <Image Source="Assets/DB/Icons/BOSS Spawn.webp" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Boss" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>
                     <ToggleButton x:Name="ChipExtract" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="True" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#x25B2;" FontSize="11" Foreground="{StaticResource MarkerExtract}" Margin="0,0,5,0"/>
+                            <Image Source="Assets/DB/Icons/PMC Extraction.webp" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Extract" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>
                     <ToggleButton x:Name="ChipTransit" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="True" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#x25A0;" FontSize="11" Foreground="{StaticResource MarkerTransit}" Margin="0,0,5,0"/>
+                            <Image Source="Assets/DB/Icons/Transit.webp" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Transit" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>
                     <ToggleButton x:Name="ChipSpawn" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="False" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#x25CF;" FontSize="11" Foreground="{StaticResource MarkerSpawn}" Margin="0,0,5,0"/>
+                            <Image Source="Assets/DB/Icons/PMC Spawn.webp" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Spawn" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>
                     <ToggleButton x:Name="ChipLever" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="True" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#x2699;" FontSize="11" Foreground="{StaticResource MarkerLever}" Margin="0,0,5,0"/>
+                            <Image Source="Assets/DB/Icons/Lever.webp" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Lever" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>
                     <ToggleButton x:Name="ChipKeys" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="False" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#x1F511;" FontSize="11" Foreground="{StaticResource MarkerKey}" Margin="0,0,5,0"/>
+                            <Image Source="Assets/DB/Icons/Keys.webp" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Keys" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>
                     <ToggleButton x:Name="ChipQuest" Style="{StaticResource LayerChipStyle}"
                                   IsChecked="True" Checked="LayerChip_Changed" Unchecked="LayerChip_Changed">
                         <StackPanel Orientation="Horizontal">
-                            <svgc:SvgViewbox Source="Assets/DB/Icons/Quest_Mark.svg" Width="14" Height="14" Margin="0,0,5,0"/>
+                            <svgc:SvgViewbox Source="Assets/DB/Icons/Quest_Mark.svg" Width="16" Height="16" Margin="0,0,5,0"/>
                             <TextBlock Text="Quest" FontSize="10" Foreground="{StaticResource TextPrimary}"/>
                         </StackPanel>
                     </ToggleButton>

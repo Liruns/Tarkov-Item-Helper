@@ -265,6 +265,14 @@ internal sealed class QuestObjectiveItem
     public SolidColorBrush CompletionColor => IsCompleted
         ? new SolidColorBrush(Color.FromRgb(0x4E, 0xC9, 0xB0))  // Teal for completed
         : new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80)); // Gray for pending
+
+    // Text styling for completed/incomplete objectives
+    public SolidColorBrush CompletedForeground => IsCompleted
+        ? new SolidColorBrush(Color.FromRgb(0x70, 0x70, 0x70))  // Dimmed gray for completed
+        : new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xE0)); // Bright white for pending
+    public TextDecorationCollection? CompletedDecoration => IsCompleted
+        ? TextDecorations.Strikethrough
+        : null;
 }
 
 /// <summary>
