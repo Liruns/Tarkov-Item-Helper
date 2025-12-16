@@ -2925,15 +2925,88 @@ public partial class MapTrackerPage : UserControl
     /// </summary>
     private void UpdateOptionalGroupHighlight(QuestObjective? objective)
     {
-        // Find and update all optional point markers for this objective
-        // Use a glow effect or border highlight
+        // Remove any existing connection lines
+        var existingLines = ObjectivesCanvas.Children
+            .OfType<Line>()
+            .Where(l => l.Tag is string tag && tag.StartsWith("optionalConnection_"))
+            .ToList();
+        foreach (var line in existingLines)
+        {
+            ObjectivesCanvas.Children.Remove(line);
+        }
+
+        // Get all regions for this objective to draw connection lines
+        var groupRegions = new List<QuestHitRegion>();
+
+        // Update individual marker highlights and collect regions for connection
         foreach (var region in _questHitRegions)
         {
             if (region.IsOptionalPoint)
             {
                 bool isHighlighted = objective != null && region.Objective == objective;
                 UpdateOptionalMarkerHighlight(region, isHighlighted);
+
+                if (isHighlighted)
+                {
+                    groupRegions.Add(region);
+                }
             }
+        }
+
+        // Draw connection lines between all markers in the group
+        if (groupRegions.Count > 1)
+        {
+            DrawOptionalGroupConnections(groupRegions);
+        }
+    }
+
+    /// <summary>
+    /// Draw dotted lines connecting all optional point markers in a group
+    /// </summary>
+    private void DrawOptionalGroupConnections(List<QuestHitRegion> regions)
+    {
+        var inverseScale = 1.0 / _zoomLevel;
+        var strokeThickness = 2 * inverseScale;
+
+        // Create a dotted line style
+        var dashStyle = new DoubleCollection { 4, 4 };  // 4px dash, 4px gap
+        var lineColor = Color.FromArgb(150, 0xFF, 0xFF, 0x00);  // Semi-transparent yellow
+
+        // Connect all points to create a visible group connection
+        // Use a simple approach: connect each point to the next in order
+        for (int i = 0; i < regions.Count - 1; i++)
+        {
+            var line = new Line
+            {
+                X1 = regions[i].ScreenX,
+                Y1 = regions[i].ScreenY,
+                X2 = regions[i + 1].ScreenX,
+                Y2 = regions[i + 1].ScreenY,
+                Stroke = new SolidColorBrush(lineColor),
+                StrokeThickness = strokeThickness,
+                StrokeDashArray = dashStyle,
+                Tag = $"optionalConnection_{i}"
+            };
+            Canvas.SetZIndex(line, -2);  // Behind markers and highlights
+            ObjectivesCanvas.Children.Add(line);
+        }
+
+        // Also connect last to first to complete the loop (if more than 2 points)
+        if (regions.Count > 2)
+        {
+            var closingLine = new Line
+            {
+                X1 = regions[regions.Count - 1].ScreenX,
+                Y1 = regions[regions.Count - 1].ScreenY,
+                X2 = regions[0].ScreenX,
+                Y2 = regions[0].ScreenY,
+                Stroke = new SolidColorBrush(lineColor),
+                StrokeThickness = strokeThickness,
+                StrokeDashArray = dashStyle,
+                Tag = $"optionalConnection_closing"
+            };
+            Canvas.SetZIndex(closingLine, -2);
+            ObjectivesCanvas.Children.Add(closingLine);
         }
     }
 
