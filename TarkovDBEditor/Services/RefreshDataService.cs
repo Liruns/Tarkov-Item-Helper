@@ -541,13 +541,15 @@ namespace TarkovDBEditor.Services
                     dbQuest.MinScavKarma = cached.MinScavKarma ?? WikiQuestService.ExtractMinScavKarma(cached.PageContent ?? "");
                 }
 
-                // Wiki 캐시에서 KappaRequired, Faction, RequiredEdition, ExcludedEdition 파싱
+                // Wiki 캐시에서 KappaRequired, Faction, RequiredEdition, ExcludedEdition, RequiredDecodeCount 파싱
                 if (cachedQuests.TryGetValue(questName, out var cachedForKappa) && !string.IsNullOrEmpty(cachedForKappa.PageContent))
                 {
                     dbQuest.KappaRequired = WikiQuestService.ExtractKappaRequired(cachedForKappa.PageContent);
                     dbQuest.Faction = cachedForKappa.Faction ?? WikiQuestService.ExtractFaction(cachedForKappa.PageContent);
                     dbQuest.RequiredEdition = cachedForKappa.RequiredEdition ?? WikiQuestService.ExtractRequiredEdition(cachedForKappa.PageContent);
                     dbQuest.ExcludedEdition = cachedForKappa.ExcludedEdition ?? WikiQuestService.ExtractExcludedEdition(cachedForKappa.PageContent);
+                    dbQuest.RequiredDecodeCount = cachedForKappa.RequiredDecodeCount ?? WikiQuestService.ExtractRequiredDecodeCount(cachedForKappa.PageContent);
+                    dbQuest.RequiredPrestigeLevel = WikiQuestService.ExtractRequiredPrestigeLevel(cachedForKappa.PageContent);
                 }
 
                 // tarkov.dev 매칭 (캐시된 데이터 사용) - 번역용
@@ -1218,11 +1220,13 @@ namespace TarkovDBEditor.Services
                 dbQuest.MinLevel = cached.MinLevel ?? WikiQuestService.ExtractMinLevel(cached.PageContent ?? "");
                 dbQuest.MinScavKarma = cached.MinScavKarma ?? WikiQuestService.ExtractMinScavKarma(cached.PageContent ?? "");
 
-                // Wiki 캐시에서 KappaRequired, Faction, RequiredEdition, ExcludedEdition 파싱
+                // Wiki 캐시에서 KappaRequired, Faction, RequiredEdition, ExcludedEdition, RequiredDecodeCount 파싱
                 dbQuest.KappaRequired = WikiQuestService.ExtractKappaRequired(cached.PageContent ?? "");
                 dbQuest.Faction = cached.Faction ?? WikiQuestService.ExtractFaction(cached.PageContent ?? "");
                 dbQuest.RequiredEdition = cached.RequiredEdition ?? WikiQuestService.ExtractRequiredEdition(cached.PageContent ?? "");
                 dbQuest.ExcludedEdition = cached.ExcludedEdition ?? WikiQuestService.ExtractExcludedEdition(cached.PageContent ?? "");
+                dbQuest.RequiredDecodeCount = cached.RequiredDecodeCount ?? WikiQuestService.ExtractRequiredDecodeCount(cached.PageContent ?? "");
+                dbQuest.RequiredPrestigeLevel = WikiQuestService.ExtractRequiredPrestigeLevel(cached.PageContent ?? "");
 
                 // tarkov.dev 매칭 - 번역용
                 TarkovDevQuestCacheItem? devQuest = null;
@@ -1582,8 +1586,10 @@ namespace TarkovDBEditor.Services
                 new() { Name = "Faction", DisplayName = "Faction", Type = ColumnType.Text, SortOrder = 12 },
                 new() { Name = "RequiredEdition", DisplayName = "Required Edition", Type = ColumnType.Text, SortOrder = 13 },
                 new() { Name = "ExcludedEdition", DisplayName = "Excluded Edition", Type = ColumnType.Text, SortOrder = 14 },
-                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, SortOrder = 15 },
-                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 16 }
+                new() { Name = "RequiredDecodeCount", DisplayName = "Decode Count", Type = ColumnType.Integer, SortOrder = 15 },
+                new() { Name = "RequiredPrestigeLevel", DisplayName = "Prestige Level", Type = ColumnType.Integer, SortOrder = 16 },
+                new() { Name = "IsApproved", DisplayName = "Approved", Type = ColumnType.Boolean, SortOrder = 17 },
+                new() { Name = "UpdatedAt", DisplayName = "Updated At", Type = ColumnType.DateTime, SortOrder = 18 }
             };
 
             var schemaJson = JsonSerializer.Serialize(columns);
@@ -1693,6 +1699,12 @@ namespace TarkovDBEditor.Services
                     ExcludedEdition TEXT,
                     ExcludedEditionApproved INTEGER NOT NULL DEFAULT 0,
                     ExcludedEditionApprovedAt TEXT,
+                    RequiredDecodeCount INTEGER,
+                    RequiredDecodeCountApproved INTEGER NOT NULL DEFAULT 0,
+                    RequiredDecodeCountApprovedAt TEXT,
+                    RequiredPrestigeLevel INTEGER,
+                    RequiredPrestigeLevelApproved INTEGER NOT NULL DEFAULT 0,
+                    RequiredPrestigeLevelApprovedAt TEXT,
                     IsApproved INTEGER NOT NULL DEFAULT 0,
                     ApprovedAt TEXT,
                     UpdatedAt TEXT
@@ -1720,7 +1732,13 @@ namespace TarkovDBEditor.Services
                 "ALTER TABLE Quests ADD COLUMN ExcludedEditionApproved INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE Quests ADD COLUMN ExcludedEditionApprovedAt TEXT",
                 "ALTER TABLE Quests ADD COLUMN IsApproved INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE Quests ADD COLUMN ApprovedAt TEXT"
+                "ALTER TABLE Quests ADD COLUMN ApprovedAt TEXT",
+                "ALTER TABLE Quests ADD COLUMN RequiredDecodeCount INTEGER",
+                "ALTER TABLE Quests ADD COLUMN RequiredDecodeCountApproved INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE Quests ADD COLUMN RequiredDecodeCountApprovedAt TEXT",
+                "ALTER TABLE Quests ADD COLUMN RequiredPrestigeLevel INTEGER",
+                "ALTER TABLE Quests ADD COLUMN RequiredPrestigeLevelApproved INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE Quests ADD COLUMN RequiredPrestigeLevelApprovedAt TEXT"
             };
 
             foreach (var alterSql in newColumns)
@@ -2764,8 +2782,8 @@ namespace TarkovDBEditor.Services
                 if (!exists)
                 {
                     var insertSql = @"
-                        INSERT INTO Quests (Id, BsgId, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, Location, MinLevel, MinScavKarma, KappaRequired, Faction, RequiredEdition, ExcludedEdition, UpdatedAt)
-                        VALUES (@Id, @BsgId, @Name, @NameEN, @NameKO, @NameJA, @WikiPageLink, @Trader, @Location, @MinLevel, @MinScavKarma, @KappaRequired, @Faction, @RequiredEdition, @ExcludedEdition, @UpdatedAt)";
+                        INSERT INTO Quests (Id, BsgId, Name, NameEN, NameKO, NameJA, WikiPageLink, Trader, Location, MinLevel, MinScavKarma, KappaRequired, Faction, RequiredEdition, ExcludedEdition, RequiredDecodeCount, RequiredPrestigeLevel, UpdatedAt)
+                        VALUES (@Id, @BsgId, @Name, @NameEN, @NameKO, @NameJA, @WikiPageLink, @Trader, @Location, @MinLevel, @MinScavKarma, @KappaRequired, @Faction, @RequiredEdition, @ExcludedEdition, @RequiredDecodeCount, @RequiredPrestigeLevel, @UpdatedAt)";
 
                     using var insertCmd = new SqliteCommand(insertSql, connection, transaction);
                     AddQuestParameters(insertCmd, quest, now);
@@ -2779,7 +2797,7 @@ namespace TarkovDBEditor.Services
                     var updateSql = @"
                         UPDATE Quests SET
                             BsgId = @BsgId, Name = @Name, NameEN = @NameEN, NameKO = @NameKO, NameJA = @NameJA,
-                            WikiPageLink = @WikiPageLink, Trader = @Trader, Location = @Location, MinLevel = @MinLevel, MinScavKarma = @MinScavKarma, KappaRequired = @KappaRequired, Faction = @Faction, RequiredEdition = @RequiredEdition, ExcludedEdition = @ExcludedEdition, UpdatedAt = @UpdatedAt
+                            WikiPageLink = @WikiPageLink, Trader = @Trader, Location = @Location, MinLevel = @MinLevel, MinScavKarma = @MinScavKarma, KappaRequired = @KappaRequired, Faction = @Faction, RequiredEdition = @RequiredEdition, ExcludedEdition = @ExcludedEdition, RequiredDecodeCount = @RequiredDecodeCount, RequiredPrestigeLevel = @RequiredPrestigeLevel, UpdatedAt = @UpdatedAt
                         WHERE Id = @Id";
 
                     using var updateCmd = new SqliteCommand(updateSql, connection, transaction);
@@ -2809,6 +2827,8 @@ namespace TarkovDBEditor.Services
             cmd.Parameters.AddWithValue("@Faction", (object?)quest.Faction ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@RequiredEdition", (object?)quest.RequiredEdition ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ExcludedEdition", (object?)quest.ExcludedEdition ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RequiredDecodeCount", (object?)quest.RequiredDecodeCount ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RequiredPrestigeLevel", (object?)quest.RequiredPrestigeLevel ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UpdatedAt", now);
         }
 
@@ -3313,6 +3333,8 @@ namespace TarkovDBEditor.Services
         public string? Faction { get; set; }
         public string? RequiredEdition { get; set; }  // EOD, Unheard 등 게임 에디션 필수 요구사항 (이 에디션만 가능)
         public string? ExcludedEdition { get; set; }  // Unheard, EOD 등 게임 에디션 제외 조건 (이 에디션은 불가)
+        public int? RequiredDecodeCount { get; set; }  // DSP 라디오 해독 필요 횟수 (Make Amends 퀘스트 등)
+        public int? RequiredPrestigeLevel { get; set; }  // Prestige 레벨 요구사항 (New Beginning 퀘스트 등)
     }
 
     public class DbTrader

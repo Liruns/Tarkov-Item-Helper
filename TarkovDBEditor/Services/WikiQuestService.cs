@@ -423,12 +423,13 @@ namespace TarkovDBEditor.Services
                             // Infobox에서 트레이더 정보 추출
                             cached.Trader = ExtractTraderFromInfobox(content);
 
-                            // Requirements 섹션에서 MinLevel, MinScavKarma, Faction, RequiredEdition, ExcludedEdition 추출
+                            // Requirements 섹션에서 MinLevel, MinScavKarma, Faction, RequiredEdition, ExcludedEdition, RequiredDecodeCount 추출
                             cached.MinLevel = ExtractMinLevel(content);
                             cached.MinScavKarma = ExtractMinScavKarma(content);
                             cached.Faction = ExtractFaction(content);
                             cached.RequiredEdition = ExtractRequiredEdition(content);
                             cached.ExcludedEdition = ExtractExcludedEdition(content);
+                            cached.RequiredDecodeCount = ExtractRequiredDecodeCount(content);
                         }
 
                         completed++;
@@ -1370,6 +1371,78 @@ namespace TarkovDBEditor.Services
         }
 
         /// <summary>
+        /// PageContent에서 ==Requirements== 섹션의 DSP 라디오 해독 필요 횟수 추출
+        /// 패턴: "Getting the Digital secure DSP radio transmitter decoded the first time."
+        /// 패턴: "Getting the Digital secure DSP radio transmitter decoded the second time."
+        /// 패턴: "Getting the Digital secure DSP radio transmitter decoded the third time."
+        /// </summary>
+        public static int? ExtractRequiredDecodeCount(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return null;
+
+            // ==Requirements== 섹션 찾기
+            var reqMatch = Regex.Match(content, @"==\s*Requirements\s*==\s*(.*?)(?===|\z)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            if (!reqMatch.Success)
+                return null;
+
+            var requirementsSection = reqMatch.Groups[1].Value;
+
+            // "DSP radio transmitter decoded the first/second/third time" 패턴 매칭
+            // Wiki 형식: [[Digital secure DSP radio transmitter]] <font color="red">decoded</font> the first time
+            // <font> 태그와 다양한 공백/줄바꿈을 고려한 패턴
+            var decodeMatch = Regex.Match(requirementsSection,
+                @"(?:\[\[)?Digital\s+secure\s+DSP\s+radio\s+transmitter(?:\]\])?\s*(?:<[^>]*>)?\s*decoded\s*(?:</[^>]*>)?\s+(?:the\s+)?(first|second|third|fourth|fifth|\d+(?:st|nd|rd|th)?)\s+time",
+                RegexOptions.IgnoreCase);
+
+            if (!decodeMatch.Success)
+                return null;
+
+            var ordinal = decodeMatch.Groups[1].Value.ToLowerInvariant();
+            return ordinal switch
+            {
+                "first" or "1st" => 1,
+                "second" or "2nd" => 2,
+                "third" or "3rd" => 3,
+                "fourth" or "4th" => 4,
+                "fifth" or "5th" => 5,
+                _ when int.TryParse(Regex.Match(ordinal, @"\d+").Value, out var num) => num,
+                _ => null
+            };
+        }
+
+        /// <summary>
+        /// PageContent에서 ==Requirements== 섹션의 Prestige 레벨 요구사항 추출
+        /// 패턴: "Must have [[Prestige]] level 1" 또는 "[[Prestige]] level 2" 등
+        /// </summary>
+        public static int? ExtractRequiredPrestigeLevel(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return null;
+
+            // ==Requirements== 섹션 찾기
+            var reqMatch = Regex.Match(content, @"==\s*Requirements\s*==\s*(.*?)(?===|\z)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            if (!reqMatch.Success)
+                return null;
+
+            var requirementsSection = reqMatch.Groups[1].Value;
+
+            // "[[Prestige]] level N" 또는 "Prestige level N" 패턴 매칭
+            // Wiki 형식: Must have [[Prestige]] level 1
+            var prestigeMatch = Regex.Match(requirementsSection,
+                @"(?:\[\[)?Prestige(?:\]\])?\s+level\s+(\d+)",
+                RegexOptions.IgnoreCase);
+
+            if (!prestigeMatch.Success)
+                return null;
+
+            if (int.TryParse(prestigeMatch.Groups[1].Value, out var level))
+                return level;
+
+            return null;
+        }
+
+        /// <summary>
         /// PageContent에서 |related 필드를 파싱하여 대체 퀘스트(Other Choices) 목록 반환
         /// 주의: |related2, |related3 등은 다른 용도이므로 |related만 정확히 매칭해야 함
         /// </summary>
@@ -1428,6 +1501,14 @@ namespace TarkovDBEditor.Services
             // HTML 엔티티 디코딩
             previousValue = System.Net.WebUtility.HtmlDecode(previousValue);
 
+            // "See requirements" 패턴 체크 - Requirements 섹션에서 파싱해야 하는 경우
+            // 예: [[Network Provider - Part 1#Requirements|See requirements]]
+            // 예: [[Collector#Requirements|See requirements]]
+            if (Regex.IsMatch(previousValue, @"\[\[[^\]]+#Requirements\|See requirements\]\]", RegexOptions.IgnoreCase))
+            {
+                return ExtractPreviousQuestsFromRequirementsSection(content);
+            }
+
             // OR 그룹 분리 (or<br/>or 또는 <br/>or<br/> 패턴)
             // 먼저 전체를 <br/>, <br>, </br>, <br /> 로 분리
             var parts = Regex.Split(previousValue, @"<br\s*/?>|</br>", RegexOptions.IgnoreCase);
@@ -1466,6 +1547,73 @@ namespace TarkovDBEditor.Services
                         quest.GroupId = groupId;
                     }
                     requirements.Add(quest);
+                }
+            }
+
+            return requirements;
+        }
+
+        /// <summary>
+        /// ==Requirements== 섹션에서 선행 퀘스트 목록 파싱
+        /// Network Provider - Part 1 등 |previous = 가 "See requirements"로 링크된 경우 사용
+        /// </summary>
+        private static List<ParsedQuestRequirement> ExtractPreviousQuestsFromRequirementsSection(string content)
+        {
+            var requirements = new List<ParsedQuestRequirement>();
+
+            // ==Requirements== 섹션 추출
+            var reqSectionMatch = Regex.Match(content, @"==\s*Requirements\s*==\s*(.*?)(?===|\z)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            if (!reqSectionMatch.Success)
+                return requirements;
+
+            var reqSection = reqSectionMatch.Groups[1].Value;
+
+            // ** [[Quest Name]] 형태의 bullet point 추출 (중첩된 불릿 포인트)
+            // 각 라인에서 ** 로 시작하는 것들만 추출
+            var lines = reqSection.Split('\n');
+            int groupId = 0;
+
+            foreach (var line in lines)
+            {
+                var trimmedLine = line.Trim();
+
+                // ** 로 시작하는 불릿 포인트만 처리 (중첩 레벨 2)
+                if (!trimmedLine.StartsWith("**") || trimmedLine.StartsWith("***"))
+                    continue;
+
+                // ** 제거
+                var questLine = trimmedLine.Substring(2).Trim();
+                if (string.IsNullOrEmpty(questLine))
+                    continue;
+
+                // 인라인 OR 조건 처리: [[A]] or [[B]] or [[C]]
+                // " or " 로 분리
+                var orParts = Regex.Split(questLine, @"\s+or\s+", RegexOptions.IgnoreCase);
+
+                if (orParts.Length > 1)
+                {
+                    // OR 그룹 - 모두 같은 GroupId
+                    groupId++;
+                    foreach (var orPart in orParts)
+                    {
+                        var quests = ExtractQuestsFromPart(orPart.Trim());
+                        foreach (var quest in quests)
+                        {
+                            quest.GroupId = groupId;
+                            requirements.Add(quest);
+                        }
+                    }
+                }
+                else
+                {
+                    // 단일 퀘스트 - 새 그룹
+                    var quests = ExtractQuestsFromPart(questLine);
+                    foreach (var quest in quests)
+                    {
+                        groupId++;
+                        quest.GroupId = groupId;
+                        requirements.Add(quest);
+                    }
                 }
             }
 
@@ -1908,6 +2056,9 @@ namespace TarkovDBEditor.Services
 
         [JsonPropertyName("excludedEdition")]
         public string? ExcludedEdition { get; set; }
+
+        [JsonPropertyName("requiredDecodeCount")]
+        public int? RequiredDecodeCount { get; set; }
 
         [JsonPropertyName("cachedAt")]
         public DateTime CachedAt { get; set; }
