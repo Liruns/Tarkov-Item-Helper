@@ -177,11 +177,19 @@ namespace TarkovHelper.Services
         public IReadOnlyList<TarkovTask> AllTasks => _allTasks;
 
         /// <summary>
-        /// Get task by normalized name
+        /// Get task by normalized name (deprecated, use GetTaskById instead)
         /// </summary>
         public TarkovTask? GetTask(string normalizedName)
         {
             return _tasksByNormalizedName.TryGetValue(normalizedName, out var task) ? task : null;
+        }
+
+        /// <summary>
+        /// Get task by database ID (primary lookup method)
+        /// </summary>
+        public TarkovTask? GetTaskById(string id)
+        {
+            return _tasksById.TryGetValue(id, out var task) ? task : null;
         }
 
         /// <summary>
@@ -201,13 +209,22 @@ namespace TarkovHelper.Services
         /// </summary>
         public QuestStatus GetStatus(TarkovTask task)
         {
-            if (task.NormalizedName == null) return QuestStatus.Active;
+            var taskId = task.Ids?.FirstOrDefault();
+            var taskKey = taskId ?? task.NormalizedName;
+
+            if (string.IsNullOrEmpty(taskKey)) return QuestStatus.Active;
 
             // Check if manually set to Done or Failed
-            if (_questProgress.TryGetValue(task.NormalizedName, out var status))
+            // Try by Id first, then by NormalizedName for backwards compatibility
+            if (!string.IsNullOrEmpty(taskId) && _questProgress.TryGetValue(taskId, out var statusById))
             {
-                if (status == QuestStatus.Done || status == QuestStatus.Failed)
-                    return status;
+                if (statusById == QuestStatus.Done || statusById == QuestStatus.Failed)
+                    return statusById;
+            }
+            else if (!string.IsNullOrEmpty(task.NormalizedName) && _questProgress.TryGetValue(task.NormalizedName, out var statusByName))
+            {
+                if (statusByName == QuestStatus.Done || statusByName == QuestStatus.Failed)
+                    return statusByName;
             }
 
             // Circular reference protection for prerequisite checking
@@ -215,14 +232,22 @@ namespace TarkovHelper.Services
             _getStatusVisited ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // If already checking this task (circular reference), treat as Active to break the cycle
-            if (!_getStatusVisited.Add(task.NormalizedName))
+            if (!_getStatusVisited.Add(taskKey))
             {
                 return QuestStatus.Active;
             }
 
             try
             {
-                // Check DSP Decode Count for Make Amends quests
+                // Check edition requirements first (Unavailable takes precedence)
+                if (!IsEditionRequirementMet(task))
+                    return QuestStatus.Unavailable;
+
+                // Check prestige level requirement (also Unavailable)
+                if (!IsPrestigeLevelRequirementMet(task))
+                    return QuestStatus.Unavailable;
+
+                // Check DSP Decode Count requirement (Locked, not Unavailable)
                 if (!IsDspRequirementMet(task))
                     return QuestStatus.Locked;
 
@@ -242,7 +267,7 @@ namespace TarkovHelper.Services
             }
             finally
             {
-                _getStatusVisited.Remove(task.NormalizedName);
+                _getStatusVisited.Remove(taskKey);
                 if (isTopLevel)
                 {
                     _getStatusVisited = null;
@@ -287,41 +312,82 @@ namespace TarkovHelper.Services
             }
         }
 
-        // Make Amends quest normalized names for DSP Decode filtering
-        private static readonly string MakeAmendsBuyout = "make-amends-buyout";
-        private static readonly string MakeAmendsSecurity = "make-amends-security";
-        private static readonly string MakeAmendsSoftware = "make-amends-software";
+        /// <summary>
+        /// Check if edition requirements are met for the quest
+        /// Returns false if quest is unavailable due to edition restrictions
+        /// </summary>
+        public bool IsEditionRequirementMet(TarkovTask task)
+        {
+            var settings = SettingsService.Instance;
+
+            // Check required edition (EOD and Unheard are independent)
+            if (!string.IsNullOrEmpty(task.RequiredEdition))
+            {
+                var requiredEdition = task.RequiredEdition.ToLowerInvariant();
+
+                // EOD edition requirement - only EOD checkbox matters
+                if (requiredEdition == "eod" || requiredEdition == "edge_of_darkness")
+                {
+                    if (!settings.HasEodEdition)
+                        return false;
+                }
+                // Unheard edition requirement - only Unheard checkbox matters
+                else if (requiredEdition == "unheard" || requiredEdition == "the_unheard")
+                {
+                    if (!settings.HasUnheardEdition)
+                        return false;
+                }
+            }
+
+            // Check excluded edition
+            if (!string.IsNullOrEmpty(task.ExcludedEdition))
+            {
+                var excludedEdition = task.ExcludedEdition.ToLowerInvariant();
+
+                // Excluded from EOD edition
+                if (excludedEdition == "eod" || excludedEdition == "edge_of_darkness")
+                {
+                    if (settings.HasEodEdition)
+                        return false;
+                }
+                // Excluded from Unheard edition
+                else if (excludedEdition == "unheard" || excludedEdition == "the_unheard")
+                {
+                    if (settings.HasUnheardEdition)
+                        return false;
+                }
+            }
+
+            return true;
+        }
 
         /// <summary>
-        /// Check if DSP Decode Count requirement is met for Make Amends quests
-        /// - 0 Decodes: No Make Amends quest available
-        /// - 1 Decode: Buyout is available
-        /// - 2 Decodes: Security is available
-        /// - 3 Decodes: Software is available
+        /// Check if prestige level requirement is met for the quest
+        /// </summary>
+        public bool IsPrestigeLevelRequirementMet(TarkovTask task)
+        {
+            // If no prestige level requirement, always met
+            if (!task.RequiredPrestigeLevel.HasValue || task.RequiredPrestigeLevel.Value <= 0)
+                return true;
+
+            var playerPrestige = SettingsService.Instance.PrestigeLevel;
+            return playerPrestige >= task.RequiredPrestigeLevel.Value;
+        }
+
+        /// <summary>
+        /// Check if DSP Decode Count requirement is met for the quest.
+        /// Uses the RequiredDecodeCount field from the database.
         /// </summary>
         public bool IsDspRequirementMet(TarkovTask task)
         {
-            if (task.NormalizedName == null) return true;
+            // If no decode count requirement, always met
+            if (!task.RequiredDecodeCount.HasValue)
+                return true;
 
-            var normalizedName = task.NormalizedName.ToLowerInvariant();
             var dspCount = SettingsService.Instance.DspDecodeCount;
 
-            // Check if this is a Make Amends quest
-            if (normalizedName == MakeAmendsBuyout)
-            {
-                return dspCount == 1;
-            }
-            else if (normalizedName == MakeAmendsSecurity)
-            {
-                return dspCount == 2;
-            }
-            else if (normalizedName == MakeAmendsSoftware)
-            {
-                return dspCount == 3;
-            }
-
-            // Not a Make Amends quest, no DSP requirement
-            return true;
+            // RequiredDecodeCount specifies the exact DSP decode count needed
+            return dspCount == task.RequiredDecodeCount.Value;
         }
 
         /// <summary>
@@ -337,24 +403,84 @@ namespace TarkovHelper.Services
         }
 
         /// <summary>
-        /// Check if all prerequisites are met based on taskRequirements or legacy Previous field
+        /// Check if all prerequisites are met based on taskRequirements or legacy Previous field.
+        /// Supports OR groups: GroupId = 0 means AND condition, GroupId > 0 means OR condition within the same group.
         /// </summary>
         public bool ArePrerequisitesMet(TarkovTask task)
         {
-            // Use taskRequirements if available (more accurate status conditions)
+            // Use taskRequirements if available (more accurate status conditions with OR group support)
             if (task.TaskRequirements != null && task.TaskRequirements.Count > 0)
             {
-                foreach (var req in task.TaskRequirements)
+                // Group requirements by GroupId
+                var andRequirements = task.TaskRequirements.Where(r => r.GroupId == 0).ToList();
+                var orGroups = task.TaskRequirements
+                    .Where(r => r.GroupId > 0)
+                    .GroupBy(r => r.GroupId)
+                    .ToList();
+
+                System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] Quest: {task.Ids?.FirstOrDefault()} ({task.Name})");
+                System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] AND requirements: {andRequirements.Count}, OR groups: {orGroups.Count}");
+
+                // Check AND requirements (GroupId = 0): ALL must be satisfied
+                foreach (var req in andRequirements)
                 {
-                    var reqTask = GetTask(req.TaskNormalizedName);
-                    if (reqTask == null) continue;
+                    // Primary: lookup by TaskId, fallback to TaskNormalizedName for backwards compatibility
+                    var reqTask = !string.IsNullOrEmpty(req.TaskId)
+                        ? GetTaskById(req.TaskId)
+                        : GetTask(req.TaskNormalizedName);
+
+                    if (reqTask == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] AND req task not found: TaskId={req.TaskId}, NormalizedName={req.TaskNormalizedName}");
+                        continue;
+                    }
 
                     var reqStatus = GetStatus(reqTask);
-
-                    // Check if current status satisfies the requirement
-                    if (!IsStatusSatisfied(reqStatus, req.Status))
+                    var satisfied = IsStatusSatisfied(reqStatus, req.Status);
+                    System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] AND: {reqTask.Name} status={reqStatus}, required={string.Join(",", req.Status ?? new List<string>())}, satisfied={satisfied}");
+                    if (!satisfied)
                         return false;
                 }
+
+                // Check OR groups (GroupId > 0): ANY ONE in each group must be satisfied
+                foreach (var group in orGroups)
+                {
+                    bool anyInGroupSatisfied = false;
+                    System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] OR Group {group.Key}: {group.Count()} items");
+
+                    foreach (var req in group)
+                    {
+                        // Primary: lookup by TaskId, fallback to TaskNormalizedName for backwards compatibility
+                        var reqTask = !string.IsNullOrEmpty(req.TaskId)
+                            ? GetTaskById(req.TaskId)
+                            : GetTask(req.TaskNormalizedName);
+
+                        if (reqTask == null)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet]   OR req task not found: TaskId={req.TaskId}, NormalizedName={req.TaskNormalizedName}");
+                            continue;
+                        }
+
+                        var reqStatus = GetStatus(reqTask);
+                        var satisfied = IsStatusSatisfied(reqStatus, req.Status);
+                        System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet]   OR: {reqTask.Name} status={reqStatus}, required={string.Join(",", req.Status ?? new List<string>())}, satisfied={satisfied}");
+                        if (satisfied)
+                        {
+                            anyInGroupSatisfied = true;
+                            break;
+                        }
+                    }
+
+                    // If no requirement in this OR group is satisfied, prerequisites are not met
+                    if (!anyInGroupSatisfied)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] OR Group {group.Key} NOT satisfied - returning false");
+                        return false;
+                    }
+                    System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] OR Group {group.Key} satisfied");
+                }
+
+                System.Diagnostics.Debug.WriteLine($"[ArePrerequisitesMet] All prerequisites met for {task.Name}");
                 return true;
             }
 
@@ -426,7 +552,8 @@ namespace TarkovHelper.Services
         /// </summary>
         public void CompleteQuest(TarkovTask task, bool completePrerequisites = true)
         {
-            System.Diagnostics.Debug.WriteLine($"[QuestProgressService] CompleteQuest: {task.NormalizedName}, prerequisites: {completePrerequisites}");
+            var taskId = task.Ids?.FirstOrDefault();
+            System.Diagnostics.Debug.WriteLine($"[QuestProgressService] CompleteQuest: {taskId} ({task.Name}), prerequisites: {completePrerequisites}");
 
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool anyChanged = CompleteQuestInternal(task, completePrerequisites, visited);
@@ -436,15 +563,19 @@ namespace TarkovHelper.Services
             {
                 foreach (var altQuestName in task.AlternativeQuests)
                 {
-                    var altTask = GetTask(altQuestName);
+                    // Try to find by NormalizedName (current data format) or by Id
+                    var altTask = GetTask(altQuestName) ?? GetTaskById(altQuestName);
                     if (altTask != null)
                     {
                         var altStatus = GetStatus(altTask);
                         // Only fail if not already done or failed
                         if (altStatus != QuestStatus.Done && altStatus != QuestStatus.Failed)
                         {
-                            _questProgress[altQuestName] = QuestStatus.Failed;
+                            var altId = altTask.Ids?.FirstOrDefault();
+                            var altKey = altId ?? altQuestName;
+                            _questProgress[altKey] = QuestStatus.Failed;
                             anyChanged = true;
+                            System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Auto-failed alternative quest: {altKey} ({altTask.Name})");
                         }
                     }
                 }
@@ -470,17 +601,38 @@ namespace TarkovHelper.Services
         /// </summary>
         private bool CompleteQuestInternal(TarkovTask task, bool completePrerequisites, HashSet<string> visited)
         {
-            if (task.NormalizedName == null) return false;
+            var taskId = task.Ids?.FirstOrDefault();
+            var taskKey = taskId ?? task.NormalizedName;
+
+            if (string.IsNullOrEmpty(taskKey)) return false;
 
             // Prevent circular reference - if already visiting this quest, skip
-            if (!visited.Add(task.NormalizedName)) return false;
+            if (!visited.Add(taskKey)) return false;
 
-            // Skip if already done
-            if (_questProgress.TryGetValue(task.NormalizedName, out var currentStatus) && currentStatus == QuestStatus.Done)
+            // Skip if already done (check by both Id and NormalizedName)
+            if (_questProgress.TryGetValue(taskKey, out var currentStatus) && currentStatus == QuestStatus.Done)
+                return false;
+            if (!string.IsNullOrEmpty(task.NormalizedName) &&
+                _questProgress.TryGetValue(task.NormalizedName, out var statusByName) && statusByName == QuestStatus.Done)
                 return false;
 
-            // Complete prerequisites first (recursive)
-            if (completePrerequisites && task.Previous != null)
+            // Complete prerequisites first (recursive) using TaskRequirements
+            if (completePrerequisites && task.TaskRequirements != null)
+            {
+                foreach (var req in task.TaskRequirements)
+                {
+                    var prevTask = !string.IsNullOrEmpty(req.TaskId)
+                        ? GetTaskById(req.TaskId)
+                        : GetTask(req.TaskNormalizedName);
+
+                    if (prevTask != null && GetStatus(prevTask) != QuestStatus.Done)
+                    {
+                        CompleteQuestInternal(prevTask, true, visited);
+                    }
+                }
+            }
+            // Fallback to Previous list
+            else if (completePrerequisites && task.Previous != null)
             {
                 foreach (var prevName in task.Previous)
                 {
@@ -492,7 +644,93 @@ namespace TarkovHelper.Services
                 }
             }
 
-            _questProgress[task.NormalizedName] = QuestStatus.Done;
+            _questProgress[taskKey] = QuestStatus.Done;
+            return true;
+        }
+
+        /// <summary>
+        /// Apply multiple quest changes in batch (for sync operations)
+        /// Saves to DB once after all changes are applied
+        /// </summary>
+        public async Task ApplyQuestChangesBatchAsync(IEnumerable<(TarkovTask Task, QuestStatus Status)> changes)
+        {
+            var changedItems = new List<(string Id, string? NormalizedName, QuestStatus Status)>();
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (task, status) in changes)
+            {
+                var taskId = task.Ids?.FirstOrDefault();
+                var taskKey = taskId ?? task.NormalizedName;
+
+                if (string.IsNullOrEmpty(taskKey)) continue;
+
+                switch (status)
+                {
+                    case QuestStatus.Done:
+                        // Complete without recursive save
+                        if (CompleteQuestBatchInternal(task, visited, changedItems))
+                        {
+                            // Handle alternative quests (mutually exclusive)
+                            if (task.AlternativeQuests != null)
+                            {
+                                foreach (var altQuestName in task.AlternativeQuests)
+                                {
+                                    var altTask = GetTask(altQuestName) ?? GetTaskById(altQuestName);
+                                    if (altTask != null)
+                                    {
+                                        var altStatus = GetStatus(altTask);
+                                        if (altStatus != QuestStatus.Done && altStatus != QuestStatus.Failed)
+                                        {
+                                            var altId = altTask.Ids?.FirstOrDefault();
+                                            var altKey = altId ?? altQuestName;
+                                            _questProgress[altKey] = QuestStatus.Failed;
+                                            changedItems.Add((altId ?? altKey, altTask.NormalizedName, QuestStatus.Failed));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+
+                    case QuestStatus.Failed:
+                        if (!_questProgress.TryGetValue(taskKey, out var currentStatus) || currentStatus != QuestStatus.Failed)
+                        {
+                            _questProgress[taskKey] = QuestStatus.Failed;
+                            changedItems.Add((taskId ?? taskKey, task.NormalizedName, QuestStatus.Failed));
+                        }
+                        break;
+                }
+            }
+
+            if (changedItems.Count > 0)
+            {
+                // Save all changes in one batch transaction
+                await _userDataDb.SaveQuestProgressBatchAsync(changedItems);
+                System.Diagnostics.Debug.WriteLine($"[QuestProgressService] Batch saved {changedItems.Count} quest changes");
+                ProgressChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Internal batch completion - updates memory state and collects changes without saving
+        /// </summary>
+        private bool CompleteQuestBatchInternal(TarkovTask task, HashSet<string> visited, List<(string Id, string? NormalizedName, QuestStatus Status)> changedItems)
+        {
+            var taskId = task.Ids?.FirstOrDefault();
+            var taskKey = taskId ?? task.NormalizedName;
+
+            if (string.IsNullOrEmpty(taskKey)) return false;
+            if (!visited.Add(taskKey)) return false;
+
+            // Skip if already done
+            if (_questProgress.TryGetValue(taskKey, out var currentStatus) && currentStatus == QuestStatus.Done)
+                return false;
+            if (!string.IsNullOrEmpty(task.NormalizedName) &&
+                _questProgress.TryGetValue(task.NormalizedName, out var statusByName) && statusByName == QuestStatus.Done)
+                return false;
+
+            _questProgress[taskKey] = QuestStatus.Done;
+            changedItems.Add((taskId ?? taskKey, task.NormalizedName, QuestStatus.Done));
             return true;
         }
 
@@ -501,9 +739,12 @@ namespace TarkovHelper.Services
         /// </summary>
         public void FailQuest(TarkovTask task)
         {
-            if (task.NormalizedName == null) return;
+            var taskId = task.Ids?.FirstOrDefault();
+            var taskKey = taskId ?? task.NormalizedName;
 
-            _questProgress[task.NormalizedName] = QuestStatus.Failed;
+            if (string.IsNullOrEmpty(taskKey)) return;
+
+            _questProgress[taskKey] = QuestStatus.Failed;
             SaveProgress();
             ProgressChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -513,9 +754,18 @@ namespace TarkovHelper.Services
         /// </summary>
         public void ResetQuest(TarkovTask task)
         {
-            if (task.NormalizedName == null) return;
+            var taskId = task.Ids?.FirstOrDefault();
+            var taskKey = taskId ?? task.NormalizedName;
 
-            _questProgress.Remove(task.NormalizedName);
+            if (string.IsNullOrEmpty(taskKey)) return;
+
+            // Remove by both Id and NormalizedName for clean migration
+            _questProgress.Remove(taskKey);
+            if (!string.IsNullOrEmpty(task.NormalizedName) && task.NormalizedName != taskKey)
+            {
+                _questProgress.Remove(task.NormalizedName);
+            }
+
             SaveProgress();
             ProgressChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -624,9 +874,9 @@ namespace TarkovHelper.Services
         /// <summary>
         /// Get count statistics for quest statuses
         /// </summary>
-        public (int Total, int Locked, int Active, int Done, int Failed, int LevelLocked) GetStatistics()
+        public (int Total, int Locked, int Active, int Done, int Failed, int LevelLocked, int Unavailable) GetStatistics()
         {
-            int locked = 0, active = 0, done = 0, failed = 0, levelLocked = 0;
+            int locked = 0, active = 0, done = 0, failed = 0, levelLocked = 0, unavailable = 0;
 
             foreach (var task in _allTasks)
             {
@@ -638,10 +888,11 @@ namespace TarkovHelper.Services
                     case QuestStatus.Done: done++; break;
                     case QuestStatus.Failed: failed++; break;
                     case QuestStatus.LevelLocked: levelLocked++; break;
+                    case QuestStatus.Unavailable: unavailable++; break;
                 }
             }
 
-            return (_allTasks.Count, locked, active, done, failed, levelLocked);
+            return (_allTasks.Count, locked, active, done, failed, levelLocked, unavailable);
         }
 
         #region Objective Progress

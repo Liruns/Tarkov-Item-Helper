@@ -267,6 +267,10 @@ namespace TarkovHelper.Pages
             _hideoutProgressService.ProgressChanged += OnProgressChanged;
             _inventoryService.InventoryChanged += OnInventoryChanged;
             SettingsService.Instance.PlayerFactionChanged += OnFactionChanged;
+            SettingsService.Instance.HasEodEditionChanged += OnEditionChanged;
+            SettingsService.Instance.HasUnheardEditionChanged += OnEditionChanged;
+            SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
+            SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
 
             Loaded += ItemsPage_Loaded;
             Unloaded += ItemsPage_Unloaded;
@@ -281,6 +285,10 @@ namespace TarkovHelper.Pages
             _hideoutProgressService.ProgressChanged -= OnProgressChanged;
             _inventoryService.InventoryChanged -= OnInventoryChanged;
             SettingsService.Instance.PlayerFactionChanged -= OnFactionChanged;
+            SettingsService.Instance.HasEodEditionChanged -= OnEditionChanged;
+            SettingsService.Instance.HasUnheardEditionChanged -= OnEditionChanged;
+            SettingsService.Instance.PrestigeLevelChanged -= OnPrestigeLevelChanged;
+            SettingsService.Instance.DspDecodeCountChanged -= OnDspDecodeCountChanged;
         }
 
         private void OnInventoryChanged(object? sender, EventArgs e)
@@ -309,6 +317,10 @@ namespace TarkovHelper.Pages
                 _hideoutProgressService.ProgressChanged += OnProgressChanged;
                 _inventoryService.InventoryChanged += OnInventoryChanged;
                 SettingsService.Instance.PlayerFactionChanged += OnFactionChanged;
+                SettingsService.Instance.HasEodEditionChanged += OnEditionChanged;
+                SettingsService.Instance.HasUnheardEditionChanged += OnEditionChanged;
+                SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
+                SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
             }
 
             // Skip if already loaded (avoid re-initialization on tab switch)
@@ -400,6 +412,42 @@ namespace TarkovHelper.Pages
                 ApplyFilters();
                 UpdateDetailPanel();
                 // Load images in background
+                _ = LoadImagesInBackgroundAsync();
+            });
+        }
+
+        private void OnEditionChanged(object? sender, bool e)
+        {
+            // Edition change affects which quests are available (Unavailable status)
+            Dispatcher.Invoke(async () =>
+            {
+                await LoadItemsAsync();
+                ApplyFilters();
+                UpdateDetailPanel();
+                _ = LoadImagesInBackgroundAsync();
+            });
+        }
+
+        private void OnPrestigeLevelChanged(object? sender, int e)
+        {
+            // Prestige level change affects which quests are available (Unavailable status)
+            Dispatcher.Invoke(async () =>
+            {
+                await LoadItemsAsync();
+                ApplyFilters();
+                UpdateDetailPanel();
+                _ = LoadImagesInBackgroundAsync();
+            });
+        }
+
+        private void OnDspDecodeCountChanged(object? sender, int e)
+        {
+            // DSP decode count change affects which quests are available (Locked status)
+            Dispatcher.Invoke(async () =>
+            {
+                await LoadItemsAsync();
+                ApplyFilters();
+                UpdateDetailPanel();
                 _ = LoadImagesInBackgroundAsync();
             });
         }
@@ -684,6 +732,10 @@ namespace TarkovHelper.Pages
                 if (status == QuestStatus.Done)
                     continue;
 
+                // Skip unavailable quests (edition/prestige requirements not met)
+                if (status == QuestStatus.Unavailable)
+                    continue;
+
                 // Skip quests from other factions
                 if (!settings.ShouldIncludeTask(task.Faction))
                     continue;
@@ -699,6 +751,10 @@ namespace TarkovHelper.Pages
 
                     // Skip if item not found in Items table
                     if (itemInfo == null)
+                        continue;
+
+                    // Skip quest-only items (they don't need to be tracked in the Items tab)
+                    if (string.Equals(itemInfo.Category, "Quest Items", StringComparison.OrdinalIgnoreCase))
                         continue;
 
                     var itemName = itemInfo.Name;
@@ -1110,6 +1166,10 @@ namespace TarkovHelper.Pages
                 // Skip completed quests
                 var status = _questProgressService.GetStatus(task);
                 if (status == QuestStatus.Done)
+                    continue;
+
+                // Skip unavailable quests (edition/prestige requirements not met)
+                if (status == QuestStatus.Unavailable)
                     continue;
 
                 // Skip quests from other factions

@@ -52,6 +52,34 @@ namespace TarkovHelper.Pages
     }
 
     /// <summary>
+    /// Prerequisite group view model for displaying OR/AND grouped prerequisites
+    /// </summary>
+    public class PrerequisiteGroupViewModel
+    {
+        public int GroupId { get; set; }
+        public bool IsOrGroup => GroupId > 0;
+        public string GroupLabel => IsOrGroup ? "OR" : "";
+        public Visibility OrLabelVisibility => IsOrGroup ? Visibility.Visible : Visibility.Collapsed;
+        public Brush OrGroupBackground => IsOrGroup ? new SolidColorBrush(Color.FromArgb(30, 33, 150, 243)) : Brushes.Transparent;
+        public List<PrerequisiteItemViewModel> Items { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Single prerequisite item view model
+    /// </summary>
+    public class PrerequisiteItemViewModel
+    {
+        public TarkovTask? Task { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string StatusText { get; set; } = string.Empty;
+        public Brush StatusBackground { get; set; } = Brushes.Gray;
+        public bool IsOrItem { get; set; }
+        public string OrSeparator => IsOrItem ? " OR " : "";
+        public Visibility OrSeparatorVisibility => IsOrItem ? Visibility.Visible : Visibility.Collapsed;
+        public string BulletText => IsOrItem ? "" : "• ";
+    }
+
+    /// <summary>
     /// Recommendation view model for display
     /// </summary>
     public class RecommendationViewModel
@@ -141,6 +169,7 @@ namespace TarkovHelper.Pages
         private static readonly Brush DoneBrush = new SolidColorBrush(Color.FromRgb(33, 150, 243));
         private static readonly Brush FailedBrush = new SolidColorBrush(Color.FromRgb(244, 67, 54));
         private static readonly Brush LevelLockedBrush = new SolidColorBrush(Color.FromRgb(255, 152, 0)); // Orange for Level Locked
+        private static readonly Brush UnavailableBrush = new SolidColorBrush(Color.FromRgb(158, 158, 158)); // Gray for Unavailable
 
         // Recommendation type brushes
         private static readonly Brush ReadyToCompleteBrush = new SolidColorBrush(Color.FromRgb(76, 175, 80)); // Green
@@ -154,6 +183,10 @@ namespace TarkovHelper.Pages
             InitializeComponent();
             _loc.LanguageChanged += OnLanguageChanged;
             _progressService.ProgressChanged += OnProgressChanged;
+            SettingsService.Instance.HasEodEditionChanged += OnProfileSettingChanged;
+            SettingsService.Instance.HasUnheardEditionChanged += OnProfileSettingChanged;
+            SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
+            SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
 
             Loaded += QuestListPage_Loaded;
             Unloaded += QuestListPage_Unloaded;
@@ -165,6 +198,10 @@ namespace TarkovHelper.Pages
             // Unsubscribe from events to prevent memory leaks
             _loc.LanguageChanged -= OnLanguageChanged;
             _progressService.ProgressChanged -= OnProgressChanged;
+            SettingsService.Instance.HasEodEditionChanged -= OnProfileSettingChanged;
+            SettingsService.Instance.HasUnheardEditionChanged -= OnProfileSettingChanged;
+            SettingsService.Instance.PrestigeLevelChanged -= OnPrestigeLevelChanged;
+            SettingsService.Instance.DspDecodeCountChanged -= OnDspDecodeCountChanged;
         }
 
         private async void QuestListPage_Loaded(object sender, RoutedEventArgs e)
@@ -175,6 +212,10 @@ namespace TarkovHelper.Pages
                 _isUnloaded = false;
                 _loc.LanguageChanged += OnLanguageChanged;
                 _progressService.ProgressChanged += OnProgressChanged;
+                SettingsService.Instance.HasEodEditionChanged += OnProfileSettingChanged;
+                SettingsService.Instance.HasUnheardEditionChanged += OnProfileSettingChanged;
+                SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
+                SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
             }
 
             // Skip if already loaded (prevents re-initialization on tab switching)
@@ -220,6 +261,39 @@ namespace TarkovHelper.Pages
         }
 
         private void OnProgressChanged(object? sender, EventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                RefreshQuestStatuses();
+                ApplyFilters();
+                UpdateDetailPanel();
+                UpdateRecommendations();
+            });
+        }
+
+        private void OnProfileSettingChanged(object? sender, bool e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                RefreshQuestStatuses();
+                ApplyFilters();
+                UpdateDetailPanel();
+                UpdateRecommendations();
+            });
+        }
+
+        private void OnPrestigeLevelChanged(object? sender, int e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                RefreshQuestStatuses();
+                ApplyFilters();
+                UpdateDetailPanel();
+                UpdateRecommendations();
+            });
+        }
+
+        private void OnDspDecodeCountChanged(object? sender, int e)
         {
             Dispatcher.Invoke(() =>
             {
@@ -370,8 +444,8 @@ namespace TarkovHelper.Pages
                 Status = status,
                 StatusText = GetStatusText(status, task),
                 StatusBackground = GetStatusBrush(status),
-                CompleteButtonVisibility = status == QuestStatus.Active || status == QuestStatus.Locked || status == QuestStatus.LevelLocked
-                    ? Visibility.Visible : Visibility.Collapsed,
+                CompleteButtonVisibility = (status == QuestStatus.Active || status == QuestStatus.Locked || status == QuestStatus.LevelLocked)
+                    && status != QuestStatus.Unavailable ? Visibility.Visible : Visibility.Collapsed,
                 IsKappaRequired = task.ReqKappa
             };
         }
@@ -423,6 +497,28 @@ namespace TarkovHelper.Pages
                 }
             }
 
+            if (status == QuestStatus.Unavailable && task != null)
+            {
+                // Show specific reason for unavailability
+                if (!_progressService.IsEditionRequirementMet(task))
+                {
+                    // Show which edition is required
+                    var requiredEdition = task.RequiredEdition?.ToLowerInvariant();
+                    if (requiredEdition == "eod" || requiredEdition == "edge_of_darkness")
+                        return "EOD";
+                    if (requiredEdition == "unheard" || requiredEdition == "the_unheard")
+                        return "Unheard";
+                    // Check for excluded edition
+                    var excludedEdition = task.ExcludedEdition?.ToLowerInvariant();
+                    if (!string.IsNullOrEmpty(excludedEdition))
+                        return "Edition";
+                }
+                if (!_progressService.IsPrestigeLevelRequirementMet(task))
+                {
+                    return $"P.{task.RequiredPrestigeLevel}";
+                }
+            }
+
             return status switch
             {
                 QuestStatus.Locked => "Locked",
@@ -430,6 +526,7 @@ namespace TarkovHelper.Pages
                 QuestStatus.Done => "Done",
                 QuestStatus.Failed => "Failed",
                 QuestStatus.LevelLocked => "Level",
+                QuestStatus.Unavailable => "N/A",
                 _ => "Unknown"
             };
         }
@@ -443,6 +540,7 @@ namespace TarkovHelper.Pages
                 QuestStatus.Done => DoneBrush,
                 QuestStatus.Failed => FailedBrush,
                 QuestStatus.LevelLocked => LevelLockedBrush,
+                QuestStatus.Unavailable => UnavailableBrush,
                 _ => Brushes.Gray
             };
         }
@@ -466,8 +564,8 @@ namespace TarkovHelper.Pages
                 vm.Status = status;
                 vm.StatusText = GetStatusText(status, vm.Task);
                 vm.StatusBackground = GetStatusBrush(status);
-                vm.CompleteButtonVisibility = status == QuestStatus.Active || status == QuestStatus.Locked || status == QuestStatus.LevelLocked
-                    ? Visibility.Visible : Visibility.Collapsed;
+                vm.CompleteButtonVisibility = (status == QuestStatus.Active || status == QuestStatus.Locked || status == QuestStatus.LevelLocked)
+                    && status != QuestStatus.Unavailable ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 
@@ -559,9 +657,18 @@ namespace TarkovHelper.Pages
                 // Status filter
                 if (selectedStatus != "All")
                 {
-                    var statusFilter = Enum.Parse<QuestStatus>(selectedStatus);
-                    if (vm.Status != statusFilter)
-                        return false;
+                    // "Locked" filter now includes both Locked and LevelLocked
+                    if (selectedStatus == "Locked")
+                    {
+                        if (vm.Status != QuestStatus.Locked && vm.Status != QuestStatus.LevelLocked)
+                            return false;
+                    }
+                    else
+                    {
+                        var statusFilter = Enum.Parse<QuestStatus>(selectedStatus);
+                        if (vm.Status != statusFilter)
+                            return false;
+                    }
                 }
 
                 // Faction filter - hide quests for the other faction
@@ -579,8 +686,9 @@ namespace TarkovHelper.Pages
             // Update statistics
             var stats = _progressService.GetStatistics();
             var playerLevel = SettingsService.Instance.PlayerLevel;
+            var lockedTotal = stats.Locked + stats.LevelLocked;
             TxtStats.Text = $"Lv.{playerLevel} | Showing {filtered.Count} of {stats.Total} quests | " +
-                           $"Active: {stats.Active} | Level: {stats.LevelLocked} | Done: {stats.Done} | Locked: {stats.Locked} | Failed: {stats.Failed}";
+                           $"Active: {stats.Active} | Locked: {lockedTotal} | Done: {stats.Done} | Failed: {stats.Failed} | N/A: {stats.Unavailable}";
 
             // Update Kappa progress gauge
             UpdateKappaGauge();
@@ -754,24 +862,122 @@ namespace TarkovHelper.Pages
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
-            // Prerequisites
-            var prereqs = _progressService.GetPrerequisiteChain(task);
-            if (prereqs.Count > 0)
+            // Prerequisites - show direct prerequisites with OR/AND grouping
+            if (task.TaskRequirements != null && task.TaskRequirements.Count > 0)
             {
-                var prereqVms = prereqs.Select(p =>
-                {
-                    var pStatus = _progressService.GetStatus(p);
-                    var (pName, _, _) = GetLocalizedNames(p);
-                    return new QuestViewModel
-                    {
-                        DisplayName = pName,
-                        StatusText = GetStatusText(pStatus),
-                        StatusBackground = GetStatusBrush(pStatus)
-                    };
-                }).ToList();
+                var prereqGroups = new List<PrerequisiteGroupViewModel>();
 
-                PrerequisitesList.ItemsSource = prereqVms;
-                PrerequisitesSectionWrapper.Visibility = Visibility.Visible;
+                // Group by GroupId: 0 = AND (each as separate group), >0 = OR (same GroupId = same group)
+                var andRequirements = task.TaskRequirements.Where(r => r.GroupId == 0).ToList();
+                var orGroups = task.TaskRequirements
+                    .Where(r => r.GroupId > 0)
+                    .GroupBy(r => r.GroupId)
+                    .ToList();
+
+                // Add AND requirements (each as separate entry)
+                foreach (var req in andRequirements)
+                {
+                    var reqTask = !string.IsNullOrEmpty(req.TaskId)
+                        ? _progressService.GetTaskById(req.TaskId)
+                        : _progressService.GetTask(req.TaskNormalizedName);
+
+                    if (reqTask == null) continue;
+
+                    var pStatus = _progressService.GetStatus(reqTask);
+                    var (pName, _, _) = GetLocalizedNames(reqTask);
+
+                    prereqGroups.Add(new PrerequisiteGroupViewModel
+                    {
+                        GroupId = 0,
+                        Items = new List<PrerequisiteItemViewModel>
+                        {
+                            new PrerequisiteItemViewModel
+                            {
+                                Task = reqTask,
+                                DisplayName = pName,
+                                StatusText = GetStatusText(pStatus),
+                                StatusBackground = GetStatusBrush(pStatus),
+                                IsOrItem = false
+                            }
+                        }
+                    });
+                }
+
+                // Add OR groups (only show as OR group if 2+ items, otherwise treat as AND)
+                foreach (var orGroup in orGroups)
+                {
+                    var orItems = orGroup.ToList();
+
+                    // If OR group has only 1 item, treat it as a regular AND requirement
+                    if (orItems.Count == 1)
+                    {
+                        var req = orItems[0];
+                        var reqTask = !string.IsNullOrEmpty(req.TaskId)
+                            ? _progressService.GetTaskById(req.TaskId)
+                            : _progressService.GetTask(req.TaskNormalizedName);
+
+                        if (reqTask != null)
+                        {
+                            var pStatus = _progressService.GetStatus(reqTask);
+                            var (pName, _, _) = GetLocalizedNames(reqTask);
+
+                            prereqGroups.Add(new PrerequisiteGroupViewModel
+                            {
+                                GroupId = 0, // Treat as AND (not OR group)
+                                Items = new List<PrerequisiteItemViewModel>
+                                {
+                                    new PrerequisiteItemViewModel
+                                    {
+                                        Task = reqTask,
+                                        DisplayName = pName,
+                                        StatusText = GetStatusText(pStatus),
+                                        StatusBackground = GetStatusBrush(pStatus),
+                                        IsOrItem = false
+                                    }
+                                }
+                            });
+                        }
+                        continue;
+                    }
+
+                    // OR group with 2+ items - display as OR group
+                    var groupVm = new PrerequisiteGroupViewModel
+                    {
+                        GroupId = orGroup.Key,
+                        Items = new List<PrerequisiteItemViewModel>()
+                    };
+
+                    bool isFirst = true;
+                    foreach (var req in orItems)
+                    {
+                        var reqTask = !string.IsNullOrEmpty(req.TaskId)
+                            ? _progressService.GetTaskById(req.TaskId)
+                            : _progressService.GetTask(req.TaskNormalizedName);
+
+                        if (reqTask == null) continue;
+
+                        var pStatus = _progressService.GetStatus(reqTask);
+                        var (pName, _, _) = GetLocalizedNames(reqTask);
+
+                        groupVm.Items.Add(new PrerequisiteItemViewModel
+                        {
+                            Task = reqTask,
+                            DisplayName = pName,
+                            StatusText = GetStatusText(pStatus),
+                            StatusBackground = GetStatusBrush(pStatus),
+                            IsOrItem = !isFirst  // Show "OR" separator for 2nd item onwards
+                        });
+                        isFirst = false;
+                    }
+
+                    if (groupVm.Items.Count > 0)
+                    {
+                        prereqGroups.Add(groupVm);
+                    }
+                }
+
+                PrerequisitesList.ItemsSource = prereqGroups;
+                PrerequisitesSectionWrapper.Visibility = prereqGroups.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             else
             {
@@ -1724,6 +1930,24 @@ namespace TarkovHelper.Pages
                 if (!string.IsNullOrEmpty(questNormalizedName))
                 {
                     SelectQuestInternal(questNormalizedName);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Prerequisite Quest Navigation
+
+        /// <summary>
+        /// Handle click on prerequisite quest name to navigate to that quest
+        /// </summary>
+        private void PrerequisiteQuest_Click(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is PrerequisiteItemViewModel vm)
+            {
+                if (vm.Task?.NormalizedName != null)
+                {
+                    SelectQuestInternal(vm.Task.NormalizedName);
                 }
             }
         }

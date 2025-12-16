@@ -180,9 +180,9 @@
                         <ComboBoxItem Content="Active" Tag="Active" IsSelected="True"/>
                         <ComboBoxItem Content="All" Tag="All"/>
                         <ComboBoxItem Content="Locked" Tag="Locked"/>
-                        <ComboBoxItem Content="Level Locked" Tag="LevelLocked"/>
                         <ComboBoxItem Content="Done" Tag="Done"/>
                         <ComboBoxItem Content="Failed" Tag="Failed"/>
+                        <ComboBoxItem Content="Unavailable" Tag="Unavailable"/>
                     </ComboBox>
 
                     <!-- Faction Toggle -->
@@ -711,16 +711,57 @@
                                         <ItemsControl x:Name="PrerequisitesList">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <StackPanel Orientation="Horizontal" Margin="0,2">
-                                                        <TextBlock Text="- " Foreground="{StaticResource TextSecondaryBrush}"/>
-                                                        <TextBlock Text="{Binding DisplayName}"
-                                                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="{DynamicResource FontSizeXSmall}"/>
-                                                        <Border Padding="4,1" CornerRadius="2" Margin="8,0,0,0"
-                                                                Background="{Binding StatusBackground}">
-                                                            <TextBlock Text="{Binding StatusText}" FontSize="{DynamicResource FontSizeTiny}"
-                                                                       Foreground="White"/>
-                                                        </Border>
-                                                    </StackPanel>
+                                                    <!-- Prerequisite Group (AND item or OR group) -->
+                                                    <Border Margin="0,2" Padding="4"
+                                                            Background="{Binding OrGroupBackground}"
+                                                            CornerRadius="4">
+                                                        <StackPanel>
+                                                            <!-- OR Group Label -->
+                                                            <Border Visibility="{Binding OrLabelVisibility}"
+                                                                    Background="#2196F3" Padding="6,2" CornerRadius="3"
+                                                                    HorizontalAlignment="Left" Margin="0,0,0,4">
+                                                                <TextBlock Text="OR Group" FontSize="{DynamicResource FontSizeTiny}"
+                                                                           Foreground="White" FontWeight="SemiBold"/>
+                                                            </Border>
+                                                            <!-- Items in group -->
+                                                            <ItemsControl ItemsSource="{Binding Items}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                                            <!-- OR separator for 2nd+ items -->
+                                                                            <TextBlock Text="OR " Foreground="#2196F3" FontWeight="Bold"
+                                                                                       FontSize="{DynamicResource FontSizeXSmall}"
+                                                                                       Visibility="{Binding OrSeparatorVisibility}"
+                                                                                       Margin="0,0,4,0"/>
+                                                                            <TextBlock Text="{Binding BulletText}" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                                            <TextBlock Text="{Binding DisplayName}"
+                                                                                       FontSize="{DynamicResource FontSizeXSmall}"
+                                                                                       Cursor="Hand"
+                                                                                       MouseLeftButtonDown="PrerequisiteQuest_Click">
+                                                                                <TextBlock.Style>
+                                                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                                                        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                                                                        <Style.Triggers>
+                                                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                                                                                                <Setter Property="TextDecorations" Value="Underline"/>
+                                                                                            </Trigger>
+                                                                                        </Style.Triggers>
+                                                                                    </Style>
+                                                                                </TextBlock.Style>
+                                                                            </TextBlock>
+                                                                            <Border Padding="4,1" CornerRadius="2" Margin="8,0,0,0"
+                                                                                    Background="{Binding StatusBackground}">
+                                                                                <TextBlock Text="{Binding StatusText}"
+                                                                                           FontSize="{DynamicResource FontSizeTiny}"
+                                                                                           Foreground="White"/>
+                                                                            </Border>
+                                                                        </StackPanel>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Border>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>

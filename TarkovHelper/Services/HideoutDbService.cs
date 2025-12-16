@@ -204,11 +204,16 @@ public sealed class HideoutDbService
         if (!await TableExistsAsync(connection, "HideoutItemRequirements"))
             return;
 
+        // JOIN Items table to get Base64 ItemId (Items.Id) that matches QuestRequiredItems
         var sql = @"
             SELECT
-                StationId, Level, ItemId, ItemName, ItemNameKO, ItemNameJA,
-                IconLink, Count, FoundInRaid
-            FROM HideoutItemRequirements";
+                h.StationId, h.Level,
+                COALESCE(i.Id, h.ItemId) as ItemId,  -- Use Items.Id (Base64) if matched
+                h.ItemName, h.ItemNameKO, h.ItemNameJA,
+                COALESCE(i.IconUrl, h.IconLink) as IconLink,
+                h.Count, h.FoundInRaid
+            FROM HideoutItemRequirements h
+            LEFT JOIN Items i ON h.ItemId = i.BsgId";
 
         await using var cmd = new SqliteCommand(sql, connection);
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -229,7 +234,7 @@ public sealed class HideoutDbService
                     ItemName = itemName,
                     ItemNameKo = reader.IsDBNull(4) ? null : reader.GetString(4),
                     ItemNameJa = reader.IsDBNull(5) ? null : reader.GetString(5),
-                    ItemNormalizedName = NormalizedNameGenerator.Generate(itemName), // Generate from name
+                    ItemNormalizedName = itemId,  // Now uses Items.Id (Base64) - same as quest items
                     IconLink = reader.IsDBNull(6) ? null : reader.GetString(6),
                     Count = reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
                     FoundInRaid = !reader.IsDBNull(8) && reader.GetInt32(8) == 1
