@@ -211,6 +211,7 @@ public partial class MapTrackerPage : UserControl
     // Quest objective hit regions for tooltip
     private readonly List<QuestHitRegion> _questHitRegions = new();
     private QuestHitRegion? _hoveredQuestRegion;
+    private QuestObjective? _hoveredOptionalGroupObjective;  // For highlighting all optional points in same group
     private const double QuestClusterDistance = 40.0;  // Screen pixels to cluster quests
 
     // Quest panel data
@@ -2572,20 +2573,24 @@ public partial class MapTrackerPage : UserControl
 
             var color = Color.FromArgb((byte)(opacity * 255), optionalColor.R, optionalColor.G, optionalColor.B);
             var (sx, sy) = _currentMapConfig!.GameToScreen(point.X, point.Z);
-            var markerSize = 26 * inverseScale;  // Slightly larger to fit number format
+            var markerSize = 28 * inverseScale;  // Size for diamond shape
+            var halfSize = markerSize / 2;
 
-            // Circular marker with number format inside
-            var circle = new Ellipse
+            // Diamond shape marker (rotated square)
+            var diamond = new Polygon
             {
-                Width = markerSize,
-                Height = markerSize,
+                Points = new PointCollection
+                {
+                    new Point(sx, sy - halfSize),        // Top
+                    new Point(sx + halfSize, sy),        // Right
+                    new Point(sx, sy + halfSize),        // Bottom
+                    new Point(sx - halfSize, sy)         // Left
+                },
                 Fill = new SolidColorBrush(Color.FromArgb((byte)(opacity * 200), optionalColor.R, optionalColor.G, optionalColor.B)),
                 Stroke = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 0xFF, 0xFF, 0xFF)),  // White border
                 StrokeThickness = 2 * inverseScale
             };
-            Canvas.SetLeft(circle, sx - markerSize / 2);
-            Canvas.SetTop(circle, sy - markerSize / 2);
-            ObjectivesCanvas.Children.Add(circle);
+            ObjectivesCanvas.Children.Add(diamond);
 
             // Number format label inside the marker (e.g., "1/8")
             var numberText = $"{i + 1}/{totalPoints}";
@@ -2842,6 +2847,13 @@ public partial class MapTrackerPage : UserControl
             // Hide quest tooltip if showing
             _hoveredQuestRegion = null;
 
+            // Clear optional group highlight when hovering over regular markers
+            if (_hoveredOptionalGroupObjective != null)
+            {
+                _hoveredOptionalGroupObjective = null;
+                UpdateOptionalGroupHighlight(null);
+            }
+
             // Convert marker's canvas position to viewer coordinates for tooltip placement
             var markerViewerPos = CanvasToViewerCoordinates(foundRegion.ScreenX, foundRegion.ScreenY);
 
@@ -2863,6 +2875,14 @@ public partial class MapTrackerPage : UserControl
             // Hide marker tooltip if showing
             _hoveredMarker = null;
             _currentTooltipHitRegion = null;
+
+            // Update optional group highlight for optional point markers
+            var newOptionalGroup = foundQuestRegion.IsOptionalPoint ? foundQuestRegion.Objective : null;
+            if (_hoveredOptionalGroupObjective != newOptionalGroup)
+            {
+                _hoveredOptionalGroupObjective = newOptionalGroup;
+                UpdateOptionalGroupHighlight(newOptionalGroup);
+            }
 
             // Convert quest marker's canvas position to viewer coordinates for tooltip placement
             var questViewerPos = CanvasToViewerCoordinates(foundQuestRegion.ScreenX, foundQuestRegion.ScreenY);
@@ -2888,7 +2908,75 @@ public partial class MapTrackerPage : UserControl
                 _currentTooltipHitRegion = null;
                 MarkerTooltip.Visibility = Visibility.Collapsed;
             }
+
+            // Clear optional group highlight when not hovering
+            if (_hoveredOptionalGroupObjective != null)
+            {
+                _hoveredOptionalGroupObjective = null;
+                UpdateOptionalGroupHighlight(null);
+            }
+
             MapCanvas.Cursor = Cursors.Arrow;
+        }
+    }
+
+    /// <summary>
+    /// Update highlight effect for all optional points in the same group
+    /// </summary>
+    private void UpdateOptionalGroupHighlight(QuestObjective? objective)
+    {
+        // Find and update all optional point markers for this objective
+        // Use a glow effect or border highlight
+        foreach (var region in _questHitRegions)
+        {
+            if (region.IsOptionalPoint)
+            {
+                bool isHighlighted = objective != null && region.Objective == objective;
+                UpdateOptionalMarkerHighlight(region, isHighlighted);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Update highlight effect for a single optional point marker
+    /// </summary>
+    private void UpdateOptionalMarkerHighlight(QuestHitRegion region, bool isHighlighted)
+    {
+        // Find the marker's visual elements in the canvas by position
+        var inverseScale = 1.0 / _zoomLevel;
+        var markerSize = 28 * inverseScale;
+        var highlightSize = markerSize + 8 * inverseScale;
+        var halfHighlightSize = highlightSize / 2;
+
+        // Remove any existing highlight for this region (identified by Tag)
+        var existingHighlights = ObjectivesCanvas.Children
+            .OfType<Polygon>()
+            .Where(p => p.Tag is string tag && tag == $"highlight_{region.ScreenX}_{region.ScreenY}")
+            .ToList();
+        foreach (var existing in existingHighlights)
+        {
+            ObjectivesCanvas.Children.Remove(existing);
+        }
+
+        if (isHighlighted)
+        {
+            // Add diamond-shaped glow/highlight effect
+            var highlightDiamond = new Polygon
+            {
+                Points = new PointCollection
+                {
+                    new Point(region.ScreenX, region.ScreenY - halfHighlightSize),        // Top
+                    new Point(region.ScreenX + halfHighlightSize, region.ScreenY),        // Right
+                    new Point(region.ScreenX, region.ScreenY + halfHighlightSize),        // Bottom
+                    new Point(region.ScreenX - halfHighlightSize, region.ScreenY)         // Left
+                },
+                Fill = Brushes.Transparent,
+                Stroke = new SolidColorBrush(Color.FromArgb(180, 0xFF, 0xFF, 0x00)),  // Yellow glow
+                StrokeThickness = 3 * inverseScale,
+                Tag = $"highlight_{region.ScreenX}_{region.ScreenY}"
+            };
+            Canvas.SetZIndex(highlightDiamond, -1);  // Behind the marker
+            ObjectivesCanvas.Children.Add(highlightDiamond);
         }
     }
 
