@@ -24,6 +24,23 @@ public class LocationPoint
 }
 
 /// <summary>
+/// Quest objective type for categorization and display
+/// </summary>
+public enum QuestObjectiveType
+{
+    Custom,     // Default/uncategorized
+    Kill,       // Kill targets
+    Collect,    // Collect items (pick up)
+    HandOver,   // Hand over items to trader
+    Visit,      // Visit location
+    Mark,       // Mark location with marker
+    Stash,      // Stash items in location
+    Survive,    // Survive and extract
+    Build,      // Build hideout module
+    Task        // Generic task
+}
+
+/// <summary>
 /// Quest objective with map location data for display on the map
 /// </summary>
 public class QuestObjective
@@ -31,6 +48,11 @@ public class QuestObjective
     public string Id { get; set; } = string.Empty;
     public string QuestId { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Type of objective (Kill, Visit, Mark, etc.)
+    /// </summary>
+    public QuestObjectiveType ObjectiveType { get; set; } = QuestObjectiveType.Custom;
 
     /// <summary>
     /// Quest name (English)

@@ -2180,14 +2180,14 @@ public partial class MapTrackerPage : UserControl
                 else if (points.Count == 2)
                 {
                     // Two points - draw dashed line (no clustering)
-                    var objectiveColor = GetQuestStatusColor(questStatus, opacity);
+                    var objectiveColor = GetObjectiveTypeColor(objective.ObjectiveType, opacity);
                     bool showLabels = _showMarkerLabels && _zoomLevel >= _labelShowZoomThreshold;
                     DrawObjectiveLine(points[0], points[1], inverseScale, objectiveColor, questName, showLabels);
                 }
                 else
                 {
                     // 3+ points - draw polygon (no clustering)
-                    var objectiveColor = GetQuestStatusColor(questStatus, opacity);
+                    var objectiveColor = GetObjectiveTypeColor(objective.ObjectiveType, opacity);
                     bool showLabels = _showMarkerLabels && _zoomLevel >= _labelShowZoomThreshold;
                     DrawObjectivePolygon(points, inverseScale, objectiveColor, questName, showLabels);
                 }
@@ -2256,6 +2256,27 @@ public partial class MapTrackerPage : UserControl
             QuestStatus.Active => Color.FromArgb((byte)(opacity * 255), 0x4C, 0xAF, 0x50),  // Green
             QuestStatus.Done => Color.FromArgb((byte)(opacity * 255), 0x9E, 0x9E, 0x9E),    // Grey
             _ => Color.FromArgb((byte)(opacity * 255), 0xFF, 0xA0, 0x00)                     // Amber (Locked)
+        };
+    }
+
+    /// <summary>
+    /// Get color based on objective type
+    /// Used for visual differentiation of quest objective types
+    /// </summary>
+    private Color GetObjectiveTypeColor(QuestObjectiveType type, double opacity)
+    {
+        return type switch
+        {
+            QuestObjectiveType.Kill => Color.FromArgb((byte)(opacity * 255), 0xE5, 0x39, 0x35),     // Red - combat/kill
+            QuestObjectiveType.Collect => Color.FromArgb((byte)(opacity * 255), 0xFF, 0xB3, 0x00),  // Orange/Gold - loot
+            QuestObjectiveType.HandOver => Color.FromArgb((byte)(opacity * 255), 0x8E, 0x24, 0xAA), // Purple - deliver
+            QuestObjectiveType.Visit => Color.FromArgb((byte)(opacity * 255), 0x00, 0xAC, 0xC1),    // Cyan - exploration
+            QuestObjectiveType.Mark => Color.FromArgb((byte)(opacity * 255), 0xFF, 0xEB, 0x3B),     // Yellow - mark location
+            QuestObjectiveType.Stash => Color.FromArgb((byte)(opacity * 255), 0x4C, 0xAF, 0x50),    // Green - stash/plant
+            QuestObjectiveType.Survive => Color.FromArgb((byte)(opacity * 255), 0x26, 0xA6, 0x9A),  // Teal - survive
+            QuestObjectiveType.Build => Color.FromArgb((byte)(opacity * 255), 0x79, 0x55, 0x48),    // Brown - build
+            QuestObjectiveType.Task => Color.FromArgb((byte)(opacity * 255), 0x5C, 0x6B, 0xC0),     // Indigo - generic task
+            _ => Color.FromArgb((byte)(opacity * 255), 0x9E, 0x9E, 0x9E)                            // Grey - custom/unknown
         };
     }
 
@@ -2358,10 +2379,10 @@ public partial class MapTrackerPage : UserControl
             var sx = cluster.CenterScreenX;
             var sy = cluster.CenterScreenY;
 
-            // Get opacity and status from first item (approximate)
+            // Get opacity and type from first item (approximate)
             var firstItem = objectives.First(o => o.Obj == primary.Objective);
             var opacity = firstItem.Opacity;
-            var objectiveColor = GetQuestStatusColor(primary.Status, opacity);
+            var objectiveColor = GetObjectiveTypeColor(primary.Objective.ObjectiveType, opacity);
 
             // Draw circular marker
             var circle = new Ellipse
@@ -2559,8 +2580,8 @@ public partial class MapTrackerPage : UserControl
 
     private void DrawObjectiveOptionalPoints(QuestObjective objective, double inverseScale, bool hasFloors, QuestStatus questStatus)
     {
-        // Get base color from quest status (lighter version for optional points)
-        var baseColor = GetQuestStatusColor(questStatus, 1.0);
+        // Get base color from objective type (lighter version for optional points)
+        var baseColor = GetObjectiveTypeColor(objective.ObjectiveType, 1.0);
         // Make it lighter/more pastel for optional points
         var optionalColor = Color.FromRgb(
             (byte)Math.Min(255, baseColor.R + 50),

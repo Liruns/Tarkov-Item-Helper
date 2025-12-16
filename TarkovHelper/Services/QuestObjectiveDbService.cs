@@ -65,6 +65,7 @@ public sealed class QuestObjectiveDbService
 
             // Check if columns exist
             var hasOptionalPoints = await ColumnExistsAsync(connection, "QuestObjectives", "OptionalPoints");
+            var hasObjectiveType = await ColumnExistsAsync(connection, "QuestObjectives", "ObjectiveType");
 
             _allObjectives.Clear();
 
@@ -81,6 +82,7 @@ public sealed class QuestObjectiveDbService
                        {(hasQuestNameJa ? "q.NameJa as QuestNameJa," : "NULL as QuestNameJa,")}
                        q.Trader as TraderName
                        {(hasOptionalPoints ? ", o.OptionalPoints" : "")}
+                       {(hasObjectiveType ? ", o.ObjectiveType" : "")}
                 FROM QuestObjectives o
                 LEFT JOIN Quests q ON o.QuestId = q.Id
                 WHERE (o.LocationPoints IS NOT NULL AND o.LocationPoints != '')
@@ -108,11 +110,22 @@ public sealed class QuestObjectiveDbService
                 var locationJson = reader.IsDBNull(4) ? null : reader.GetString(4);
                 objective.LocationPointsJson = locationJson;
 
-                // Parse OptionalPoints JSON if column exists (now at index 10)
-                if (hasOptionalPoints && reader.FieldCount > 10)
+                // Track column index for optional fields
+                int nextIndex = 10;
+
+                // Parse OptionalPoints JSON if column exists
+                if (hasOptionalPoints && reader.FieldCount > nextIndex)
                 {
-                    var optionalJson = reader.IsDBNull(10) ? null : reader.GetString(10);
+                    var optionalJson = reader.IsDBNull(nextIndex) ? null : reader.GetString(nextIndex);
                     objective.OptionalPointsJson = optionalJson;
+                    nextIndex++;
+                }
+
+                // Parse ObjectiveType if column exists
+                if (hasObjectiveType && reader.FieldCount > nextIndex)
+                {
+                    var typeStr = reader.IsDBNull(nextIndex) ? "Custom" : reader.GetString(nextIndex);
+                    objective.ObjectiveType = ParseObjectiveType(typeStr);
                 }
 
                 // Only add if has any coordinates
@@ -155,5 +168,25 @@ public sealed class QuestObjectiveDbService
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Parse ObjectiveType string from DB to enum
+    /// </summary>
+    private static QuestObjectiveType ParseObjectiveType(string typeStr)
+    {
+        return typeStr?.ToLowerInvariant() switch
+        {
+            "kill" => QuestObjectiveType.Kill,
+            "collect" => QuestObjectiveType.Collect,
+            "handover" => QuestObjectiveType.HandOver,
+            "visit" => QuestObjectiveType.Visit,
+            "mark" => QuestObjectiveType.Mark,
+            "stash" => QuestObjectiveType.Stash,
+            "survive" => QuestObjectiveType.Survive,
+            "build" => QuestObjectiveType.Build,
+            "task" => QuestObjectiveType.Task,
+            _ => QuestObjectiveType.Custom
+        };
     }
 }
