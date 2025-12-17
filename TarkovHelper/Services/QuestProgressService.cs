@@ -297,6 +297,10 @@ namespace TarkovHelper.Services
                 if (!IsPrestigeLevelRequirementMet(task))
                     return QuestStatus.Unavailable;
 
+                // Check faction requirement (Unavailable if player chose different faction)
+                if (!IsFactionRequirementMet(task))
+                    return QuestStatus.Unavailable;
+
                 // Check DSP Decode Count requirement (Locked, not Unavailable)
                 if (!IsDspRequirementMet(task))
                     return QuestStatus.Locked;
@@ -422,6 +426,20 @@ namespace TarkovHelper.Services
 
             var playerPrestige = SettingsService.Instance.PrestigeLevel;
             return playerPrestige >= task.RequiredPrestigeLevel.Value;
+        }
+
+        /// <summary>
+        /// Check if faction requirement is met for the quest
+        /// Returns false if player chose a faction and quest is for the opposite faction
+        /// </summary>
+        public bool IsFactionRequirementMet(TarkovTask task)
+        {
+            // If quest has no faction requirement, always available
+            if (string.IsNullOrEmpty(task.Faction))
+                return true;
+
+            // Use SettingsService's existing faction check logic
+            return SettingsService.Instance.ShouldIncludeTask(task.Faction);
         }
 
         /// <summary>

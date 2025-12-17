@@ -238,7 +238,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding QuestName}"
-                                                       FontSize="13" FontWeight="Bold"
+                                                       FontSize="17" FontWeight="Bold"
                                                        Foreground="{Binding HeaderBrush}"
                                                        TextDecorations="{Binding TextDecoration}"
                                                        TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
@@ -282,7 +282,7 @@
                                                     CornerRadius="10" Padding="8,2" Margin="8,0,0,0"
                                                     VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding Progress}"
-                                                           FontSize="11" FontWeight="Bold"
+                                                           FontSize="15" FontWeight="Bold"
                                                            Foreground="White"/>
                                             </Border>
                                         </Grid>
@@ -327,29 +327,35 @@
                                             <StackPanel Grid.Column="1">
                                                 <!-- 퀘스트 이름 (그룹화 시 숨김) -->
                                                 <TextBlock Text="{Binding QuestName}"
-                                                           FontSize="12" FontWeight="SemiBold"
+                                                           FontSize="14" FontWeight="SemiBold"
                                                            Foreground="{StaticResource AccentBrush}"
                                                            TextWrapping="Wrap" Margin="0,0,0,4"
                                                            TextDecorations="{Binding TextDecoration}"
                                                            Visibility="{Binding QuestNameVisibility}"/>
-                                                <!-- 목표 타입 배지 + 다른 맵 배지 -->
+                                                <!-- 목표 타입 배지 + 층 배지 + 다른 맵 배지 -->
                                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                                     <Border Background="{Binding TypeBrush}"
                                                             CornerRadius="3" Padding="5,2"
                                                             Opacity="{Binding ContentOpacity}">
                                                         <TextBlock Text="{Binding TypeDisplay}"
-                                                                   FontSize="9" Foreground="White" FontWeight="SemiBold"/>
+                                                                   FontSize="11" Foreground="White" FontWeight="SemiBold"/>
+                                                    </Border>
+                                                    <!-- 층 배지 -->
+                                                    <Border Background="{Binding FloorBrush}" CornerRadius="3" Padding="5,2" Margin="4,0,0,0"
+                                                            Visibility="{Binding FloorBadgeVisibility}">
+                                                        <TextBlock Text="{Binding FloorDisplay}"
+                                                                   FontSize="11" Foreground="White" FontWeight="Bold"/>
                                                     </Border>
                                                     <!-- 다른 맵 배지 -->
                                                     <Border Background="#607D8B" CornerRadius="3" Padding="5,2" Margin="4,0,0,0"
                                                             Visibility="{Binding OtherMapBadgeVisibility}">
                                                         <TextBlock Text="{Binding OtherMapName}"
-                                                                   FontSize="9" Foreground="White" FontWeight="SemiBold"/>
+                                                                   FontSize="11" Foreground="White" FontWeight="SemiBold"/>
                                                     </Border>
                                                 </StackPanel>
                                                 <!-- 목표 설명 -->
                                                 <TextBlock Text="{Binding Description}"
-                                                           FontSize="11"
+                                                           FontSize="13"
                                                            Foreground="{StaticResource TextSecondaryBrush}"
                                                            TextWrapping="Wrap"
                                                            Opacity="{Binding ContentOpacity}"/>

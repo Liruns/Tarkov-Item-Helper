@@ -249,6 +249,7 @@ namespace TarkovHelper.Pages
         private bool _isInitializing = true;
         private bool _isDataLoaded = false;
         private bool _isUnloaded = false;
+        private bool _needsRefreshOnLoad = false; // Flag to indicate data refresh needed after unload
         private string? _pendingItemSelection = null;
 
         // Currency items should count by reference count, not total amount
@@ -279,6 +280,7 @@ namespace TarkovHelper.Pages
         private void ItemsPage_Unloaded(object sender, RoutedEventArgs e)
         {
             _isUnloaded = true;
+            _needsRefreshOnLoad = true; // Mark for refresh on next load to catch changes
             // Unsubscribe from events to prevent memory leaks
             _loc.LanguageChanged -= OnLanguageChanged;
             _questProgressService.ProgressChanged -= OnProgressChanged;
@@ -321,6 +323,16 @@ namespace TarkovHelper.Pages
                 SettingsService.Instance.HasUnheardEditionChanged += OnEditionChanged;
                 SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
                 SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
+            }
+
+            // Check if data needs refresh (changes might have occurred while unloaded)
+            if (_isDataLoaded && _needsRefreshOnLoad)
+            {
+                _needsRefreshOnLoad = false;
+                await LoadItemsAsync();
+                ApplyFilters();
+                _ = LoadImagesInBackgroundAsync();
+                return;
             }
 
             // Skip if already loaded (avoid re-initialization on tab switch)
@@ -709,21 +721,12 @@ namespace TarkovHelper.Pages
         private Dictionary<string, QuestItemAggregate> GetQuestItemRequirements()
         {
             var result = new Dictionary<string, QuestItemAggregate>(StringComparer.OrdinalIgnoreCase);
-            var settings = SettingsService.Instance;
 
             foreach (var task in _questProgressService.AllTasks)
             {
-                // Skip completed quests
+                // Skip completed, failed, or unavailable quests (includes faction-restricted quests)
                 var status = _questProgressService.GetStatus(task);
-                if (status == QuestStatus.Done)
-                    continue;
-
-                // Skip unavailable quests (edition/prestige requirements not met)
-                if (status == QuestStatus.Unavailable)
-                    continue;
-
-                // Skip quests from other factions
-                if (!settings.ShouldIncludeTask(task.Faction))
+                if (status == QuestStatus.Done || status == QuestStatus.Failed || status == QuestStatus.Unavailable)
                     continue;
 
                 if (task.RequiredItems == null)
@@ -1145,21 +1148,12 @@ namespace TarkovHelper.Pages
         private List<QuestItemSourceViewModel> GetQuestSources(string itemNormalizedName)
         {
             var sources = new List<QuestItemSourceViewModel>();
-            var settings = SettingsService.Instance;
 
             foreach (var task in _questProgressService.AllTasks)
             {
-                // Skip completed quests
+                // Skip completed, failed, or unavailable quests (includes faction-restricted quests)
                 var status = _questProgressService.GetStatus(task);
-                if (status == QuestStatus.Done)
-                    continue;
-
-                // Skip unavailable quests (edition/prestige requirements not met)
-                if (status == QuestStatus.Unavailable)
-                    continue;
-
-                // Skip quests from other factions
-                if (!settings.ShouldIncludeTask(task.Faction))
+                if (status == QuestStatus.Done || status == QuestStatus.Failed || status == QuestStatus.Unavailable)
                     continue;
 
                 if (task.RequiredItems == null)

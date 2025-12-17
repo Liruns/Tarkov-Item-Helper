@@ -187,6 +187,7 @@ namespace TarkovHelper.Pages
             SettingsService.Instance.HasUnheardEditionChanged += OnProfileSettingChanged;
             SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
             SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
+            SettingsService.Instance.PlayerFactionChanged += OnPlayerFactionChanged;
 
             Loaded += QuestListPage_Loaded;
             Unloaded += QuestListPage_Unloaded;
@@ -202,6 +203,7 @@ namespace TarkovHelper.Pages
             SettingsService.Instance.HasUnheardEditionChanged -= OnProfileSettingChanged;
             SettingsService.Instance.PrestigeLevelChanged -= OnPrestigeLevelChanged;
             SettingsService.Instance.DspDecodeCountChanged -= OnDspDecodeCountChanged;
+            SettingsService.Instance.PlayerFactionChanged -= OnPlayerFactionChanged;
         }
 
         private async void QuestListPage_Loaded(object sender, RoutedEventArgs e)
@@ -216,6 +218,7 @@ namespace TarkovHelper.Pages
                 SettingsService.Instance.HasUnheardEditionChanged += OnProfileSettingChanged;
                 SettingsService.Instance.PrestigeLevelChanged += OnPrestigeLevelChanged;
                 SettingsService.Instance.DspDecodeCountChanged += OnDspDecodeCountChanged;
+                SettingsService.Instance.PlayerFactionChanged += OnPlayerFactionChanged;
             }
 
             // Skip if already loaded (prevents re-initialization on tab switching)
@@ -297,6 +300,36 @@ namespace TarkovHelper.Pages
         {
             Dispatcher.Invoke(() =>
             {
+                RefreshQuestStatuses();
+                ApplyFilters();
+                UpdateDetailPanel();
+                UpdateRecommendations();
+            });
+        }
+
+        private void OnPlayerFactionChanged(object? sender, string? e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                // Update radio button selection to match the new faction
+                _isInitializing = true;
+                if (e == "bear")
+                {
+                    RbBear.IsChecked = true;
+                    RbUsec.IsChecked = false;
+                }
+                else if (e == "usec")
+                {
+                    RbUsec.IsChecked = true;
+                    RbBear.IsChecked = false;
+                }
+                else
+                {
+                    RbBear.IsChecked = false;
+                    RbUsec.IsChecked = false;
+                }
+                _isInitializing = false;
+
                 RefreshQuestStatuses();
                 ApplyFilters();
                 UpdateDetailPanel();
@@ -517,6 +550,15 @@ namespace TarkovHelper.Pages
                 {
                     return $"P.{task.RequiredPrestigeLevel}";
                 }
+                // Show faction if quest is for different faction
+                if (!_progressService.IsFactionRequirementMet(task))
+                {
+                    var faction = task.Faction?.ToLowerInvariant();
+                    if (faction == "bear")
+                        return "BEAR";
+                    if (faction == "usec")
+                        return "USEC";
+                }
             }
 
             return status switch
@@ -674,7 +716,7 @@ namespace TarkovHelper.Pages
                 // Faction filter - hide quests for the other faction
                 if (!string.IsNullOrEmpty(selectedFaction) && !string.IsNullOrEmpty(vm.Task.Faction))
                 {
-                    if (vm.Task.Faction != selectedFaction)
+                    if (!string.Equals(vm.Task.Faction, selectedFaction, StringComparison.OrdinalIgnoreCase))
                         return false;
                 }
 

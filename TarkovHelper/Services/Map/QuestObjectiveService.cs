@@ -209,6 +209,7 @@ public sealed class QuestObjectiveService
                 X = firstPoint.X,
                 Y = firstPoint.Z, // Game Z → Location Y (수평면)
                 Z = firstPoint.Y, // Game Y → Location Z (높이)
+                FloorId = firstPoint.FloorId // 층 정보 복사
             };
 
             // 여러 포인트가 있으면 Outline으로 변환
@@ -233,7 +234,8 @@ public sealed class QuestObjectiveService
                 MapNormalizedName = NormalizeMapName(mapName),
                 X = point.X,
                 Y = point.Z,
-                Z = point.Y
+                Z = point.Y,
+                FloorId = point.FloorId // 층 정보 복사
             };
             result.Locations.Add(optLoc);
         }

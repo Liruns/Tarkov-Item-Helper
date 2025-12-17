@@ -221,6 +221,7 @@ namespace TarkovHelper.Pages
         private bool _isInitializing = true;
         private bool _isDataLoaded = false;
         private bool _isUnloaded = false;
+        private bool _needsRefreshOnLoad = false; // Flag to indicate data refresh needed after unload
         private string? _pendingItemSelection = null;
 
         // Currency items should count by reference count, not total amount
@@ -245,6 +246,7 @@ namespace TarkovHelper.Pages
         private void CollectorPage_Unloaded(object sender, RoutedEventArgs e)
         {
             _isUnloaded = true;
+            _needsRefreshOnLoad = true; // Mark for refresh on next load to catch changes
             _loc.LanguageChanged -= OnLanguageChanged;
             _questProgressService.ProgressChanged -= OnProgressChanged;
             _inventoryService.InventoryChanged -= OnInventoryChanged;
@@ -272,6 +274,16 @@ namespace TarkovHelper.Pages
                 _loc.LanguageChanged += OnLanguageChanged;
                 _questProgressService.ProgressChanged += OnProgressChanged;
                 _inventoryService.InventoryChanged += OnInventoryChanged;
+            }
+
+            // Check if data needs refresh (changes might have occurred while unloaded)
+            if (_isDataLoaded && _needsRefreshOnLoad)
+            {
+                _needsRefreshOnLoad = false;
+                await LoadItemsAsync();
+                ApplyFilters();
+                _ = LoadImagesInBackgroundAsync();
+                return;
             }
 
             if (_isDataLoaded)
@@ -394,9 +406,9 @@ namespace TarkovHelper.Pages
 
             if (collectorQuest != null && !string.IsNullOrEmpty(collectorQuest.NormalizedName))
             {
-                // Always include Collector quest itself (unless completed)
+                // Always include Collector quest itself (unless completed, failed, or unavailable)
                 var status = _questProgressService.GetStatus(collectorQuest);
-                if (status != QuestStatus.Done)
+                if (status != QuestStatus.Done && status != QuestStatus.Failed && status != QuestStatus.Unavailable)
                 {
                     questsToInclude.Add(collectorQuest.NormalizedName);
                 }
@@ -410,9 +422,9 @@ namespace TarkovHelper.Pages
                         if (string.IsNullOrEmpty(prereq.NormalizedName))
                             continue;
 
-                        // Skip completed quests
+                        // Skip completed, failed, or unavailable quests
                         var prereqStatus = _questProgressService.GetStatus(prereq);
-                        if (prereqStatus == QuestStatus.Done)
+                        if (prereqStatus == QuestStatus.Done || prereqStatus == QuestStatus.Failed || prereqStatus == QuestStatus.Unavailable)
                             continue;
 
                         questsToInclude.Add(prereq.NormalizedName);
@@ -886,7 +898,7 @@ namespace TarkovHelper.Pages
             if (collectorQuest != null && !string.IsNullOrEmpty(collectorQuest.NormalizedName))
             {
                 var status = _questProgressService.GetStatus(collectorQuest);
-                if (status != QuestStatus.Done)
+                if (status != QuestStatus.Done && status != QuestStatus.Failed && status != QuestStatus.Unavailable)
                 {
                     questsToInclude.Add(collectorQuest.NormalizedName);
                 }
@@ -900,7 +912,7 @@ namespace TarkovHelper.Pages
                         if (string.IsNullOrEmpty(prereq.NormalizedName))
                             continue;
                         var prereqStatus = _questProgressService.GetStatus(prereq);
-                        if (prereqStatus == QuestStatus.Done)
+                        if (prereqStatus == QuestStatus.Done || prereqStatus == QuestStatus.Failed || prereqStatus == QuestStatus.Unavailable)
                             continue;
                         questsToInclude.Add(prereq.NormalizedName);
                     }

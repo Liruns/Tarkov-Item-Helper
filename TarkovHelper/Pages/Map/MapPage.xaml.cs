@@ -137,7 +137,10 @@ public partial class MapPage : UserControl
             LoadSettings();
             PopulateMapComboBox();
 
-            // 저장된 맵 상태 복원
+            // 로그 맵 감시 시작 (자동 맵 전환용) - RestoreMapState 전에 호출하여 마지막 플레이 맵 우선
+            StartLogMapWatching();
+
+            // 로그에서 맵이 감지되지 않은 경우에만 저장된 맵 상태 복원
             RestoreMapState();
 
             UpdateUI();
@@ -147,6 +150,9 @@ public partial class MapPage : UserControl
 
             // 탈출구 데이터 로드
             await LoadExtractsAsync();
+
+            // 층 감지 데이터 로드 (자동 층 전환용)
+            await FloorDetectionService.Instance.LoadFloorRangesAsync();
 
             // Drawer 기본 열기 및 내용 새로고침
             OpenQuestDrawer();
@@ -161,9 +167,6 @@ public partial class MapPage : UserControl
 
             // 자동 Tracking 시작 (Map 탭 활성화 시)
             StartAutoTracking();
-
-            // 로그 맵 감시 시작 (자동 맵 전환용)
-            StartLogMapWatching();
         }
         catch (Exception ex)
         {
@@ -207,8 +210,9 @@ public partial class MapPage : UserControl
         if (_trackerService == null) return;
         var settings = _trackerService.Settings;
 
-        // 저장된 맵이 있으면 복원
-        if (!string.IsNullOrEmpty(settings.LastSelectedMapKey))
+        // 로그에서 이미 맵이 감지되어 선택된 경우 맵 선택 건너뜀
+        // _currentMapKey가 없는 경우에만 저장된 맵 복원
+        if (string.IsNullOrEmpty(_currentMapKey) && !string.IsNullOrEmpty(settings.LastSelectedMapKey))
         {
             // 맵 선택 복원
             for (int i = 0; i < CmbMapSelect.Items.Count; i++)
@@ -221,19 +225,11 @@ public partial class MapPage : UserControl
                 }
             }
 
-            // 줌 레벨 복원 (맵 로드 후 Dispatcher로 지연 실행)
-            var savedZoom = settings.LastZoomLevel;
-            var savedTranslateX = settings.LastTranslateX;
-            var savedTranslateY = settings.LastTranslateY;
-
+            // 마지막 맵 복원 시 100% 배율로 리셋
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (savedZoom > 0)
-                {
-                    SetZoom(savedZoom);
-                }
-                MapTranslate.X = savedTranslateX;
-                MapTranslate.Y = savedTranslateY;
+                SetZoom(1.0);
+                CenterMapInView();
             }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
     }
@@ -420,7 +416,49 @@ public partial class MapPage : UserControl
             UpdateMarkerPosition(position);
             UpdateTrailPath();
             UpdateCoordinatesDisplay(position);
+
+            // Y 좌표(높이)를 기반으로 층 자동 전환
+            TryAutoSwitchFloor(position);
         });
+    }
+
+    /// <summary>
+    /// Y 좌표(높이)를 기반으로 층을 자동 전환합니다.
+    /// DB의 MapFloorLocations 테이블에 설정된 Y 범위를 사용합니다.
+    /// </summary>
+    private void TryAutoSwitchFloor(ScreenPosition position)
+    {
+        // 현재 맵이 없거나 단일 층 맵이면 스킵
+        if (string.IsNullOrEmpty(_currentMapKey))
+            return;
+
+        if (CmbFloorSelect.Visibility != Visibility.Visible)
+            return;
+
+        // 원본 EFT 좌표에서 Y(높이) 가져오기
+        var originalPos = position.OriginalPosition;
+        if (originalPos == null)
+            return;
+
+        // FloorDetectionService로 층 감지
+        var detectedFloorId = FloorDetectionService.Instance.DetectFloor(_currentMapKey, originalPos.Y);
+        if (string.IsNullOrEmpty(detectedFloorId))
+            return;
+
+        // 현재 층과 같으면 스킵
+        if (string.Equals(_currentFloorId, detectedFloorId, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // 층 콤보박스에서 해당 층 찾아서 선택
+        for (int i = 0; i < CmbFloorSelect.Items.Count; i++)
+        {
+            if (CmbFloorSelect.Items[i] is ComboBoxItem item &&
+                string.Equals(item.Tag as string, detectedFloorId, StringComparison.OrdinalIgnoreCase))
+            {
+                CmbFloorSelect.SelectedIndex = i;
+                break;
+            }
+        }
     }
 
     private void OnErrorOccurred(object? sender, string message)
@@ -488,8 +526,9 @@ public partial class MapPage : UserControl
         // 이벤트 구독
         _logMapWatcher.MapChanged += OnLogMapChanged;
 
-        // 로그 감시 시작
-        _logMapWatcher.StartWatching();
+        // Settings에서 설정된 로그 폴더 경로 사용
+        var logFolderPath = SettingsService.Instance.LogFolderPath;
+        _logMapWatcher.StartWatching(logFolderPath);
     }
 
     /// <summary>
@@ -532,6 +571,9 @@ public partial class MapPage : UserControl
 
                     // 맵 선택 변경 (이로 인해 CmbMapSelect_SelectionChanged가 호출됨)
                     CmbMapSelect.SelectedIndex = i;
+
+                    // 로그에서 맵 감지 시 100% 배율로 리셋
+                    SetZoom(1.0);
 
                     TxtStatus.Text = $"맵 감지: {e.NewMapKey}";
                     break;
@@ -659,10 +701,10 @@ public partial class MapPage : UserControl
             {
                 _currentFloorId = floorId;
 
-                // 층이 변경되면 맵 이미지 다시 로드
+                // 층이 변경되면 맵 이미지 다시 로드 (화면 위치는 유지)
                 if (!string.IsNullOrEmpty(_currentMapKey))
                 {
-                    LoadMapImage(_currentMapKey);
+                    LoadMapImage(_currentMapKey, centerView: false);
 
                     // 마커들도 새로고침 (층 정보에 따른 표시 업데이트)
                     RefreshExtractMarkers();
@@ -991,7 +1033,7 @@ public partial class MapPage : UserControl
 
     #region 맵/마커 관련 메서드
 
-    private void LoadMapImage(string mapKey)
+    private void LoadMapImage(string mapKey, bool centerView = true)
     {
         var config = _trackerService?.GetMapConfig(mapKey);
         if (config == null)
@@ -1102,8 +1144,11 @@ public partial class MapPage : UserControl
 
             ShowNoMapPanel(false);
 
-            // 맵을 화면 중앙에 배치
-            CenterMapInView();
+            // 맵을 화면 중앙에 배치 (층 변경 시에는 위치 유지)
+            if (centerView)
+            {
+                CenterMapInView();
+            }
         }
         catch
         {
@@ -1781,20 +1826,25 @@ public partial class MapPage : UserControl
         }
 
         // 퀘스트명 표시
+        Border? floorBadgeBorder = null;  // 층 배지를 별도로 관리
         if (showName)
         {
             var questName = _loc.CurrentLanguage == AppLanguage.KO && !string.IsNullOrEmpty(objective.TaskNameKo)
                 ? objective.TaskNameKo
                 : objective.TaskName;
 
-            // Border로 감싸서 중앙 정렬 가능하게 함
+            // 층 정보 가져오기
+            var floorInfo = GetFloorIndicator(location.FloorId);
+
+            // 퀘스트명 텍스트
             var nameText = new TextBlock
             {
                 Text = questName,
                 FontSize = _questNameTextSize,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White,
-                TextAlignment = TextAlignment.Center
+                TextAlignment = TextAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
             };
 
             var nameBorder = new Border
@@ -1819,6 +1869,41 @@ public partial class MapPage : UserControl
             nameBorder.Cursor = Cursors.Hand;
 
             canvas.Children.Add(nameBorder);
+
+            // 다른 층일 때 층 배지 추가 (별도의 Border로 분리)
+            if (floorInfo.HasValue)
+            {
+                var (arrow, floorText, indicatorColor) = floorInfo.Value;
+
+                // 층 배지 (화살표 + 층 표시) - 불투명하게 유지하기 위해 별도 Border
+                var floorBadgeText = new TextBlock
+                {
+                    Text = $"{arrow}{floorText}",
+                    FontSize = _questNameTextSize * 0.85,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Brushes.White,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                floorBadgeBorder = new Border
+                {
+                    Background = new SolidColorBrush(indicatorColor),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(3, 1, 3, 1),
+                    Child = floorBadgeText,
+                    Tag = "FloorBadge"  // 식별용 태그
+                };
+
+                // 층 배지 크기 측정
+                floorBadgeBorder.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                var badgeWidth = floorBadgeBorder.DesiredSize.Width;
+
+                // 텍스트 오른쪽에 위치
+                Canvas.SetLeft(floorBadgeBorder, textWidth / 2 + 4);
+                Canvas.SetTop(floorBadgeBorder, markerSize / 2 + 4);
+
+                canvas.Children.Add(floorBadgeBorder);
+            }
         }
 
         // 위치 설정
@@ -1830,10 +1915,25 @@ public partial class MapPage : UserControl
         canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
         canvas.RenderTransformOrigin = new Point(0, 0);
 
-        // 다른 층의 마커는 반투명 처리
+        // 다른 층의 마커는 반투명 처리 (층 배지 제외)
         if (!isOnCurrentFloor)
         {
-            canvas.Opacity = 0.5;
+            // canvas 전체 대신 개별 요소에 반투명 적용
+            foreach (var child in canvas.Children)
+            {
+                if (child is FrameworkElement element)
+                {
+                    // 층 배지는 불투명하게 유지
+                    if (element is Border border && border.Tag as string == "FloorBadge")
+                    {
+                        element.Opacity = 1.0;
+                    }
+                    else
+                    {
+                        element.Opacity = 0.5;
+                    }
+                }
+            }
         }
 
         // 클릭 이벤트
@@ -2113,13 +2213,20 @@ public partial class MapPage : UserControl
                 ? item.Objective.TaskNameKo
                 : item.Objective.TaskName;
 
+            // StackPanel으로 이름과 층 배지를 나란히 배치
+            var itemPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 1, 0, 1)
+            };
+
             var itemText = new TextBlock
             {
                 Text = $"• {questName}",
                 FontSize = _questNameTextSize,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Brushes.White,
-                Margin = new Thickness(0, 1, 0, 1)
+                VerticalAlignment = VerticalAlignment.Center
             };
 
             // 완료 상태 표시
@@ -2129,10 +2236,40 @@ public partial class MapPage : UserControl
                 itemText.Foreground = new SolidColorBrush(Colors.LightGray);
             }
 
+            itemPanel.Children.Add(itemText);
+
+            // 층 정보 추가 (위치가 있는 경우)
+            if (item.Objective.Locations.Count > 0)
+            {
+                var location = item.Objective.Locations[0];
+                var floorInfo = GetFloorIndicator(location.FloorId);
+                if (floorInfo.HasValue)
+                {
+                    var (arrow, floorText, indicatorColor) = floorInfo.Value;
+                    var floorBadge = new Border
+                    {
+                        Background = new SolidColorBrush(indicatorColor),
+                        CornerRadius = new CornerRadius(3),
+                        Padding = new Thickness(3, 1, 3, 1),
+                        Margin = new Thickness(4, 0, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    var floorBadgeText = new TextBlock
+                    {
+                        Text = $"{arrow}{floorText}",
+                        FontSize = _questNameTextSize * 0.85,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.White
+                    };
+                    floorBadge.Child = floorBadgeText;
+                    itemPanel.Children.Add(floorBadge);
+                }
+            }
+
             // 개별 항목에 Tag 설정 (클릭 시 사용)
             var itemBorder = new Border
             {
-                Child = itemText,
+                Child = itemPanel,
                 Tag = item.Objective,
                 Cursor = Cursors.Hand,
                 Padding = new Thickness(2, 0, 2, 0)
@@ -2728,6 +2865,62 @@ public partial class MapPage : UserControl
 
         // 층 ID 비교 (대소문자 무시)
         return string.Equals(_currentFloorId, markerFloorId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 층 정보를 가져옵니다 (화살표 방향, 짧은 표시 문자, 색상).
+    /// </summary>
+    /// <param name="markerFloorId">마커의 FloorId</param>
+    /// <returns>(화살표, 층 표시, 색상) - 현재 층이면 null 반환</returns>
+    private (string arrow, string floorText, Color color)? GetFloorIndicator(string? markerFloorId)
+    {
+        if (string.IsNullOrEmpty(_currentMapKey) || string.IsNullOrEmpty(_currentFloorId))
+            return null;
+
+        var config = _trackerService?.GetMapConfig(_currentMapKey);
+        if (config?.Floors == null || config.Floors.Count == 0)
+            return null;
+
+        // 현재 층의 Order 가져오기
+        var currentFloor = config.Floors.FirstOrDefault(f =>
+            string.Equals(f.LayerId, _currentFloorId, StringComparison.OrdinalIgnoreCase));
+        var currentOrder = currentFloor?.Order ?? 0;
+
+        // 마커 층의 Order 가져오기 (FloorId가 없으면 main으로 간주)
+        var effectiveFloorId = string.IsNullOrEmpty(markerFloorId) ? "main" : markerFloorId;
+        var markerFloor = config.Floors.FirstOrDefault(f =>
+            string.Equals(f.LayerId, effectiveFloorId, StringComparison.OrdinalIgnoreCase));
+        var markerOrder = markerFloor?.Order ?? 0;
+
+        // 같은 층이면 표시 안함
+        if (currentOrder == markerOrder)
+            return null;
+
+        // 화살표 방향 결정 (마커가 현재 층보다 위에 있으면 ↑, 아래면 ↓)
+        var isAbove = markerOrder > currentOrder;
+        var arrow = isAbove ? "↑" : "↓";
+
+        // 색상 결정 (위: 하늘색, 아래: 주황색)
+        var color = isAbove
+            ? Color.FromRgb(100, 181, 246)  // Light Blue
+            : Color.FromRgb(255, 167, 38);  // Orange
+
+        // 층 표시 문자 결정 (B: 지하, G: 기본층, 2/3: 2층/3층)
+        string floorText;
+        if (markerOrder < 0)
+        {
+            floorText = "B";
+        }
+        else if (markerOrder == 0)
+        {
+            floorText = "G";
+        }
+        else
+        {
+            floorText = (markerOrder + 1).ToString(); // Order 1 = 2층
+        }
+
+        return (arrow, floorText, color);
     }
 
     private List<List<MapExtract>> GroupExtractsByPosition(List<MapExtract> extracts)
@@ -3358,7 +3551,7 @@ public partial class MapPage : UserControl
             viewModels.Add(new QuestObjectiveViewModel(
                 obj, _loc, _progressService,
                 obj.ObjectiveId == _selectedObjective?.ObjectiveId,
-                _currentMapKey));
+                _currentMapKey, _currentFloorId));
         }
 
         // 맵별 진행률 업데이트 (필터 적용 전 전체 목표 기준)
@@ -3668,17 +3861,27 @@ public class QuestObjectiveViewModel
     public Visibility QuestNameVisibility => IsGrouped ? Visibility.Collapsed : Visibility.Visible;
     public Thickness ItemMargin => IsGrouped ? new Thickness(16, 0, 0, 8) : new Thickness(0, 0, 0, 8);
 
+    // 층 표시용 프로퍼티
+    public string? FloorDisplay { get; }
+    public Brush? FloorBrush { get; }
+    public Visibility FloorBadgeVisibility { get; }
+
     public QuestObjectiveViewModel(TaskObjectiveWithLocation objective, LocalizationService loc, bool isSelected = false)
-        : this(objective, loc, null, isSelected, null)
+        : this(objective, loc, null, isSelected, null, null)
     {
     }
 
     public QuestObjectiveViewModel(TaskObjectiveWithLocation objective, LocalizationService loc, QuestProgressService? progressService, bool isSelected = false)
-        : this(objective, loc, progressService, isSelected, null)
+        : this(objective, loc, progressService, isSelected, null, null)
     {
     }
 
     public QuestObjectiveViewModel(TaskObjectiveWithLocation objective, LocalizationService loc, QuestProgressService? progressService, bool isSelected, string? currentMapKey)
+        : this(objective, loc, progressService, isSelected, currentMapKey, null)
+    {
+    }
+
+    public QuestObjectiveViewModel(TaskObjectiveWithLocation objective, LocalizationService loc, QuestProgressService? progressService, bool isSelected, string? currentMapKey, string? currentFloorId)
     {
         Objective = objective;
         IsSelected = isSelected;
@@ -3741,6 +3944,70 @@ public class QuestObjectiveViewModel
             OtherMapBadgeVisibility = Visibility.Collapsed;
             IsEnabled = true;
         }
+
+        // 층 정보 초기화
+        if (objective.Locations.Count > 0)
+        {
+            var floorId = objective.Locations[0].FloorId;
+            if (!string.IsNullOrEmpty(floorId))
+            {
+                FloorDisplay = GetFloorDisplayText(floorId);
+                FloorBrush = new SolidColorBrush(GetFloorColor(floorId, currentFloorId));
+                FloorBadgeVisibility = Visibility.Visible;
+            }
+            else
+            {
+                FloorBadgeVisibility = Visibility.Collapsed;
+            }
+        }
+        else
+        {
+            FloorBadgeVisibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// FloorId를 표시용 텍스트로 변환합니다.
+    /// </summary>
+    private static string GetFloorDisplayText(string floorId)
+    {
+        // FloorId 패턴: "basement", "main", "first", "second", "third", "roof" 등
+        return floorId.ToLowerInvariant() switch
+        {
+            "basement" or "basement1" or "basement-1" or "b1" => "B1",
+            "basement2" or "basement-2" or "b2" => "B2",
+            "basement3" or "basement-3" or "b3" => "B3",
+            "main" or "ground" or "1" or "first" => "1F",
+            "second" or "2" => "2F",
+            "third" or "3" => "3F",
+            "roof" or "rooftop" => "RF",
+            _ => floorId.Length <= 3 ? floorId.ToUpperInvariant() : floorId.Substring(0, 2).ToUpperInvariant()
+        };
+    }
+
+    /// <summary>
+    /// 층에 따른 색상을 반환합니다.
+    /// </summary>
+    private static Color GetFloorColor(string floorId, string? currentFloorId)
+    {
+        // 현재 층과 같으면 회색, 다르면 강조색
+        if (!string.IsNullOrEmpty(currentFloorId) &&
+            string.Equals(floorId, currentFloorId, StringComparison.OrdinalIgnoreCase))
+        {
+            return Color.FromRgb(128, 128, 128); // 회색
+        }
+
+        // 지하층은 파란색, 기본층은 초록색, 상층은 주황색
+        var lowerFloorId = floorId.ToLowerInvariant();
+        if (lowerFloorId.Contains("basement") || lowerFloorId.StartsWith("b"))
+        {
+            return Color.FromRgb(33, 150, 243); // 파란색
+        }
+        if (lowerFloorId == "main" || lowerFloorId == "ground" || lowerFloorId == "1" || lowerFloorId == "first")
+        {
+            return Color.FromRgb(76, 175, 80); // 초록색
+        }
+        return Color.FromRgb(255, 152, 0); // 주황색
     }
 
     private static string GetTypeDisplay(string type) => type switch
