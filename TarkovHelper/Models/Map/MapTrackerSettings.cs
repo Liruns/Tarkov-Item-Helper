@@ -58,14 +58,14 @@ public sealed class MapTrackerSettings
     public List<MapConfig> Maps { get; set; } = new();
 
     /// <summary>
-    /// 퀘스트 마커 크기 (픽셀)
+    /// 퀘스트 마커 크기 (픽셀, 기본 18, 범위 12~32)
     /// </summary>
-    public int MarkerSize { get; set; } = 12;
+    public int MarkerSize { get; set; } = 18;
 
     /// <summary>
-    /// 플레이어 위치 마커 크기 (픽셀)
+    /// 플레이어 위치 마커 크기 (픽셀, 기본 18, 범위 12~32)
     /// </summary>
-    public int PlayerMarkerSize { get; set; } = 12;
+    public int PlayerMarkerSize { get; set; } = 18;
 
     /// <summary>
     /// 마커 색상 (ARGB hex, 예: "#FFFF0000" = 빨간색)
@@ -118,9 +118,9 @@ public sealed class MapTrackerSettings
     public QuestMarkerStyle QuestMarkerStyle { get; set; } = QuestMarkerStyle.DefaultWithName;
 
     /// <summary>
-    /// 퀘스트명 텍스트 크기
+    /// 퀘스트명 텍스트 크기 (기본 20, 범위 16~32)
     /// </summary>
-    public double QuestNameTextSize { get; set; } = 12.0;
+    public double QuestNameTextSize { get; set; } = 20.0;
 
     /// <summary>
     /// 탈출구 마커 표시 여부

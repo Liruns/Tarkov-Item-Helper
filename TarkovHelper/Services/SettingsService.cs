@@ -86,6 +86,13 @@ public class SettingsService
     private const string KeyExpanderMapInfoExpanded = "map.expanderMapInfo";
     private const string KeyQuestPanelVisible = "map.questPanelVisible";
     private const string KeyMapScreenshotPath = "map.screenshotPath";
+    private const string KeyMapQuestMarkerSize = "map.questMarkerSize";
+    private const string KeyMapPlayerMarkerSize = "map.playerMarkerSize";
+    private const string KeyMapExtractNameSize = "map.extractNameSize";
+    private const string KeyMapQuestNameSize = "map.questNameSize";
+    private const string KeyMapLastZoomLevel = "map.lastZoomLevel";
+    private const string KeyMapLastTranslateX = "map.lastTranslateX";
+    private const string KeyMapLastTranslateY = "map.lastTranslateY";
 
     private bool _settingsLoaded;
     private string? _detectionMethod;
@@ -146,6 +153,13 @@ public class SettingsService
     private bool? _mapShowLevers;
     private bool? _mapShowKeys;
     private string? _mapScreenshotPath;
+    private int? _mapQuestMarkerSize;
+    private int? _mapPlayerMarkerSize;
+    private double? _mapExtractNameSize;
+    private double? _mapQuestNameSize;
+    private double? _mapLastZoomLevel;
+    private double? _mapLastTranslateX;
+    private double? _mapLastTranslateY;
 
     public event EventHandler<string?>? LogFolderChanged;
     public event EventHandler<int>? PlayerLevelChanged;
@@ -1414,6 +1428,150 @@ public class SettingsService
     }
 
     /// <summary>
+    /// Quest marker size (12-32, default 18)
+    /// </summary>
+    public int MapQuestMarkerSize
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapQuestMarkerSize ?? 18;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 12, 32);
+            if (_mapQuestMarkerSize != clampedValue)
+            {
+                _mapQuestMarkerSize = clampedValue;
+                SaveSetting(KeyMapQuestMarkerSize, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Player marker size (12-32, default 18)
+    /// </summary>
+    public int MapPlayerMarkerSize
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapPlayerMarkerSize ?? 18;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 12, 32);
+            if (_mapPlayerMarkerSize != clampedValue)
+            {
+                _mapPlayerMarkerSize = clampedValue;
+                SaveSetting(KeyMapPlayerMarkerSize, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extract name text size (default 16.0)
+    /// </summary>
+    public double MapExtractNameSize
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapExtractNameSize ?? 16.0;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 10.0, 32.0);
+            if (Math.Abs((_mapExtractNameSize ?? 16.0) - clampedValue) > 0.1)
+            {
+                _mapExtractNameSize = clampedValue;
+                SaveSetting(KeyMapExtractNameSize, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Quest name text size (default 20.0)
+    /// </summary>
+    public double MapQuestNameSize
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapQuestNameSize ?? 20.0;
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 12.0, 32.0);
+            if (Math.Abs((_mapQuestNameSize ?? 20.0) - clampedValue) > 0.1)
+            {
+                _mapQuestNameSize = clampedValue;
+                SaveSetting(KeyMapQuestNameSize, clampedValue.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Last zoom level (for state restoration)
+    /// </summary>
+    public double MapLastZoomLevel
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapLastZoomLevel ?? 1.0;
+        }
+        set
+        {
+            if (Math.Abs((_mapLastZoomLevel ?? 1.0) - value) > 0.01)
+            {
+                _mapLastZoomLevel = value;
+                SaveSetting(KeyMapLastZoomLevel, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Last translate X (for state restoration)
+    /// </summary>
+    public double MapLastTranslateX
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapLastTranslateX ?? 0;
+        }
+        set
+        {
+            if (Math.Abs((_mapLastTranslateX ?? 0) - value) > 1)
+            {
+                _mapLastTranslateX = value;
+                SaveSetting(KeyMapLastTranslateX, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Last translate Y (for state restoration)
+    /// </summary>
+    public double MapLastTranslateY
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapLastTranslateY ?? 0;
+        }
+        set
+        {
+            if (Math.Abs((_mapLastTranslateY ?? 0) - value) > 1)
+            {
+                _mapLastTranslateY = value;
+                SaveSetting(KeyMapLastTranslateY, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
     /// Add a quest to hidden list
     /// </summary>
     public void AddHiddenQuest(string questId)
@@ -1894,6 +2052,28 @@ public class SettingsService
 
             _mapScreenshotPath = _userDataDb.GetSetting(KeyMapScreenshotPath);
             if (string.IsNullOrEmpty(_mapScreenshotPath)) _mapScreenshotPath = null;
+
+            // Load map marker/text sizes and state
+            if (int.TryParse(_userDataDb.GetSetting(KeyMapQuestMarkerSize), out var questMarkerSize))
+                _mapQuestMarkerSize = questMarkerSize;
+
+            if (int.TryParse(_userDataDb.GetSetting(KeyMapPlayerMarkerSize), out var playerMarkerSize))
+                _mapPlayerMarkerSize = playerMarkerSize;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapExtractNameSize), out var extractNameSize))
+                _mapExtractNameSize = extractNameSize;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapQuestNameSize), out var questNameSize))
+                _mapQuestNameSize = questNameSize;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapLastZoomLevel), out var lastZoomLevel))
+                _mapLastZoomLevel = lastZoomLevel;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapLastTranslateX), out var lastTranslateX))
+                _mapLastTranslateX = lastTranslateX;
+
+            if (double.TryParse(_userDataDb.GetSetting(KeyMapLastTranslateY), out var lastTranslateY))
+                _mapLastTranslateY = lastTranslateY;
 
             // Load quest display settings
             if (double.TryParse(_userDataDb.GetSetting(KeyMapLabelScale), out var labelScale))

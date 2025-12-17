@@ -336,21 +336,27 @@
                                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                                     <Border Background="{Binding TypeBrush}"
                                                             CornerRadius="3" Padding="5,2"
-                                                            Opacity="{Binding ContentOpacity}">
+                                                            Opacity="{Binding ContentOpacity}"
+                                                            VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding TypeDisplay}"
-                                                                   FontSize="11" Foreground="White" FontWeight="SemiBold"/>
+                                                                   FontSize="11" Foreground="White" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"/>
                                                     </Border>
                                                     <!-- 층 배지 -->
                                                     <Border Background="{Binding FloorBrush}" CornerRadius="3" Padding="5,2" Margin="4,0,0,0"
-                                                            Visibility="{Binding FloorBadgeVisibility}">
+                                                            Visibility="{Binding FloorBadgeVisibility}"
+                                                            VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding FloorDisplay}"
-                                                                   FontSize="11" Foreground="White" FontWeight="Bold"/>
+                                                                   FontSize="11" Foreground="White" FontWeight="Bold"
+                                                                   VerticalAlignment="Center"/>
                                                     </Border>
                                                     <!-- 다른 맵 배지 -->
                                                     <Border Background="#607D8B" CornerRadius="3" Padding="5,2" Margin="4,0,0,0"
-                                                            Visibility="{Binding OtherMapBadgeVisibility}">
+                                                            Visibility="{Binding OtherMapBadgeVisibility}"
+                                                            VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding OtherMapName}"
-                                                                   FontSize="11" Foreground="White" FontWeight="SemiBold"/>
+                                                                   FontSize="11" Foreground="White" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"/>
                                                     </Border>
                                                 </StackPanel>
                                                 <!-- 목표 설명 -->
@@ -585,9 +591,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <TextBlock x:Name="TxtQuestNameSizeLabel" Text="Quest Name:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderQuestNameTextSize" Width="120" Minimum="8" Maximum="24"
-                                    Value="12" ValueChanged="SliderQuestNameTextSize_ValueChanged"/>
-                            <TextBlock x:Name="TxtQuestNameTextSize" Text="12" Width="30"
+                            <Slider x:Name="SliderQuestNameTextSize" Width="120" Minimum="16" Maximum="32"
+                                    Value="20" ValueChanged="SliderQuestNameTextSize_ValueChanged"/>
+                            <TextBlock x:Name="TxtQuestNameTextSize" Text="20" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Center" Margin="8,0,0,0"/>
                         </StackPanel>
@@ -596,9 +602,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <TextBlock x:Name="TxtQuestMarkerSizeLabel" Text="Quest Marker:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderMarkerSize" Width="120" Minimum="8" Maximum="24"
-                                    Value="12" ValueChanged="SliderMarkerSize_ValueChanged"/>
-                            <TextBlock x:Name="TxtMarkerSize" Text="12" Width="30"
+                            <Slider x:Name="SliderMarkerSize" Width="120" Minimum="12" Maximum="32"
+                                    Value="18" ValueChanged="SliderMarkerSize_ValueChanged"/>
+                            <TextBlock x:Name="TxtMarkerSize" Text="18" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Center" Margin="8,0,0,0"/>
                         </StackPanel>
@@ -607,9 +613,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
                             <TextBlock x:Name="TxtPlayerMarkerSizeLabel" Text="Player Marker:" Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center" Width="100"/>
-                            <Slider x:Name="SliderPlayerMarkerSize" Width="120" Minimum="8" Maximum="24"
-                                    Value="12" ValueChanged="SliderPlayerMarkerSize_ValueChanged"/>
-                            <TextBlock x:Name="TxtPlayerMarkerSize" Text="12" Width="30"
+                            <Slider x:Name="SliderPlayerMarkerSize" Width="120" Minimum="12" Maximum="32"
+                                    Value="18" ValueChanged="SliderPlayerMarkerSize_ValueChanged"/>
+                            <TextBlock x:Name="TxtPlayerMarkerSize" Text="18" Width="30"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Center" Margin="8,0,0,0"/>
                         </StackPanel>

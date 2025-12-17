@@ -714,10 +714,15 @@ namespace TarkovHelper.Pages
                 }
 
                 // Faction filter - hide quests for the other faction
+                // Exception: Show in Unavailable filter so users can see faction-restricted quests
                 if (!string.IsNullOrEmpty(selectedFaction) && !string.IsNullOrEmpty(vm.Task.Faction))
                 {
                     if (!string.Equals(vm.Task.Faction, selectedFaction, StringComparison.OrdinalIgnoreCase))
-                        return false;
+                    {
+                        // Only hide if NOT viewing Unavailable status
+                        if (selectedStatus != "Unavailable")
+                            return false;
+                    }
                 }
 
                 return true;
