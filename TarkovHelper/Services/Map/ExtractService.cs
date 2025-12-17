@@ -58,14 +58,15 @@ public sealed class ExtractService
     }
 
     /// <summary>
-    /// 특정 맵의 탈출구 목록을 반환합니다.
+    /// 특정 맵의 탈출구 목록을 반환합니다 (Transit 포함).
     /// </summary>
     /// <param name="mapKey">맵 키 (예: "Customs", "Woods")</param>
     /// <returns>탈출구 목록</returns>
     public List<MapExtract> GetExtractsForMap(string mapKey)
     {
-        var markers = _markerService.GetExtractionsForMap(mapKey);
-        return markers.Select(ConvertToMapExtract).ToList();
+        var extractions = _markerService.GetExtractionsForMap(mapKey);
+        var transits = _markerService.GetTransitsForMap(mapKey);
+        return extractions.Concat(transits).Select(ConvertToMapExtract).ToList();
     }
 
     /// <summary>
@@ -165,9 +166,9 @@ public sealed class ExtractService
             X = marker.X,
             Y = marker.Y,
             Z = marker.Z,
-            // FloorId를 기반으로 Top/Bottom 설정 (필요시 맵 설정에서 가져올 수 있음)
             Top = null,
-            Bottom = null
+            Bottom = null,
+            FloorId = marker.FloorId
         };
     }
 
@@ -181,7 +182,7 @@ public sealed class ExtractService
             MarkerType.PmcExtraction => ExtractFaction.Pmc,
             MarkerType.ScavExtraction => ExtractFaction.Scav,
             MarkerType.SharedExtraction => ExtractFaction.Shared,
-            MarkerType.Transit => ExtractFaction.Shared, // Transit은 공용으로 처리
+            MarkerType.Transit => ExtractFaction.Transit,
             _ => ExtractFaction.Shared
         };
     }

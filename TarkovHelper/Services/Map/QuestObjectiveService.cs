@@ -129,8 +129,9 @@ public sealed class QuestObjectiveService
 
             if (!isOnMap) continue;
 
-            // 퀘스트 활성 상태 확인
-            var task = progressService.GetTask(obj.TaskNormalizedName);
+            // 퀘스트 활성 상태 확인 (ID 기반 조회 우선, NormalizedName은 fallback)
+            var task = progressService.GetTaskById(obj.QuestId)
+                ?? progressService.GetTask(obj.TaskNormalizedName);
             if (task != null)
             {
                 var status = progressService.GetStatus(task);
@@ -147,7 +148,7 @@ public sealed class QuestObjectiveService
     }
 
     /// <summary>
-    /// 특정 퀘스트의 모든 목표를 반환합니다.
+    /// 특정 퀘스트의 모든 목표를 반환합니다. (NormalizedName 기반 - deprecated)
     /// </summary>
     /// <param name="taskNormalizedName">정규화된 퀘스트 이름</param>
     /// <returns>해당 퀘스트의 목표 목록</returns>
@@ -159,17 +160,34 @@ public sealed class QuestObjectiveService
     }
 
     /// <summary>
+    /// 특정 퀘스트의 모든 목표를 QuestId로 반환합니다. (권장)
+    /// </summary>
+    /// <param name="questId">퀘스트 ID</param>
+    /// <returns>해당 퀘스트의 목표 목록</returns>
+    public List<TaskObjectiveWithLocation> GetObjectivesForTaskById(string questId)
+    {
+        return GetAllObjectives()
+            .Where(o => string.Equals(o.QuestId, questId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    /// <summary>
     /// QuestObjective를 TaskObjectiveWithLocation으로 변환합니다.
     /// </summary>
     private static TaskObjectiveWithLocation ConvertToTaskObjective(QuestObjective obj, MapConfig? mapConfig)
     {
+        // QuestDbService에서 정확한 NormalizedName 조회
+        var quest = QuestDbService.Instance.GetQuestById(obj.QuestId);
+        var taskNormalizedName = quest?.NormalizedName ?? NormalizeQuestName(obj.QuestName);
+
         var result = new TaskObjectiveWithLocation
         {
             ObjectiveId = obj.Id,
             Description = obj.Description,
             DescriptionKo = null, // DB에 한국어 설명이 없으면 null
             Type = ConvertObjectiveType(obj.ObjectiveType),
-            TaskNormalizedName = NormalizeQuestName(obj.QuestName),
+            QuestId = obj.QuestId,
+            TaskNormalizedName = taskNormalizedName,
             TaskName = obj.QuestName,
             TaskNameKo = obj.QuestNameKo,
             Locations = new List<QuestObjectiveLocation>()

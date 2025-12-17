@@ -235,13 +235,50 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding QuestName}"
                                                        FontSize="13" FontWeight="Bold"
                                                        Foreground="{Binding HeaderBrush}"
                                                        TextDecorations="{Binding TextDecoration}"
                                                        TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
-                                            <Border Grid.Column="1" Background="{Binding HeaderBrush}"
+                                            <!-- Wiki 링크 버튼 -->
+                                            <Button Grid.Column="1" Content="Wiki"
+                                                    Click="WikiLinkButton_Click"
+                                                    Tag="{Binding WikiLink}"
+                                                    Visibility="{Binding HasWikiLink, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    VerticalAlignment="Center" Margin="8,0,0,0"
+                                                    Padding="6,2" FontSize="10"
+                                                    Background="Transparent"
+                                                    Foreground="{StaticResource AccentBrush}"
+                                                    BorderBrush="{StaticResource AccentBrush}"
+                                                    BorderThickness="1"
+                                                    Cursor="Hand">
+                                                <Button.Style>
+                                                    <Style TargetType="Button">
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="Button">
+                                                                    <Border x:Name="border"
+                                                                            Background="{TemplateBinding Background}"
+                                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                                                            CornerRadius="3" Padding="{TemplateBinding Padding}">
+                                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="border" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                                                            <Setter Property="Foreground" Value="White"/>
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+                                            <Border Grid.Column="2" Background="{Binding HeaderBrush}"
                                                     CornerRadius="10" Padding="8,2" Margin="8,0,0,0"
                                                     VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding Progress}"
@@ -582,7 +619,13 @@
                                   Unchecked="ChkExtractFilter_Changed"/>
 
                         <CheckBox x:Name="ChkShowScavExtracts" Content="Scav Extracts"
-                                  Foreground="#FFB74D" FontWeight="SemiBold"
+                                  Foreground="#9E9E9E" FontWeight="SemiBold"
+                                  Margin="0,0,0,6" IsChecked="True"
+                                  Checked="ChkExtractFilter_Changed"
+                                  Unchecked="ChkExtractFilter_Changed"/>
+
+                        <CheckBox x:Name="ChkShowTransitExtracts" Content="Transit"
+                                  Foreground="#FF9800" FontWeight="SemiBold"
                                   Margin="0,0,0,12" IsChecked="True"
                                   Checked="ChkExtractFilter_Changed"
                                   Unchecked="ChkExtractFilter_Changed"/>

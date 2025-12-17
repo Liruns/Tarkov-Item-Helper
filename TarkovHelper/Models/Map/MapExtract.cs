@@ -64,6 +64,11 @@ public sealed class MapExtract
     /// 하단 높이 (층 구분용)
     /// </summary>
     public double? Bottom { get; set; }
+
+    /// <summary>
+    /// 층 ID (다층 맵에서 층 구분용, 예: "main", "basement", "level2")
+    /// </summary>
+    public string? FloorId { get; set; }
 }
 
 /// <summary>
@@ -84,7 +89,12 @@ public enum ExtractFaction
     /// <summary>
     /// 공용 탈출구 (PMC + Scav) 또는 Co-op
     /// </summary>
-    Shared
+    Shared,
+
+    /// <summary>
+    /// Transit (맵 간 이동)
+    /// </summary>
+    Transit
 }
 
 /// <summary>

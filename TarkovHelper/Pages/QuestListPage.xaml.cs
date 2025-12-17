@@ -1020,7 +1020,7 @@ namespace TarkovHelper.Pages
             // Required Items
             if (task.RequiredItems != null && task.RequiredItems.Count > 0)
             {
-                _ = LoadRequiredItemsAsync(task.RequiredItems);
+                LoadRequiredItems(task.RequiredItems);
                 RequiredItemsSectionWrapper.Visibility = Visibility.Visible;
             }
             else
@@ -1679,7 +1679,7 @@ namespace TarkovHelper.Pages
 
         #region Required Items with Localization
 
-        private async Task LoadRequiredItemsAsync(List<QuestItem> requiredItems)
+        private void LoadRequiredItems(List<QuestItem> requiredItems)
         {
             var itemVms = new List<RequiredItemViewModel>();
 
@@ -1707,24 +1707,16 @@ namespace TarkovHelper.Pages
 
                 // Get item icon (with display name for better matching)
                 var tarkovItem = GetItemByNormalizedName(item.ItemNormalizedName, item.ItemDisplayName);
-                if (tarkovItem?.IconLink != null)
+                if (tarkovItem?.Id != null)
                 {
-                    var icon = await _imageCache.GetItemIconAsync(tarkovItem.IconLink);
+                    var icon = _imageCache.GetLocalItemIcon(tarkovItem.Id);
                     vm.IconSource = icon;
                 }
 
                 itemVms.Add(vm);
             }
 
-            // Update on UI thread only if page is still loaded
-            if (!_isUnloaded)
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    if (!_isUnloaded)
-                        RequiredItemsList.ItemsSource = itemVms;
-                });
-            }
+            RequiredItemsList.ItemsSource = itemVms;
         }
 
         /// <summary>

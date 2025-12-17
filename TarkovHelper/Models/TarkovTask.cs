@@ -163,6 +163,12 @@ namespace TarkovHelper.Models
         /// </summary>
         [JsonPropertyName("tarkovMarketQuestUid")]
         public string? TarkovMarketQuestUid { get; set; }
+
+        /// <summary>
+        /// Wiki page link for this quest
+        /// </summary>
+        [JsonPropertyName("wikiPageLink")]
+        public string? WikiPageLink { get; set; }
     }
 
     /// <summary>

@@ -98,6 +98,11 @@ public sealed class MapTrackerSettings
     public bool ShowScavExtracts { get; set; } = true;
 
     /// <summary>
+    /// Transit 마커 표시 여부
+    /// </summary>
+    public bool ShowTransitExtracts { get; set; } = true;
+
+    /// <summary>
     /// 탈출구 이름 텍스트 크기
     /// </summary>
     public double ExtractNameTextSize { get; set; } = 16.0;
@@ -110,7 +115,7 @@ public sealed class MapTrackerSettings
     /// <summary>
     /// 퀘스트 마커 스타일
     /// </summary>
-    public QuestMarkerStyle QuestMarkerStyle { get; set; } = QuestMarkerStyle.Default;
+    public QuestMarkerStyle QuestMarkerStyle { get; set; } = QuestMarkerStyle.DefaultWithName;
 
     /// <summary>
     /// 퀘스트명 텍스트 크기
@@ -125,7 +130,7 @@ public sealed class MapTrackerSettings
     /// <summary>
     /// 완료된 퀘스트 목표 마커 숨기기 여부
     /// </summary>
-    public bool HideCompletedObjectives { get; set; } = false;
+    public bool HideCompletedObjectives { get; set; } = true;
 
     /// <summary>
     /// 마지막으로 선택한 맵 키 (탭 전환 시 상태 유지용)

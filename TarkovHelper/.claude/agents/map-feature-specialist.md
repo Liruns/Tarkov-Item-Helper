@@ -128,15 +128,51 @@ public static string FilterByFloor(string svgContent, string floorId)
 
 ### Discovered Patterns
 
-_아직 기록된 패턴이 없습니다._
+**2025-12-17: Quest Objective 조회 패턴**
+- Quest objectives는 반드시 **ID 기반 조회**를 사용해야 함
+- `TaskObjectiveWithLocation` 모델에 `QuestId` 필드 추가됨
+- `_progressService.GetTaskById(questId)` 사용 (ID 기반)
+- `_progressService.GetTask(normalizedName)`는 deprecated - fallback용으로만 사용
+- NormalizedName은 다음 용도로만 사용:
+  - 중복 제거를 위한 집합 추적
+  - 목표 필터링 (GetObjectivesForTask)
+  - UI 그룹화
+- **CLAUDE.md 제약사항 준수**: "Quest의 NormalizedName은 데이터 마이그레이션에서만 사용, DB상의 ID가 기준"
+
+**좌표 변환 패턴**
+- DB의 LocationPoint: `X`, `Y` (높이), `Z` (수평면)
+- TaskObjectiveWithLocation: `X`, `Y` (수평면), `Z` (높이)
+- 변환 시: DB의 Z → Location의 Y, DB의 Y → Location의 Z
+- 화면 표시 시: `config.GameToScreen(location.X, location.Y)` 사용 (Z는 높이이므로 사용 안 함)
 
 ### Known Issues
 
-_아직 기록된 이슈가 없습니다._
+**2025-12-17: Quest Objectives 패널 버그 (해결됨)**
+- **문제**: MapPage의 RefreshQuestDrawer()에서 NormalizedName 기반 조회 사용으로 null 반환
+- **원인**: TaskObjectiveWithLocation에 QuestId 필드 없음, NormalizedName만으로 조회 시도
+- **해결**: QuestId 필드 추가 및 ID 기반 조회로 변경 (fallback 포함)
+- **변경 파일**:
+  - `Models/Map/QuestObjectiveLocation.cs` (line 113): QuestId 필드 추가
+  - `Services/Map/QuestObjectiveService.cs` (line 176): QuestId 복사
+  - `Pages/Map/MapPage.xaml.cs` (line 3189-3190): ID 기반 조회 + fallback
 
 ### Project-Specific Notes
 
-_아직 기록된 노트가 없습니다._
+**Map Quest Objectives 데이터 흐름**
+1. DB 로드: `QuestObjectiveDbService` (QuestObjectives + Quests JOIN)
+2. 변환: `QuestObjectiveService.ConvertToTaskObjective()` - QuestId 포함
+3. UI 표시: `MapPage.RefreshQuestDrawer()` - ID 기반 조회 사용
+4. 진행 상태: `QuestProgressService.GetTaskById()` 또는 fallback `GetTask()`
+
+**안전한 Quest 조회 패턴**
+```csharp
+// ✅ 올바른 패턴 (ID 우선, NormalizedName fallback)
+var task = _progressService.GetTaskById(taskObj.QuestId)
+    ?? _progressService.GetTask(taskObj.TaskNormalizedName);
+
+// ❌ 잘못된 패턴 (NormalizedName만 사용)
+var task = _progressService.GetTask(taskObj.TaskNormalizedName);
+```
 
 ---
 

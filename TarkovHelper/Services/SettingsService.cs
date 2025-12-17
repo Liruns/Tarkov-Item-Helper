@@ -66,6 +66,7 @@ public class SettingsService
     private const string KeyMapHideCompletedQuests = "map.hideCompletedQuests";
     private const string KeyMapShowActiveOnly = "map.showActiveOnly";
     private const string KeyMapHideCompletedObjectives = "map.hideCompletedObjectives";
+    private const string KeyMapQuestMarkerStyle = "map.questMarkerStyle";
     private const string KeyMapShowKappaHighlight = "map.showKappaHighlight";
     private const string KeyMapTraderFilter = "map.traderFilter";
     private const string KeyMapTrailColor = "map.trailColor";
@@ -131,6 +132,7 @@ public class SettingsService
     private bool? _mapHideCompletedQuests;
     private bool? _mapShowActiveOnly;
     private bool? _mapHideCompletedObjectives;
+    private int? _mapQuestMarkerStyle;
     private bool? _mapShowKappaHighlight;
     private string? _mapTraderFilter;  // Empty = all, or trader name
     private string? _mapTrailColor;
@@ -1023,7 +1025,7 @@ public class SettingsService
         get
         {
             if (!_settingsLoaded) LoadSettings();
-            return _mapHideCompletedObjectives ?? false;
+            return _mapHideCompletedObjectives ?? true;  // Default: hide completed objectives
         }
         set
         {
@@ -1031,6 +1033,27 @@ public class SettingsService
             {
                 _mapHideCompletedObjectives = value;
                 SaveSetting(KeyMapHideCompletedObjectives, value.ToString());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Quest marker style on map (0=Icon, 1=GreenCircle, 2=IconWithName, 3=GreenCircleWithName)
+    /// </summary>
+    public int MapQuestMarkerStyle
+    {
+        get
+        {
+            if (!_settingsLoaded) LoadSettings();
+            return _mapQuestMarkerStyle ?? 2;  // Default: DefaultWithName (Icon + Name)
+        }
+        set
+        {
+            var clampedValue = Math.Clamp(value, 0, 3);
+            if (_mapQuestMarkerStyle != clampedValue)
+            {
+                _mapQuestMarkerStyle = clampedValue;
+                SaveSetting(KeyMapQuestMarkerStyle, clampedValue.ToString());
             }
         }
     }
@@ -1887,6 +1910,9 @@ public class SettingsService
 
             if (bool.TryParse(_userDataDb.GetSetting(KeyMapHideCompletedObjectives), out var hideCompletedObjectives))
                 _mapHideCompletedObjectives = hideCompletedObjectives;
+
+            if (int.TryParse(_userDataDb.GetSetting(KeyMapQuestMarkerStyle), out var questMarkerStyle))
+                _mapQuestMarkerStyle = questMarkerStyle;
 
             if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowKappaHighlight), out var showKappaHighlight))
                 _mapShowKappaHighlight = showKappaHighlight;

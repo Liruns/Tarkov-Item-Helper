@@ -47,7 +47,7 @@ public partial class MapPage : UserControl
     private readonly List<FrameworkElement> _questMarkerElements = new();
     private List<TaskObjectiveWithLocation> _currentMapObjectives = new();
     private bool _showQuestMarkers = true;
-    private QuestMarkerStyle _questMarkerStyle = QuestMarkerStyle.Default;
+    private QuestMarkerStyle _questMarkerStyle = QuestMarkerStyle.DefaultWithName;
     private double _questNameTextSize = 12.0;
     private TaskObjectiveWithLocation? _selectedObjective;
     private FrameworkElement? _selectedMarkerElement;
@@ -58,8 +58,9 @@ public partial class MapPage : UserControl
     private bool _showExtractMarkers = true;
     private bool _showPmcExtracts = true;
     private bool _showScavExtracts = true;
+    private bool _showTransitExtracts = true;
     private double _extractNameTextSize = 10.0;
-    private bool _hideCompletedObjectives = false;
+    private bool _hideCompletedObjectives = true;
 
     // 로그 맵 감시 서비스 (자동 맵 전환용)
     private readonly LogMapWatcherService _logMapWatcher = LogMapWatcherService.Instance;
@@ -154,6 +155,10 @@ public partial class MapPage : UserControl
             _progressService.ProgressChanged += OnQuestProgressChanged;
             _progressService.ObjectiveProgressChanged += OnObjectiveProgressChanged;
 
+            // Global Keyboard Hook 시작 (NumPad 키로 층 변경)
+            GlobalKeyboardHookService.Instance.FloorKeyPressed += OnFloorKeyPressed;
+            GlobalKeyboardHookService.Instance.IsEnabled = true;
+
             // 자동 Tracking 시작 (Map 탭 활성화 시)
             StartAutoTracking();
 
@@ -174,6 +179,10 @@ public partial class MapPage : UserControl
         // 이벤트 구독 해제
         _progressService.ProgressChanged -= OnQuestProgressChanged;
         _progressService.ObjectiveProgressChanged -= OnObjectiveProgressChanged;
+
+        // Global Keyboard Hook 중지
+        GlobalKeyboardHookService.Instance.FloorKeyPressed -= OnFloorKeyPressed;
+        GlobalKeyboardHookService.Instance.IsEnabled = false;
 
         // 자동 Tracking 중지 (다른 탭으로 이동 시)
         StopAutoTracking();
@@ -337,18 +346,21 @@ public partial class MapPage : UserControl
         // 탈출구 설정 로드
         _showPmcExtracts = settings.ShowPmcExtracts;
         _showScavExtracts = settings.ShowScavExtracts;
+        _showTransitExtracts = settings.ShowTransitExtracts;
         _extractNameTextSize = settings.ExtractNameTextSize;
         _showExtractMarkers = settings.ShowExtractMarkers;
         _showQuestMarkers = settings.ShowQuestMarkers;
-        _questMarkerStyle = settings.QuestMarkerStyle;
         _questNameTextSize = settings.QuestNameTextSize;
 
-        // 완료된 목표 숨기기 설정 로드
-        _hideCompletedObjectives = settings.HideCompletedObjectives;
+        // SettingsService에서 DB 저장 설정 로드
+        var settingsService = SettingsService.Instance;
+        _questMarkerStyle = (QuestMarkerStyle)settingsService.MapQuestMarkerStyle;
+        _hideCompletedObjectives = settingsService.MapHideCompletedObjectives;
 
         // UI 업데이트 (이벤트 트리거 방지를 위해 직접 설정)
         ChkShowPmcExtracts.IsChecked = _showPmcExtracts;
         ChkShowScavExtracts.IsChecked = _showScavExtracts;
+        ChkShowTransitExtracts.IsChecked = _showTransitExtracts;
         SliderExtractTextSize.Value = _extractNameTextSize;
         ChkShowExtractMarkers.IsChecked = _showExtractMarkers;
         ChkShowQuestMarkers.IsChecked = _showQuestMarkers;
@@ -612,11 +624,31 @@ public partial class MapPage : UserControl
             {
                 RefreshExtractMarkers();
             }
-            if (QuestDrawerPanel != null)
+
+            // 패널이 열려있으면 내용 갱신 (닫지 않음)
+            if (QuestDrawerPanel?.Visibility == Visibility.Visible)
             {
-                CloseQuestDrawer();
+                RefreshQuestDrawer();
             }
         }
+    }
+
+    /// <summary>
+    /// Global Keyboard Hook에서 NumPad 키가 눌렸을 때 호출됩니다.
+    /// NumPad 0-5로 층을 선택합니다.
+    /// </summary>
+    private void OnFloorKeyPressed(int floorIndex)
+    {
+        // 층 콤보박스가 보이지 않으면 (단일 층 맵) 무시
+        if (CmbFloorSelect.Visibility != Visibility.Visible)
+            return;
+
+        // 유효한 인덱스인지 확인
+        if (floorIndex < 0 || floorIndex >= CmbFloorSelect.Items.Count)
+            return;
+
+        // 층 선택
+        CmbFloorSelect.SelectedIndex = floorIndex;
     }
 
     private void CmbFloorSelect_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -631,6 +663,10 @@ public partial class MapPage : UserControl
                 if (!string.IsNullOrEmpty(_currentMapKey))
                 {
                     LoadMapImage(_currentMapKey);
+
+                    // 마커들도 새로고침 (층 정보에 따른 표시 업데이트)
+                    RefreshExtractMarkers();
+                    RefreshQuestMarkers();
                 }
             }
         }
@@ -751,11 +787,12 @@ public partial class MapPage : UserControl
 
     private void CmbQuestMarkerStyle_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_trackerService == null || CmbQuestMarkerStyle.SelectedIndex < 0) return;
+        if (CmbQuestMarkerStyle.SelectedIndex < 0) return;
 
         _questMarkerStyle = (QuestMarkerStyle)CmbQuestMarkerStyle.SelectedIndex;
-        _trackerService.Settings.QuestMarkerStyle = _questMarkerStyle;
-        _trackerService.SaveSettings();
+
+        // 설정 저장 (SettingsService를 통해 DB에 저장)
+        SettingsService.Instance.MapQuestMarkerStyle = (int)_questMarkerStyle;
 
         // 마커 다시 그리기
         RefreshQuestMarkers();
@@ -1592,15 +1629,19 @@ public partial class MapPage : UserControl
             foreach (var location in locationsOnCurrentMap)
             {
                 // TarkovDBEditor 방식: config.GameToScreen 직접 사용
-                // API coordinates: X = game X, Z = game Z (Y는 높이)
-                var (screenX, screenY) = config.GameToScreen(location.X, location.Z ?? 0);
+                // QuestObjectiveLocation: X = game X, Y = game Z (수평면), Z = game Y (높이)
+                var (screenX, screenY) = config.GameToScreen(location.X, location.Y);
                 var screenPos = new ScreenPosition
                 {
                     MapKey = _currentMapKey!,
                     X = screenX,
                     Y = screenY
                 };
-                var marker = CreateQuestMarker(objective, location, screenPos);
+
+                // 층 정보 확인: 현재 선택된 층과 목표 위치의 층 비교
+                var isOnCurrentFloor = IsMarkerOnCurrentFloor(location.FloorId);
+
+                var marker = CreateQuestMarker(objective, location, screenPos, isOnCurrentFloor);
                 _questMarkerElements.Add(marker);
                 QuestMarkersContainer.Children.Add(marker);
             }
@@ -1616,18 +1657,29 @@ public partial class MapPage : UserControl
         }
     }
 
-    private FrameworkElement CreateQuestMarker(TaskObjectiveWithLocation objective, QuestObjectiveLocation location, ScreenPosition screenPos)
+    private FrameworkElement CreateQuestMarker(TaskObjectiveWithLocation objective, QuestObjectiveLocation location, ScreenPosition screenPos, bool isOnCurrentFloor = true)
     {
         // 설정에서 커스텀 색상 가져오기
         var colorHex = _trackerService?.Settings.GetMarkerColor(objective.Type) ?? objective.MarkerColor;
         var markerColor = (Color)ColorConverter.ConvertFromString(colorHex);
+
+        // 다른 층의 마커는 색상을 흐리게 처리
+        if (!isOnCurrentFloor)
+        {
+            markerColor = Color.FromArgb(100, markerColor.R, markerColor.G, markerColor.B);
+        }
+
         var markerBrush = new SolidColorBrush(markerColor);
-        var glowBrush = new SolidColorBrush(Color.FromArgb(64, markerColor.R, markerColor.G, markerColor.B));
+        var glowBrush = new SolidColorBrush(Color.FromArgb((byte)(isOnCurrentFloor ? 64 : 30), markerColor.R, markerColor.G, markerColor.B));
 
         // 초록색 원 스타일용 색상
         var greenColor = (Color)ColorConverter.ConvertFromString("#4CAF50");
+        if (!isOnCurrentFloor)
+        {
+            greenColor = Color.FromArgb(100, greenColor.R, greenColor.G, greenColor.B);
+        }
         var greenBrush = new SolidColorBrush(greenColor);
-        var greenGlowBrush = new SolidColorBrush(Color.FromArgb(64, greenColor.R, greenColor.G, greenColor.B));
+        var greenGlowBrush = new SolidColorBrush(Color.FromArgb((byte)(isOnCurrentFloor ? 64 : 30), greenColor.R, greenColor.G, greenColor.B));
 
         // 설정에서 마커 크기 가져오기
         var baseMarkerSize = _trackerService?.Settings.MarkerSize ?? 16;
@@ -1778,6 +1830,12 @@ public partial class MapPage : UserControl
         canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
         canvas.RenderTransformOrigin = new Point(0, 0);
 
+        // 다른 층의 마커는 반투명 처리
+        if (!isOnCurrentFloor)
+        {
+            canvas.Opacity = 0.5;
+        }
+
         // 클릭 이벤트
         canvas.MouseLeftButtonDown += QuestMarker_Click;
         canvas.Cursor = Cursors.Hand;
@@ -1789,7 +1847,8 @@ public partial class MapPage : UserControl
         var tooltipName = _loc.CurrentLanguage == AppLanguage.KO && !string.IsNullOrEmpty(objective.TaskNameKo)
             ? objective.TaskNameKo
             : objective.TaskName;
-        canvas.ToolTip = $"{tooltipName}\n{tooltipDesc}";
+        var floorIndicator = !isOnCurrentFloor ? " ⬆⬇" : "";
+        canvas.ToolTip = $"{tooltipName}\n{tooltipDesc}{floorIndicator}";
 
         return canvas;
     }
@@ -2515,6 +2574,25 @@ public partial class MapPage : UserControl
         }
     }
 
+    private void WikiLinkButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string wikiLink && !string.IsNullOrEmpty(wikiLink))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = wikiLink,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to open wiki link: {ex.Message}");
+            }
+        }
+    }
+
     private void CenterOnObjective(TaskObjectiveWithLocation objective)
     {
         if (string.IsNullOrEmpty(_currentMapKey)) return;
@@ -2595,22 +2673,24 @@ public partial class MapPage : UserControl
         // 현재 맵의 탈출구 가져오기 (MapConfig의 Aliases 사용)
         var extracts = _extractService.GetExtractsForMap(_currentMapKey, config);
 
-        // 같은 위치의 탈출구 그룹화 (PMC+Scav 공용 탈출구 처리)
-        var extractGroups = GroupExtractsByPosition(extracts);
-
-        foreach (var group in extractGroups)
+        // 디버그: 로드된 탈출구 목록 출력
+        System.Diagnostics.Debug.WriteLine($"[MapPage] Loaded {extracts.Count} extracts for '{_currentMapKey}':");
+        foreach (var e in extracts)
         {
-            // 그룹의 대표 탈출구와 진영 타입 결정
-            var (representativeExtract, combinedFaction) = DetermineExtractDisplay(group);
+            System.Diagnostics.Debug.WriteLine($"  - {e.Name} ({e.Faction}) FloorId={e.FloorId ?? "null"}");
+        }
 
+        // 모든 탈출구를 개별적으로 표시 (그룹화 없음)
+        foreach (var extract in extracts)
+        {
             // 진영 필터 적용
-            if (!ShouldShowExtract(combinedFaction)) continue;
+            if (!ShouldShowExtract(extract.Faction)) continue;
 
             // TarkovDBEditor 방식: config.GameToScreen 직접 사용
-            var (screenX, screenY) = config.GameToScreen(representativeExtract.X, representativeExtract.Z);
+            var (screenX, screenY) = config.GameToScreen(extract.X, extract.Z);
 
-            // 디버그: 첫 번째 탈출구 좌표 변환 결과 출력
-            System.Diagnostics.Debug.WriteLine($"[MapPage] Extract '{representativeExtract.Name}': Game({representativeExtract.X:F2}, {representativeExtract.Z:F2}) -> Screen({screenX:F2}, {screenY:F2})");
+            // 디버그: 탈출구 좌표 변환 결과 출력
+            System.Diagnostics.Debug.WriteLine($"[MapPage] Extract '{extract.Name}': Game({extract.X:F2}, {extract.Z:F2}) -> Screen({screenX:F2}, {screenY:F2})");
 
             var screenPos = new ScreenPosition
             {
@@ -2618,10 +2698,36 @@ public partial class MapPage : UserControl
                 X = screenX,
                 Y = screenY
             };
-            var marker = CreateExtractMarker(representativeExtract, screenPos, combinedFaction);
+
+            // 층 정보 확인: 현재 선택된 층과 탈출구의 층 비교
+            var isOnCurrentFloor = IsMarkerOnCurrentFloor(extract.FloorId);
+
+            var marker = CreateExtractMarker(extract, screenPos, null, isOnCurrentFloor);
             _extractMarkerElements.Add(marker);
             ExtractMarkersContainer.Children.Add(marker);
         }
+    }
+
+    /// <summary>
+    /// 마커가 현재 선택된 층에 있는지 확인합니다.
+    /// </summary>
+    /// <param name="markerFloorId">마커의 FloorId</param>
+    /// <returns>현재 층에 있으면 true, 다른 층이면 false</returns>
+    private bool IsMarkerOnCurrentFloor(string? markerFloorId)
+    {
+        // 단일 층 맵이거나 층 선택이 없는 경우: 모든 마커를 현재 층으로 간주
+        if (string.IsNullOrEmpty(_currentFloorId))
+            return true;
+
+        // 마커에 층 정보가 없는 경우: 기본 층(main)으로 간주
+        if (string.IsNullOrEmpty(markerFloorId))
+        {
+            // 현재 선택된 층이 main이면 표시, 아니면 다른 층으로 처리
+            return string.Equals(_currentFloorId, "main", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // 층 ID 비교 (대소문자 무시)
+        return string.Equals(_currentFloorId, markerFloorId, StringComparison.OrdinalIgnoreCase);
     }
 
     private List<List<MapExtract>> GroupExtractsByPosition(List<MapExtract> extracts)
@@ -2637,16 +2743,23 @@ public partial class MapPage : UserControl
             used.Add(extract.Id);
 
             // 같은 위치(근접)의 다른 탈출구 찾기
+            // 단, PMC+Scav 공용 탈출구만 그룹화 (같은 이름 또는 다른 진영이면서 매우 가까운 경우)
             foreach (var other in extracts)
             {
                 if (used.Contains(other.Id)) continue;
 
-                // 거리가 가까우면 (50 유닛 이내) 같은 그룹으로
+                // 거리 계산
                 var distance = Math.Sqrt(
                     Math.Pow(extract.X - other.X, 2) +
                     Math.Pow(extract.Z - other.Z, 2));
 
-                if (distance < 50)
+                // 그룹화 조건:
+                // 1. 같은 이름이고 10유닛 이내 (PMC/Scav 공용 탈출구)
+                // 2. 다른 진영이고 10유닛 이내 (PMC+Scav 겹치는 경우)
+                var sameName = string.Equals(extract.Name, other.Name, StringComparison.OrdinalIgnoreCase);
+                var differentFaction = extract.Faction != other.Faction;
+
+                if (distance < 10 && (sameName || differentFaction))
                 {
                     group.Add(other);
                     used.Add(other.Id);
@@ -2688,17 +2801,17 @@ public partial class MapPage : UserControl
 
     private bool ShouldShowExtract(ExtractFaction faction)
     {
-        // Shared는 PMC로 처리되므로 Pmc 필터 적용
         return faction switch
         {
             ExtractFaction.Pmc => _showPmcExtracts,
             ExtractFaction.Scav => _showScavExtracts,
             ExtractFaction.Shared => _showPmcExtracts, // Shared도 PMC 필터 사용
+            ExtractFaction.Transit => _showTransitExtracts,
             _ => true
         };
     }
 
-    private FrameworkElement CreateExtractMarker(MapExtract extract, ScreenPosition screenPos, ExtractFaction? overrideFaction = null)
+    private FrameworkElement CreateExtractMarker(MapExtract extract, ScreenPosition screenPos, ExtractFaction? overrideFaction = null, bool isOnCurrentFloor = true)
     {
         // 맵별 마커 스케일 적용
         var mapConfig = _trackerService?.GetMapConfig(_currentMapKey ?? "");
@@ -2712,6 +2825,13 @@ public partial class MapPage : UserControl
 
         // 진영별 색상 설정
         var (fillColor, strokeColor) = GetExtractStyle(faction);
+
+        // 다른 층의 마커는 색상을 흐리게 처리
+        if (!isOnCurrentFloor)
+        {
+            fillColor = Color.FromArgb(100, fillColor.R, fillColor.G, fillColor.B);
+            strokeColor = Color.FromArgb(150, strokeColor.R, strokeColor.G, strokeColor.B);
+        }
 
         var canvas = new Canvas
         {
@@ -2790,6 +2910,12 @@ public partial class MapPage : UserControl
         canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
         canvas.RenderTransformOrigin = new Point(0, 0);
 
+        // 다른 층의 마커는 반투명 처리
+        if (!isOnCurrentFloor)
+        {
+            canvas.Opacity = 0.5;
+        }
+
         // 툴팁
         var factionText = faction switch
         {
@@ -2797,7 +2923,9 @@ public partial class MapPage : UserControl
             ExtractFaction.Scav => "Scav",
             _ => "Extract"
         };
-        canvas.ToolTip = $"[{factionText}] {displayName}";
+        var floorText = !string.IsNullOrEmpty(extract.FloorId) ? $" ({extract.FloorId})" : "";
+        var differentFloorIndicator = !isOnCurrentFloor ? " ⬆⬇" : "";
+        canvas.ToolTip = $"[{factionText}] {displayName}{floorText}{differentFloorIndicator}";
         canvas.Cursor = Cursors.Hand;
 
         // 보정 모드용 드래그 이벤트 설정
@@ -2814,10 +2942,13 @@ public partial class MapPage : UserControl
                 Color.FromRgb(76, 175, 80),    // Green
                 Colors.White),
             ExtractFaction.Scav => (
-                Color.FromRgb(255, 183, 77),   // Light Orange (연주황색)
+                Color.FromRgb(158, 158, 158),  // Gray (회색)
                 Colors.White),
             ExtractFaction.Shared => (
                 Color.FromRgb(76, 175, 80),    // Green (Shared도 PMC로 처리)
+                Colors.White),
+            ExtractFaction.Transit => (
+                Color.FromRgb(255, 152, 0),    // Orange (주황색)
                 Colors.White),
             _ => (
                 Color.FromRgb(158, 158, 158),  // Gray
@@ -2993,12 +3124,14 @@ public partial class MapPage : UserControl
     {
         _showPmcExtracts = ChkShowPmcExtracts?.IsChecked ?? true;
         _showScavExtracts = ChkShowScavExtracts?.IsChecked ?? true;
+        _showTransitExtracts = ChkShowTransitExtracts?.IsChecked ?? true;
 
         // 설정 저장
         if (_trackerService != null)
         {
             _trackerService.Settings.ShowPmcExtracts = _showPmcExtracts;
             _trackerService.Settings.ShowScavExtracts = _showScavExtracts;
+            _trackerService.Settings.ShowTransitExtracts = _showTransitExtracts;
             _trackerService.SaveSettings();
         }
 
@@ -3143,14 +3276,10 @@ public partial class MapPage : UserControl
 
     private void ChkHideCompletedObjectives_Changed(object sender, RoutedEventArgs e)
     {
-        _hideCompletedObjectives = ChkHideCompletedObjectives?.IsChecked ?? false;
+        _hideCompletedObjectives = ChkHideCompletedObjectives?.IsChecked ?? true;
 
-        // 설정 저장
-        if (_trackerService != null)
-        {
-            _trackerService.Settings.HideCompletedObjectives = _hideCompletedObjectives;
-            _trackerService.SaveSettings();
-        }
+        // 설정 저장 (SettingsService를 통해 DB에 저장)
+        SettingsService.Instance.MapHideCompletedObjectives = _hideCompletedObjectives;
 
         // 마커 새로고침
         RefreshQuestMarkers();
@@ -3171,32 +3300,36 @@ public partial class MapPage : UserControl
         var viewModels = new List<QuestObjectiveViewModel>();
 
         // 현재 맵의 활성 퀘스트들에 대해 모든 위치 정보 수집 (다른 맵 목표 포함)
-        var processedTaskNames = new HashSet<string>();
+        var processedQuestIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var allObjectivesForDrawer = new List<TaskObjectiveWithLocation>();
 
         foreach (var obj in _currentMapObjectives)
         {
-            // 이 퀘스트의 다른 맵 목표도 가져오기
-            if (!processedTaskNames.Contains(obj.TaskNormalizedName))
+            // 이 퀘스트의 다른 맵 목표도 가져오기 (QuestId 기반)
+            if (!processedQuestIds.Contains(obj.QuestId))
             {
-                processedTaskNames.Add(obj.TaskNormalizedName);
+                processedQuestIds.Add(obj.QuestId);
 
-                // 이 퀘스트의 모든 목표 가져오기
-                var allTaskObjectives = _objectiveService.GetObjectivesForTask(obj.TaskNormalizedName);
+                // 이 퀘스트의 모든 목표 가져오기 (QuestId 기반)
+                var allTaskObjectives = _objectiveService.GetObjectivesForTaskById(obj.QuestId);
+
                 foreach (var taskObj in allTaskObjectives)
                 {
-                    // 퀘스트 상태 확인
-                    var task = _progressService.GetTask(taskObj.TaskNormalizedName);
-                    if (task != null)
+                    // 퀘스트 상태 확인 (ID 기반 조회 우선, NormalizedName은 fallback)
+                    var task = _progressService.GetTaskById(taskObj.QuestId)
+                        ?? _progressService.GetTask(taskObj.TaskNormalizedName);
+
+                    if (task == null)
+                        continue;
+
+                    var status = _progressService.GetStatus(task);
+
+                    if (status == QuestStatus.Active)
                     {
-                        var status = _progressService.GetStatus(task);
-                        if (status == QuestStatus.Active)
-                        {
-                            // 목표 인덱스 및 완료 상태 설정
-                            taskObj.ObjectiveIndex = GetObjectiveIndex(task, taskObj.Description);
-                            taskObj.IsCompleted = _progressService.IsObjectiveCompletedById(taskObj.ObjectiveId);
-                            allObjectivesForDrawer.Add(taskObj);
-                        }
+                        // 목표 인덱스 및 완료 상태 설정
+                        taskObj.ObjectiveIndex = GetObjectiveIndex(task, taskObj.Description);
+                        taskObj.IsCompleted = _progressService.IsObjectiveCompletedById(taskObj.ObjectiveId);
+                        allObjectivesForDrawer.Add(taskObj);
                     }
                 }
             }
@@ -3322,11 +3455,15 @@ public partial class MapPage : UserControl
             var firstObj = group.First();
             var completedCount = group.Count(vm => vm.IsChecked);
             var totalCount = group.Count();
+            // DB에서 WikiPageLink 가져오기
+            var quest = QuestDbService.Instance.GetQuestById(firstObj.Objective.QuestId);
             result.Add(new QuestGroupHeader
             {
                 QuestName = firstObj.QuestName,
+                QuestId = firstObj.Objective.QuestId,
                 Progress = $"{completedCount}/{totalCount}",
-                IsFullyCompleted = completedCount == totalCount
+                IsFullyCompleted = completedCount == totalCount,
+                WikiLink = quest?.WikiPageLink
             });
 
             // 해당 퀘스트의 목표들 추가 (그룹화 플래그 설정)
@@ -3577,12 +3714,12 @@ public class QuestObjectiveViewModel
         SelectionBorderBrush = isSelected ? new SolidColorBrush(Color.FromRgb(255, 215, 0)) : Brushes.Transparent;
         SelectionBorderThickness = isSelected ? new Thickness(1.5) : new Thickness(0);
 
-        // 현재 맵에 있는 목표인지 확인
+        // 현재 맵에 있는 목표인지 확인 (공백/하이픈 차이 무시)
         if (!string.IsNullOrEmpty(currentMapKey))
         {
             IsOnCurrentMap = objective.Locations.Any(loc =>
-                loc.MapNormalizedName?.Equals(currentMapKey, StringComparison.OrdinalIgnoreCase) == true ||
-                loc.MapName?.Equals(currentMapKey, StringComparison.OrdinalIgnoreCase) == true);
+                MatchesMapKey(loc.MapName, currentMapKey) ||
+                MatchesMapKey(loc.MapNormalizedName, currentMapKey));
 
             if (!IsOnCurrentMap && objective.Locations.Count > 0)
             {
@@ -3615,6 +3752,20 @@ public class QuestObjectiveViewModel
         "findItem" => "Find",
         _ => type
     };
+
+    /// <summary>
+    /// 맵 이름 비교 (공백, 하이픈, 대소문자 차이 무시)
+    /// </summary>
+    private static bool MatchesMapKey(string? mapName, string mapKey)
+    {
+        if (string.IsNullOrEmpty(mapName) || string.IsNullOrEmpty(mapKey))
+            return false;
+
+        // 공백, 하이픈 제거 후 소문자로 비교
+        var normalizedMapName = mapName.Replace(" ", "").Replace("-", "").ToLowerInvariant();
+        var normalizedMapKey = mapKey.Replace(" ", "").Replace("-", "").ToLowerInvariant();
+        return normalizedMapName == normalizedMapKey;
+    }
 }
 
 /// <summary>
@@ -3623,6 +3774,7 @@ public class QuestObjectiveViewModel
 public class QuestGroupHeader
 {
     public string QuestName { get; set; } = string.Empty;
+    public string QuestId { get; set; } = string.Empty;
     public string Progress { get; set; } = string.Empty;
     public bool IsFullyCompleted { get; set; }
     public Brush HeaderBrush => IsFullyCompleted
@@ -3630,6 +3782,13 @@ public class QuestGroupHeader
         : new SolidColorBrush(Color.FromRgb(197, 168, 74)); // Accent
     public TextDecorationCollection? TextDecoration => IsFullyCompleted ? TextDecorations.Strikethrough : null;
     public double Opacity => IsFullyCompleted ? 0.6 : 1.0;
+
+    /// <summary>
+    /// Wiki 링크 (DB의 WikiPageLink 사용)
+    /// </summary>
+    public string? WikiLink { get; set; }
+
+    public bool HasWikiLink => !string.IsNullOrEmpty(WikiLink);
 }
 
 /// <summary>

@@ -75,6 +75,12 @@ public sealed class QuestObjectiveLocation
     /// </summary>
     [JsonPropertyName("bottom")]
     public double? Bottom { get; set; }
+
+    /// <summary>
+    /// 층 ID (다층 맵에서 층 구분용, 예: "main", "basement", "level2")
+    /// </summary>
+    [JsonPropertyName("FloorId")]
+    public string? FloorId { get; set; }
 }
 
 /// <summary>
@@ -106,6 +112,12 @@ public sealed class TaskObjectiveWithLocation
     /// </summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 연결된 퀘스트 ID (tarkov.dev API의 Quest.id)
+    /// </summary>
+    [JsonPropertyName("questId")]
+    public string QuestId { get; set; } = string.Empty;
 
     /// <summary>
     /// 연결된 퀘스트 normalized name

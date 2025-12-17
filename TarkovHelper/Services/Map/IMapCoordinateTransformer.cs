@@ -45,6 +45,14 @@ public interface IMapCoordinateTransformer
     IReadOnlyList<string> GetAllMapKeys();
 
     /// <summary>
+    /// 맵 이름 또는 별칭을 정규화된 맵 키로 변환합니다.
+    /// DB의 MapName이나 다양한 형식의 맵 이름을 config key로 변환할 때 사용합니다.
+    /// </summary>
+    /// <param name="mapNameOrAlias">맵 이름 또는 별칭 (예: "Ground Zero", "ground-zero", "GroundZero")</param>
+    /// <returns>정규화된 맵 키 (예: "GroundZero"), 찾지 못하면 null</returns>
+    string? ResolveMapKey(string mapNameOrAlias);
+
+    /// <summary>
     /// tarkov.dev API 좌표를 화면 좌표로 변환합니다.
     /// Transform 배열과 CoordinateRotation을 사용합니다.
     /// tarkov.dev 방식: pos(position) = [position.z, position.x]

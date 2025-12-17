@@ -59,6 +59,90 @@ public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
     }
 
     /// <summary>
+    /// 플레이어 마커 전용 좌표 변환.
+    /// playerMarkerTransform이 있으면 우선 사용합니다.
+    /// </summary>
+    public bool TryTransformPlayerPosition(EftPosition worldPosition, out ScreenPosition? screenPosition)
+    {
+        return TryTransformPlayerPosition(
+            worldPosition.MapName,
+            worldPosition.X,
+            worldPosition.Z,
+            worldPosition.Angle,
+            out screenPosition);
+    }
+
+    /// <summary>
+    /// 플레이어 마커 전용 좌표 변환.
+    /// playerMarkerTransform이 있으면 우선 사용합니다.
+    /// </summary>
+    public bool TryTransformPlayerPosition(string mapKey, double gameX, double? gameZ, double? angle, out ScreenPosition? screenPosition)
+    {
+        screenPosition = null;
+
+        var config = GetMapConfig(mapKey);
+        if (config == null)
+            return false;
+
+        try
+        {
+            double finalX, finalY;
+
+            // playerMarkerTransform이 있으면 우선 사용
+            if (config.PlayerMarkerTransform != null && config.PlayerMarkerTransform.Length >= 6)
+            {
+                var a = config.PlayerMarkerTransform[0];
+                var b = config.PlayerMarkerTransform[1];
+                var c = config.PlayerMarkerTransform[2];
+                var d = config.PlayerMarkerTransform[3];
+                var tx = config.PlayerMarkerTransform[4];
+                var ty = config.PlayerMarkerTransform[5];
+
+                finalX = a * gameX + b * (gameZ ?? 0) + tx;
+                finalY = c * gameX + d * (gameZ ?? 0) + ty;
+            }
+            // calibratedTransform이 있으면 IDW 보정을 적용한 변환 사용
+            else if (config.CalibratedTransform != null && config.CalibratedTransform.Length >= 6)
+            {
+                var calibrationService = MapCalibrationService.Instance;
+                (finalX, finalY) = calibrationService.ApplyCalibratedTransformWithIDW(
+                    config.CalibratedTransform,
+                    config.CalibrationPoints,
+                    gameX,
+                    gameZ ?? 0);
+            }
+            else
+            {
+                // 기존 Transform 방식으로 폴백
+                return TryTransformGameCoordinate(mapKey, gameX, gameZ, angle, out screenPosition);
+            }
+
+            screenPosition = new ScreenPosition
+            {
+                MapKey = config.Key,
+                X = finalX,
+                Y = finalY,
+                Angle = angle,
+                OriginalPosition = new EftPosition
+                {
+                    MapName = mapKey,
+                    X = gameX,
+                    Y = 0,
+                    Z = gameZ,
+                    Angle = angle,
+                    Timestamp = DateTime.Now
+                }
+            };
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 게임 좌표를 SVG viewBox 좌표로 변환합니다.
     /// </summary>
     /// <param name="mapKey">맵 키</param>
@@ -236,6 +320,18 @@ public sealed class MapCoordinateTransformer : IMapCoordinateTransformer
     public IReadOnlyList<string> GetAllMapKeys()
     {
         return _mapConfigs.Keys.ToList().AsReadOnly();
+    }
+
+    /// <inheritdoc />
+    public string? ResolveMapKey(string mapNameOrAlias)
+    {
+        if (string.IsNullOrWhiteSpace(mapNameOrAlias))
+            return null;
+
+        if (_aliasToKey.TryGetValue(mapNameOrAlias, out var actualKey))
+            return actualKey;
+
+        return null;
     }
 
     /// <summary>

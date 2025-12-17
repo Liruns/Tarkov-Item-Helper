@@ -196,6 +196,17 @@ public sealed class MapTrackerService : IDisposable
     }
 
     /// <summary>
+    /// 맵 이름 또는 별칭을 정규화된 맵 키로 변환합니다.
+    /// DB의 MapName이나 다양한 형식의 맵 이름을 config key로 변환할 때 사용합니다.
+    /// </summary>
+    /// <param name="mapNameOrAlias">맵 이름 또는 별칭 (예: "Ground Zero", "ground-zero")</param>
+    /// <returns>정규화된 맵 키 (예: "GroundZero"), 찾지 못하면 null</returns>
+    public string? ResolveMapKey(string mapNameOrAlias)
+    {
+        return _transformer.ResolveMapKey(mapNameOrAlias);
+    }
+
+    /// <summary>
     /// 스크린샷 폴더 경로를 변경합니다.
     /// </summary>
     public bool ChangeScreenshotFolder(string newPath)
@@ -309,7 +320,8 @@ public sealed class MapTrackerService : IDisposable
             OriginalFileName = e.Position.OriginalFileName
         };
 
-        if (_transformer.TryTransform(position, out var screenPos) && screenPos != null)
+        // 플레이어 마커 전용 변환 사용 (playerMarkerTransform 우선)
+        if (_transformer.TryTransformPlayerPosition(position, out var screenPos) && screenPos != null)
         {
             _currentPosition = screenPos;
 

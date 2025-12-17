@@ -184,6 +184,7 @@ public sealed class QuestDbService
         var hasExcludedEdition = await ColumnExistsAsync(connection, "Quests", "ExcludedEdition");
         var hasRequiredPrestigeLevel = await ColumnExistsAsync(connection, "Quests", "RequiredPrestigeLevel");
         var hasRequiredDecodeCount = await ColumnExistsAsync(connection, "Quests", "RequiredDecodeCount");
+        var hasWikiPageLink = await ColumnExistsAsync(connection, "Quests", "WikiPageLink");
         _log.Debug($"BsgId column exists: {hasBsgId}");
 
         // NormalizedName이 없으면 Name에서 생성
@@ -202,7 +203,8 @@ public sealed class QuestDbService
                 {(hasRequiredEdition ? "RequiredEdition" : "NULL")} as RequiredEdition,
                 {(hasExcludedEdition ? "ExcludedEdition" : "NULL")} as ExcludedEdition,
                 {(hasRequiredPrestigeLevel ? "RequiredPrestigeLevel" : "NULL")} as RequiredPrestigeLevel,
-                {(hasRequiredDecodeCount ? "RequiredDecodeCount" : "NULL")} as RequiredDecodeCount
+                {(hasRequiredDecodeCount ? "RequiredDecodeCount" : "NULL")} as RequiredDecodeCount,
+                {(hasWikiPageLink ? "WikiPageLink" : "NULL")} as WikiPageLink
             FROM Quests
             ORDER BY Name";
 
@@ -230,7 +232,8 @@ public sealed class QuestDbService
                 RequiredEdition = reader.IsDBNull(12) ? null : reader.GetString(12),
                 ExcludedEdition = reader.IsDBNull(13) ? null : reader.GetString(13),
                 RequiredPrestigeLevel = reader.IsDBNull(14) ? null : reader.GetInt32(14),
-                RequiredDecodeCount = reader.IsDBNull(15) ? null : reader.GetInt32(15)
+                RequiredDecodeCount = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+                WikiPageLink = reader.IsDBNull(16) ? null : reader.GetString(16)
             };
 
             // BsgId가 있으면 Ids에 추가
