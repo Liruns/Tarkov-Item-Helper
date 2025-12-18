@@ -267,6 +267,7 @@ Specialized agents for specific tasks (located in `.claude/agents/`):
 | `service-architect` | Service design, DI patterns | Service refactoring |
 | `map-feature-specialist` | Map tracking, coordinates, markers | Map 탭 기능 작업 |
 | `prd-manager` | PRD 관리, 작업 계획, 에이전트 조율 | 기능 계획 및 관리 |
+| `tarkov-log-analyst` | EFT 게임 로그 분석, 에러 진단, 레이드 추적 | 인게임 로그 분석 |
 
 ### Agent Self-Learning
 
@@ -331,6 +332,11 @@ Custom commands (located in `.claude/commands/`):
 
 # Service design → service-architect
 "How should I structure a new notification service?"
+
+# Game log analysis → tarkov-log-analyst
+"Why did I get disconnected from the last raid?"
+"What errors occurred in my last game session?"
+"Parse my game logs and find network issues"
 
 # Quick commands
 /build-and-run    # Build and launch the app
