@@ -52,5 +52,6 @@
 - gh CLI 경로: `C:\Program Files\GitHub CLI\gh.exe` (PATH에 없을 수 있음)
 - 빌드 실패 시 중단합니다
 - PowerShell로 bat 파일 실행: `powershell.exe -Command "cd '[경로]'; .\CreateRelease.bat"`
+- **update.xml 수정 시 XML 태그가 누락되지 않도록 주의** (예: `</url>`, `</version>` 등 닫는 태그 필수)
 
 위 작업들을 순서대로 실행해주세요. 각 단계마다 결과를 확인하고 진행하세요.
