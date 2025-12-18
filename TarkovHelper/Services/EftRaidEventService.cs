@@ -230,17 +230,22 @@ public sealed class EftRaidEventService : IDisposable
     {
         lock (_watcherLock)
         {
+            _log.Debug($"StartMonitoring called with path: {logFolderPath ?? "(null, will use default)"}");
             StopMonitoring();
 
             var folderPath = logFolderPath ?? GetDefaultLogFolderPath();
+            _log.Debug($"Resolved folder path: {folderPath}");
+
             if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
             {
+                _log.Warning($"Log folder not found or invalid: {folderPath}");
                 ErrorOccurred?.Invoke(this, "EFT 로그 폴더를 찾을 수 없습니다.");
                 return false;
             }
 
             try
             {
+                _log.Debug("Creating FileSystemWatchers...");
                 // Application log watcher
                 _applicationLogWatcher = new FileSystemWatcher(folderPath)
                 {
@@ -348,9 +353,11 @@ public sealed class EftRaidEventService : IDisposable
 
     private void InitialScan(string folderPath)
     {
+        _log.Debug($"InitialScan started for: {folderPath}");
         try
         {
             var latestFolder = FindLatestLogSubfolder(folderPath);
+            _log.Debug($"Latest log subfolder: {latestFolder}");
             if (latestFolder == null) return;
 
             // Application log 스캔
@@ -358,10 +365,13 @@ public sealed class EftRaidEventService : IDisposable
                 .OrderByDescending(f => File.GetLastWriteTime(f))
                 .ToList();
 
+            _log.Debug($"Found {appLogs.Count} application logs");
             if (appLogs.Count > 0)
             {
                 var latestAppLog = appLogs[0];
+                _log.Debug($"Latest application log: {latestAppLog}");
                 _filePositions[latestAppLog] = new FileInfo(latestAppLog).Length;
+                _log.Debug($"Set file position to: {_filePositions[latestAppLog]}");
                 ScanLogFileForProfile(latestAppLog);
             }
 
@@ -370,9 +380,11 @@ public sealed class EftRaidEventService : IDisposable
                 .OrderByDescending(f => File.GetLastWriteTime(f))
                 .ToList();
 
+            _log.Debug($"Found {netLogs.Count} network logs");
             if (netLogs.Count > 0)
             {
                 _filePositions[netLogs[0]] = new FileInfo(netLogs[0]).Length;
+                _log.Debug($"Latest network log: {netLogs[0]}, position: {_filePositions[netLogs[0]]}");
             }
         }
         catch (Exception ex)
@@ -400,6 +412,7 @@ public sealed class EftRaidEventService : IDisposable
 
     private void ScanLogFileForProfile(string filePath)
     {
+        _log.Debug($"ScanLogFileForProfile started: {filePath}");
         try
         {
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -418,6 +431,7 @@ public sealed class EftRaidEventService : IDisposable
                 {
                     lastPmcProfileId = selectMatch.Groups[1].Value;
                     lastAccountId = selectMatch.Groups[2].Value;
+                    _log.Debug($"[Scan] Found SelectProfile: PMC={lastPmcProfileId}, Account={lastAccountId}");
                 }
 
                 // Session mode 감지
@@ -430,6 +444,7 @@ public sealed class EftRaidEventService : IDisposable
                         "pvp" or "regular" => GameMode.PVP,
                         _ => GameMode.Unknown
                     };
+                    _log.Debug($"[Scan] Found Session mode: {lastGameMode}");
                 }
             }
 
@@ -437,15 +452,18 @@ public sealed class EftRaidEventService : IDisposable
             if (!string.IsNullOrEmpty(lastPmcProfileId))
             {
                 var existingProfile = _currentProfile;
+                _log.Debug($"[Scan] Updating profile: existing={existingProfile?.PmcProfileId}, new={lastPmcProfileId}");
                 if (existingProfile?.PmcProfileId != lastPmcProfileId)
                 {
+                    var scavId = CalculateScavProfileId(lastPmcProfileId);
                     _currentProfile = new EftProfileInfo
                     {
                         PmcProfileId = lastPmcProfileId,
-                        ScavProfileId = CalculateScavProfileId(lastPmcProfileId),
+                        ScavProfileId = scavId,
                         AccountId = lastAccountId,
                         UpdatedAt = DateTime.Now
                     };
+                    _log.Debug($"[Scan] Profile set: PMC={lastPmcProfileId}, SCAV={scavId}");
 
                     Task.Run(() => SaveProfileToDbAsync(_currentProfile));
                     ProfileChanged?.Invoke(this, new EftProfileEventArgs { ProfileInfo = _currentProfile });
@@ -455,7 +473,9 @@ public sealed class EftRaidEventService : IDisposable
             if (lastGameMode != GameMode.Unknown)
             {
                 _currentGameMode = lastGameMode;
+                _log.Debug($"[Scan] GameMode set: {_currentGameMode}");
             }
+            _log.Debug("ScanLogFileForProfile completed");
         }
         catch (Exception ex)
         {
@@ -465,6 +485,7 @@ public sealed class EftRaidEventService : IDisposable
 
     private void OnLogFileCreated(object sender, FileSystemEventArgs e)
     {
+        _log.Debug($"[FileWatcher] New log file created: {e.FullPath}");
         _filePositions[e.FullPath] = 0;
     }
 
@@ -474,6 +495,7 @@ public sealed class EftRaidEventService : IDisposable
         if ((now - _lastApplicationEventTime).TotalMilliseconds < 200) return;
         _lastApplicationEventTime = now;
 
+        _log.Debug($"[FileWatcher] Application log changed: {e.FullPath}");
         Task.Run(() => ProcessApplicationLogChanges(e.FullPath));
     }
 
@@ -483,6 +505,7 @@ public sealed class EftRaidEventService : IDisposable
         if ((now - _lastNetworkEventTime).TotalMilliseconds < 200) return;
         _lastNetworkEventTime = now;
 
+        _log.Debug($"[FileWatcher] Network log changed: {e.FullPath}");
         Task.Run(() => ProcessNetworkLogChanges(e.FullPath));
     }
 
@@ -495,19 +518,29 @@ public sealed class EftRaidEventService : IDisposable
 
             var lastPosition = _filePositions.GetValueOrDefault(filePath, 0);
             if (fileInfo.Length < lastPosition) lastPosition = 0;
-            if (fileInfo.Length <= lastPosition) return;
+            if (fileInfo.Length <= lastPosition)
+            {
+                _log.Debug($"[Process] No new content in: {Path.GetFileName(filePath)}");
+                return;
+            }
+
+            var bytesToRead = fileInfo.Length - lastPosition;
+            _log.Debug($"[Process] Reading application log: {Path.GetFileName(filePath)}, bytes={bytesToRead}");
 
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             stream.Seek(lastPosition, SeekOrigin.Begin);
 
             using var reader = new StreamReader(stream);
             string? line;
+            int lineCount = 0;
             while ((line = reader.ReadLine()) != null)
             {
+                lineCount++;
                 ParseApplicationLogLine(line);
             }
 
             _filePositions[filePath] = stream.Position;
+            _log.Debug($"[Process] Processed {lineCount} lines from application log");
         }
         catch (Exception ex)
         {
@@ -526,17 +559,23 @@ public sealed class EftRaidEventService : IDisposable
             if (fileInfo.Length < lastPosition) lastPosition = 0;
             if (fileInfo.Length <= lastPosition) return;
 
+            var bytesToRead = fileInfo.Length - lastPosition;
+            _log.Debug($"[Process] Reading network log: {Path.GetFileName(filePath)}, bytes={bytesToRead}");
+
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             stream.Seek(lastPosition, SeekOrigin.Begin);
 
             using var reader = new StreamReader(stream);
             string? line;
+            int lineCount = 0;
             while ((line = reader.ReadLine()) != null)
             {
+                lineCount++;
                 ParseNetworkLogLine(line);
             }
 
             _filePositions[filePath] = stream.Position;
+            _log.Debug($"[Process] Processed {lineCount} lines from network log");
         }
         catch (Exception ex)
         {
@@ -558,6 +597,7 @@ public sealed class EftRaidEventService : IDisposable
                 "pvp" or "regular" => GameMode.PVP,
                 _ => GameMode.Unknown
             };
+            _log.Debug($"[Parse] Session mode detected: {_currentGameMode}");
 
             RaidEvent?.Invoke(this, new EftRaidEventArgs
             {
@@ -573,16 +613,19 @@ public sealed class EftRaidEventService : IDisposable
         {
             var profileId = selectMatch.Groups[1].Value;
             var accountId = selectMatch.Groups[2].Value;
+            _log.Debug($"[Parse] SelectProfile detected: ProfileId={profileId}, AccountId={accountId}");
 
             if (_currentProfile?.PmcProfileId != profileId)
             {
+                var scavId = CalculateScavProfileId(profileId);
                 _currentProfile = new EftProfileInfo
                 {
                     PmcProfileId = profileId,
-                    ScavProfileId = CalculateScavProfileId(profileId),
+                    ScavProfileId = scavId,
                     AccountId = accountId,
                     UpdatedAt = DateTime.Now
                 };
+                _log.Debug($"[Parse] Profile updated: PMC={profileId}, SCAV={scavId}");
 
                 Task.Run(() => SaveProfileToDbAsync(_currentProfile));
                 ProfileChanged?.Invoke(this, new EftProfileEventArgs
@@ -604,6 +647,7 @@ public sealed class EftRaidEventService : IDisposable
         if (matchingMatch.Success)
         {
             _pendingGroupId = matchingMatch.Groups[1].Value;
+            _log.Debug($"[Parse] Matching started: GroupId={_pendingGroupId ?? "(solo)"}");
 
             RaidEvent?.Invoke(this, new EftRaidEventArgs
             {
@@ -618,9 +662,15 @@ public sealed class EftRaidEventService : IDisposable
         if (traceMatch.Success)
         {
             var raidProfileId = traceMatch.Groups[1].Value;
+            _log.Debug($"[Parse] TRACE-NetworkGameCreate detected: RaidProfileId={raidProfileId}");
+            _log.Debug($"[Parse] Current profile: PMC={_currentProfile?.PmcProfileId}, SCAV={_currentProfile?.ScavProfileId}");
+
             var raidType = _currentProfile?.GetRaidType(raidProfileId) ?? RaidType.Unknown;
+            _log.Debug($"[Parse] RaidType determined: {raidType}");
+
             var mapName = traceMatch.Groups[6].Value;
             var mapKey = MapNameMapping.TryGetValue(mapName, out var key) ? key : mapName;
+            _log.Debug($"[Parse] Map: {mapName} -> {mapKey}");
 
             _currentRaid = new EftRaidInfo
             {
@@ -638,6 +688,7 @@ public sealed class EftRaidEventService : IDisposable
                 State = RaidState.Matching
             };
 
+            _log.Info($"[RaidStarted] Map={mapKey}, RaidType={raidType}, GameMode={_currentGameMode}");
             RaidEvent?.Invoke(this, new EftRaidEventArgs
             {
                 EventType = EftRaidEventType.RaidStarted,
@@ -884,6 +935,7 @@ public sealed class EftRaidEventService : IDisposable
 
     private async Task LoadProfileFromDbAsync()
     {
+        _log.Debug("[DB] LoadProfileFromDbAsync started");
         try
         {
             var dbService = UserDataDbService.Instance;
@@ -891,38 +943,55 @@ public sealed class EftRaidEventService : IDisposable
             var scavId = await dbService.GetSettingAsync("eft.scavProfileId");
             var accountId = await dbService.GetSettingAsync("eft.accountId");
 
+            _log.Debug($"[DB] Loaded from DB: PMC={pmcId ?? "(null)"}, SCAV={scavId ?? "(null)"}, Account={accountId ?? "(null)"}");
+
             if (!string.IsNullOrEmpty(pmcId))
             {
+                var calculatedScav = scavId ?? CalculateScavProfileId(pmcId);
                 _currentProfile = new EftProfileInfo
                 {
                     PmcProfileId = pmcId,
-                    ScavProfileId = scavId ?? CalculateScavProfileId(pmcId),
+                    ScavProfileId = calculatedScav,
                     AccountId = accountId,
                     UpdatedAt = DateTime.Now
                 };
 
-                _log.Debug($"Loaded profile from DB: PMC={pmcId}");
+                _log.Debug($"[DB] Profile set from DB: PMC={pmcId}, SCAV={calculatedScav}");
+            }
+            else
+            {
+                _log.Debug("[DB] No profile found in DB");
             }
         }
         catch (Exception ex)
         {
-            _log.Warning($"Failed to load profile from DB: {ex.Message}");
+            _log.Warning($"[DB] Failed to load profile from DB: {ex.Message}");
         }
     }
 
     private async Task SaveProfileToDbAsync(EftProfileInfo profile)
     {
+        _log.Debug($"[DB] SaveProfileToDbAsync: PMC={profile.PmcProfileId}, SCAV={profile.ScavProfileId}");
         try
         {
             var dbService = UserDataDbService.Instance;
             if (!string.IsNullOrEmpty(profile.PmcProfileId))
+            {
                 await dbService.SetSettingAsync("eft.pmcProfileId", profile.PmcProfileId);
+                _log.Debug($"[DB] Saved eft.pmcProfileId={profile.PmcProfileId}");
+            }
             if (!string.IsNullOrEmpty(profile.ScavProfileId))
+            {
                 await dbService.SetSettingAsync("eft.scavProfileId", profile.ScavProfileId);
+                _log.Debug($"[DB] Saved eft.scavProfileId={profile.ScavProfileId}");
+            }
             if (!string.IsNullOrEmpty(profile.AccountId))
+            {
                 await dbService.SetSettingAsync("eft.accountId", profile.AccountId);
+                _log.Debug($"[DB] Saved eft.accountId={profile.AccountId}");
+            }
 
-            _log.Debug($"Saved profile to DB: PMC={profile.PmcProfileId}");
+            _log.Debug("[DB] SaveProfileToDbAsync completed");
         }
         catch (Exception ex)
         {

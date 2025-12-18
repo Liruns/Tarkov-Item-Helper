@@ -709,11 +709,13 @@ public class SettingsService
     {
         try
         {
+            _log.Debug($"SaveSetting called: key={key}, value={value}");
             _userDataDb.SetSetting(key, value);
+            _log.Debug($"SaveSetting success: key={key}");
         }
         catch (Exception ex)
         {
-            _log.Error($"Save failed: {ex.Message}");
+            _log.Error($"SaveSetting failed: key={key}, error={ex.Message}");
         }
     }
 
