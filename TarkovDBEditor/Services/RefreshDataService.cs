@@ -25,6 +25,16 @@ namespace TarkovDBEditor.Services
         private readonly string _logDir;
         private readonly string _revisionPath;
 
+        // 트레이더 본명 -> 일반 이름 매핑
+        private static readonly Dictionary<string, string> TraderNameAliases = new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Pavel Yegorovich Romanenko", "Prapor" },
+            { "Elvira Khabibullina", "Therapist" },
+            { "Alexander Fyodorovich Kiselyov", "Skier" },
+            { "Abramyan Arshavir Sarkisivich", "Ragman" },
+            { "Arshavir Sarkisivich", "Ragman" }
+        };
+
         public RefreshDataService(string? basePath = null)
         {
             basePath ??= AppDomain.CurrentDomain.BaseDirectory;
@@ -523,17 +533,21 @@ namespace TarkovDBEditor.Services
                 if (cachedQuests.TryGetValue(questName, out var cached))
                 {
                     // 캐시된 Trader가 있으면 사용, 없으면 PageContent에서 직접 파싱
-                    var trader = cached.Trader;
+                    var trader = NormalizeTraderName(cached.Trader);
                     if (string.IsNullOrEmpty(trader) && !string.IsNullOrEmpty(cached.PageContent))
                     {
                         trader = ExtractTraderFromContent(cached.PageContent);
                     }
                     dbQuest.Trader = trader;
 
-                    // Location - PageContent에서 파싱
+                    // Location - PageContent에서 파싱, null이면 "Any"
                     if (!string.IsNullOrEmpty(cached.PageContent))
                     {
-                        dbQuest.Location = ExtractLocationFromContent(cached.PageContent);
+                        dbQuest.Location = ExtractLocationFromContent(cached.PageContent) ?? "Any";
+                    }
+                    else
+                    {
+                        dbQuest.Location = "Any";
                     }
 
                     // MinLevel, MinScavKarma - 캐시에 있으면 사용, 없으면 PageContent에서 파싱
@@ -1203,17 +1217,21 @@ namespace TarkovDBEditor.Services
                 };
 
                 // 캐시에서 Trader, MinLevel, MinScavKarma 가져오기
-                var trader = cached.Trader;
+                var trader = NormalizeTraderName(cached.Trader);
                 if (string.IsNullOrEmpty(trader) && !string.IsNullOrEmpty(cached.PageContent))
                 {
                     trader = ExtractTraderFromContent(cached.PageContent);
                 }
                 dbQuest.Trader = trader;
 
-                // Location 파싱
+                // Location 파싱, null이면 "Any"
                 if (!string.IsNullOrEmpty(cached.PageContent))
                 {
-                    dbQuest.Location = ExtractLocationFromContent(cached.PageContent);
+                    dbQuest.Location = ExtractLocationFromContent(cached.PageContent) ?? "Any";
+                }
+                else
+                {
+                    dbQuest.Location = "Any";
                 }
 
                 // MinLevel, MinScavKarma
@@ -3143,7 +3161,7 @@ namespace TarkovDBEditor.Services
                 content, @"\|given\s*by\s*=\s*\[\[([^\]|]+)",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             if (match.Success)
-                return match.Groups[1].Value.Trim();
+                return NormalizeTraderName(match.Groups[1].Value.Trim());
 
             // 링크 없이 직접 트레이더 이름만 있는 경우
             match = System.Text.RegularExpressions.Regex.Match(
@@ -3153,10 +3171,25 @@ namespace TarkovDBEditor.Services
             {
                 var trader = match.Groups[1].Value.Trim();
                 if (!string.IsNullOrEmpty(trader))
-                    return trader;
+                    return NormalizeTraderName(trader);
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 트레이더 본명을 일반적인 트레이더 이름으로 변환
+        /// </summary>
+        private static string? NormalizeTraderName(string? traderName)
+        {
+            if (string.IsNullOrEmpty(traderName))
+                return traderName;
+
+            // 본명 매핑에 있으면 일반 이름으로 변환
+            if (TraderNameAliases.TryGetValue(traderName, out var normalizedName))
+                return normalizedName;
+
+            return traderName;
         }
 
         /// <summary>
@@ -3168,13 +3201,18 @@ namespace TarkovDBEditor.Services
                 return null;
 
             // |location = [[Woods]] 또는 |location = [[Customs]], [[Woods]] 형식
+            // 다음 필드(|) 또는 infobox 끝(}}) 전까지만 매칭
             var match = System.Text.RegularExpressions.Regex.Match(
-                content, @"\|location\s*=\s*(.+?)(?=\n\||\n\}|\}\})",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+                content, @"\|location\s*=\s*([^|\n\r]*?)(?=\n|\r|\||\}\}|$)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             if (match.Success)
             {
                 var locationValue = match.Groups[1].Value.Trim();
+
+                // 빈 값이면 null 반환
+                if (string.IsNullOrEmpty(locationValue))
+                    return null;
 
                 // [[Location]] 형식에서 이름만 추출 (여러 개일 수 있음)
                 var locations = new List<string>();

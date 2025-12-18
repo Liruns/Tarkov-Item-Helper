@@ -119,6 +119,9 @@ public partial class MainWindow : Window
         // Start database update check (initial check + background updates every 5 minutes)
         StartDatabaseUpdateService();
 
+        // Start app update service (check every 3 minutes)
+        StartAppUpdateService();
+
         // Load and show quest data from DB
         await CheckAndRefreshDataAsync();
 
@@ -1429,6 +1432,9 @@ public partial class MainWindow : Window
             _settingsService.HideWipeWarning = true;
         }
 
+        // Immediately hide WipeWarningOverlay to prevent animation collision
+        // (HideWipeWarningDialog animation may be cancelled by ShowLoadingOverlay's blur animation)
+        WipeWarningOverlay.Visibility = Visibility.Collapsed;
         HideWipeWarningDialog();
 
         var logPath = _settingsService.LogFolderPath;
@@ -1459,6 +1465,9 @@ public partial class MainWindow : Window
 
             var result = await _logSyncService.SyncFromLogsAsync(logPath, progress);
 
+            // Immediately hide LoadingOverlay to prevent animation collision
+            // (HideLoadingOverlay animation may be cancelled by ShowSyncResultDialog's blur animation)
+            LoadingOverlay.Visibility = Visibility.Collapsed;
             HideLoadingOverlay();
 
             // Show result dialog even if no quests to complete (to show in-progress quests)
@@ -1832,6 +1841,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Immediately hide SyncResultOverlay to prevent animation collision
+        // (HideSyncResultDialog animation may be cancelled by ShowLoadingOverlay's blur animation)
+        SyncResultOverlay.Visibility = Visibility.Collapsed;
         HideSyncResultDialog();
         ShowLoadingOverlay(_loc.CurrentLanguage switch
         {
@@ -2912,6 +2924,169 @@ public partial class MainWindow : Window
     private void BtnMigrationResultOk_Click(object sender, RoutedEventArgs e)
     {
         HideMigrationResultDialog();
+    }
+
+    #endregion
+
+    #region App Update
+
+    /// <summary>
+    /// Start app update service
+    /// </summary>
+    private void StartAppUpdateService()
+    {
+        var updateService = UpdateService.Instance;
+
+        // Initialize version display
+        TxtCurrentVersion.Text = $"v{updateService.CurrentVersion.ToString(3)}";
+
+        // Subscribe to update events
+        updateService.UpdateCheckStarted += OnUpdateCheckStarted;
+        updateService.UpdateCheckCompleted += OnUpdateCheckCompleted;
+
+        // Start automatic update checking (every 3 minutes)
+        updateService.StartAutoCheck();
+
+        _log.Info("App update service started");
+    }
+
+    /// <summary>
+    /// Update check started event handler
+    /// </summary>
+    private void OnUpdateCheckStarted(object? sender, EventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            TxtUpdateChecking.Visibility = Visibility.Visible;
+            BtnCheckUpdate.IsEnabled = false;
+        });
+    }
+
+    /// <summary>
+    /// Update check completed event handler
+    /// </summary>
+    private void OnUpdateCheckCompleted(object? sender, UpdateCheckEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            TxtUpdateChecking.Visibility = Visibility.Collapsed;
+            BtnCheckUpdate.IsEnabled = true;
+
+            // Update last check time
+            UpdateLastCheckTimeDisplay();
+
+            if (e.IsUpdateAvailable && e.UpdateInfo != null)
+            {
+                // Show "Update to vX.X.X" button
+                TxtUpdateVersion.Text = $"v{e.UpdateInfo.Version}";
+                BtnUpdateAvailable.Visibility = Visibility.Visible;
+                BtnCheckUpdate.Visibility = Visibility.Collapsed;
+
+                // Update status to show update available
+                TxtUpdateStatus.Text = _loc.CurrentLanguage switch
+                {
+                    AppLanguage.KO => "업데이트 있음",
+                    AppLanguage.JA => "更新あり",
+                    _ => "Update available"
+                };
+                TxtUpdateStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFA726"));
+
+                _log.Info($"Update available: {e.UpdateInfo.Version}");
+            }
+            else if (e.Error != null)
+            {
+                // Show error status
+                TxtUpdateStatus.Text = _loc.CurrentLanguage switch
+                {
+                    AppLanguage.KO => "확인 실패",
+                    AppLanguage.JA => "確認失敗",
+                    _ => "Check failed"
+                };
+                TxtUpdateStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EF5350"));
+
+                _log.Warning($"Update check failed: {e.Error.Message}");
+            }
+            else
+            {
+                // No update available, keep showing "Check Update" button
+                BtnUpdateAvailable.Visibility = Visibility.Collapsed;
+                BtnCheckUpdate.Visibility = Visibility.Visible;
+
+                // Update status to show up to date
+                TxtUpdateStatus.Text = _loc.CurrentLanguage switch
+                {
+                    AppLanguage.KO => "최신 버전",
+                    AppLanguage.JA => "最新版",
+                    _ => "Up to date"
+                };
+                TxtUpdateStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4CAF50"));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Update the last check time display
+    /// </summary>
+    private void UpdateLastCheckTimeDisplay()
+    {
+        var lastCheck = UpdateService.Instance.LastCheckTime;
+        if (lastCheck.HasValue)
+        {
+            var timeAgo = DateTime.Now - lastCheck.Value;
+            string timeText;
+
+            if (timeAgo.TotalSeconds < 60)
+            {
+                timeText = _loc.CurrentLanguage switch
+                {
+                    AppLanguage.KO => "방금 전",
+                    AppLanguage.JA => "たった今",
+                    _ => "just now"
+                };
+            }
+            else if (timeAgo.TotalMinutes < 60)
+            {
+                var mins = (int)timeAgo.TotalMinutes;
+                timeText = _loc.CurrentLanguage switch
+                {
+                    AppLanguage.KO => $"{mins}분 전",
+                    AppLanguage.JA => $"{mins}分前",
+                    _ => $"{mins}m ago"
+                };
+            }
+            else
+            {
+                timeText = lastCheck.Value.ToString("HH:mm");
+            }
+
+            TxtLastCheckTime.Text = $"({timeText})";
+        }
+        else
+        {
+            TxtLastCheckTime.Text = "";
+        }
+    }
+
+    /// <summary>
+    /// Check Update button click
+    /// </summary>
+    private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        _log.Debug("Manual update check triggered");
+        await UpdateService.Instance.CheckForUpdateAsync();
+    }
+
+    /// <summary>
+    /// Update Available button click - starts the update
+    /// </summary>
+    private void BtnUpdateAvailable_Click(object sender, RoutedEventArgs e)
+    {
+        var updateInfo = UpdateService.Instance.AvailableUpdate;
+        if (updateInfo != null)
+        {
+            _log.Info($"User initiated update to version {updateInfo.Version}");
+            UpdateService.Instance.StartUpdate();
+        }
     }
 
     #endregion

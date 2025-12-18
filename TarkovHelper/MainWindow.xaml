@@ -35,8 +35,61 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Column="0" Text="TARKOV HELPER" FontSize="{DynamicResource FontSizeXLarge}" FontWeight="Bold"
-                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="TARKOV HELPER" FontSize="{DynamicResource FontSizeXLarge}" FontWeight="Bold"
+                                   Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+
+                        <!-- Update Button -->
+                        <Button x:Name="BtnCheckUpdate" Content="Check Update"
+                                Padding="8,4" Margin="16,0,0,0"
+                                FontSize="{DynamicResource FontSizeXSmall}"
+                                Click="BtnCheckUpdate_Click"
+                                ToolTip="Check for updates"
+                                Visibility="Visible"/>
+
+                        <!-- Update Available Button (hidden by default) -->
+                        <Button x:Name="BtnUpdateAvailable"
+                                Padding="8,4" Margin="16,0,0,0"
+                                FontSize="{DynamicResource FontSizeXSmall}"
+                                Click="BtnUpdateAvailable_Click"
+                                Background="#4CAF50"
+                                Foreground="White"
+                                Visibility="Collapsed">
+                            <Button.Content>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Update to " VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="TxtUpdateVersion" Text="v0.0.0" VerticalAlignment="Center" FontWeight="Bold"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+
+                        <!-- Update Checking Indicator -->
+                        <TextBlock x:Name="TxtUpdateChecking" Text="Checking..."
+                                   FontSize="{DynamicResource FontSizeXSmall}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center" Margin="16,0,0,0"
+                                   Visibility="Collapsed"/>
+
+                        <!-- Version Info Panel -->
+                        <StackPanel x:Name="VersionInfoPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                            <TextBlock x:Name="TxtCurrentVersion" Text="v4.0.0"
+                                       FontSize="{DynamicResource FontSizeTiny}"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock Text=" · "
+                                       FontSize="{DynamicResource FontSizeTiny}"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtUpdateStatus" Text="Up to date"
+                                       FontSize="{DynamicResource FontSizeTiny}"
+                                       Foreground="#4CAF50"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtLastCheckTime" Text=""
+                                       FontSize="{DynamicResource FontSizeTiny}"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Margin="8,0,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
 
                     <!-- Right Side Controls -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
