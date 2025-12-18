@@ -46,16 +46,8 @@ namespace TarkovHelper
             ApplyBaseFontSize(SettingsService.Instance.BaseFontSize);
             SettingsService.Instance.BaseFontSizeChanged += (_, size) => ApplyBaseFontSize(size);
 
-            // AutoUpdater 설정
-            AutoUpdater.InstalledVersion = Assembly.GetExecutingAssembly().GetName().Version;
-            AutoUpdater.ShowSkipButton = true;
-            AutoUpdater.ShowRemindLaterButton = true;
-            AutoUpdater.LetUserSelectRemindLater = true;
-            AutoUpdater.RemindLaterTimeSpan = RemindLaterFormat.Days;
-            AutoUpdater.RemindLaterAt = 1;
-
-            // 업데이트 체크 시작
-            AutoUpdater.Start(UpdateXmlUrl);
+            // Note: AutoUpdater is now managed by UpdateService in MainWindow
+            // It will show update dialog only when user clicks "Update to vX.X.X" button
         }
 
         /// <summary>

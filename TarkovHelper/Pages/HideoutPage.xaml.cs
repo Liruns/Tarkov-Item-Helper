@@ -577,7 +577,7 @@ namespace TarkovHelper.Pages
             {
                 if (_isUnloaded) return;
 
-                var icon = await _imageCache.GetItemIconAsync(vm.IconLink);
+                var icon = await _imageCache.GetImageAsync(vm.IconLink!, "items");
                 if (icon != null && !_isUnloaded)
                 {
                     await Dispatcher.InvokeAsync(() =>
