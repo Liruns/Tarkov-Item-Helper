@@ -32,11 +32,12 @@ public partial class SvgStylePreprocessor
     /// <param name="allFloorIds">맵에 정의된 모든 층 ID 목록. 이 목록에 있는 층만 숨기기/보이기 처리됨.</param>
     /// <param name="backgroundFloorId">배경으로 반투명하게 표시할 층의 ID (예: "main"). null이면 배경 층 없음.</param>
     /// <param name="backgroundOpacity">배경 층의 투명도 (0.0 ~ 1.0). 기본값 0.3</param>
+    /// <param name="dimAllOtherFloors">true이면 선택된 층 외의 모든 층을 반투명하게 표시. 기본값 false</param>
     /// <returns>변환된 SVG 문자열</returns>
-    public string ProcessSvgFile(string svgFilePath, IEnumerable<string>? visibleFloorIds, IEnumerable<string>? allFloorIds = null, string? backgroundFloorId = null, double backgroundOpacity = 0.3)
+    public string ProcessSvgFile(string svgFilePath, IEnumerable<string>? visibleFloorIds, IEnumerable<string>? allFloorIds = null, string? backgroundFloorId = null, double backgroundOpacity = 0.3, bool dimAllOtherFloors = false)
     {
         var svgContent = File.ReadAllText(svgFilePath);
-        return ProcessSvgContent(svgContent, visibleFloorIds, allFloorIds, backgroundFloorId, backgroundOpacity);
+        return ProcessSvgContent(svgContent, visibleFloorIds, allFloorIds, backgroundFloorId, backgroundOpacity, dimAllOtherFloors);
     }
 
     /// <summary>
@@ -58,14 +59,15 @@ public partial class SvgStylePreprocessor
     /// <param name="allFloorIds">맵에 정의된 모든 층 ID 목록. 이 목록에 있는 층만 숨기기/보이기 처리됨.</param>
     /// <param name="backgroundFloorId">배경으로 반투명하게 표시할 층의 ID (예: "main"). null이면 배경 층 없음.</param>
     /// <param name="backgroundOpacity">배경 층의 투명도 (0.0 ~ 1.0). 기본값 0.3</param>
+    /// <param name="dimAllOtherFloors">true이면 선택된 층 외의 모든 층을 반투명하게 표시. 기본값 false</param>
     /// <returns>변환된 SVG 콘텐츠</returns>
-    public string ProcessSvgContent(string svgContent, IEnumerable<string>? visibleFloorIds, IEnumerable<string>? allFloorIds = null, string? backgroundFloorId = null, double backgroundOpacity = 0.3)
+    public string ProcessSvgContent(string svgContent, IEnumerable<string>? visibleFloorIds, IEnumerable<string>? allFloorIds = null, string? backgroundFloorId = null, double backgroundOpacity = 0.3, bool dimAllOtherFloors = false)
     {
         // 1. CSS 스타일 블록 추출 및 파싱
         var styleRules = ExtractAndParseCssStyles(svgContent);
 
         // 2. XML 파싱 및 클래스→스타일 변환 + 층 필터링
-        var processedSvg = ConvertClassesToInlineStyles(svgContent, styleRules, visibleFloorIds, allFloorIds, backgroundFloorId, backgroundOpacity);
+        var processedSvg = ConvertClassesToInlineStyles(svgContent, styleRules, visibleFloorIds, allFloorIds, backgroundFloorId, backgroundOpacity, dimAllOtherFloors);
 
         return processedSvg;
     }
@@ -132,7 +134,8 @@ public partial class SvgStylePreprocessor
         IEnumerable<string>? visibleFloorIds = null,
         IEnumerable<string>? allFloorIds = null,
         string? backgroundFloorId = null,
-        double backgroundOpacity = 0.3)
+        double backgroundOpacity = 0.3,
+        bool dimAllOtherFloors = false)
     {
         var doc = new XmlDocument();
         doc.PreserveWhitespace = true;
@@ -154,8 +157,11 @@ public partial class SvgStylePreprocessor
         HashSet<string>? visibleFloors = visibleFloorIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
         HashSet<string>? allFloors = allFloorIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // wrapper rect의 fill:none을 fill:transparent로 변경 (bounding box 문제 해결)
+        FixWrapperRect(doc.DocumentElement!);
+
         // class 속성이 있는 모든 요소 처리 + 층 필터링
-        ProcessElementsWithClass(doc.DocumentElement!, styleRules, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity);
+        ProcessElementsWithClass(doc.DocumentElement!, styleRules, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity, dimAllOtherFloors);
 
         // <style> 태그 제거 (선택적 - 이미 인라인으로 변환됨)
         RemoveStyleTags(doc);
@@ -181,13 +187,15 @@ public partial class SvgStylePreprocessor
     /// <param name="allFloors">모든 층 ID 집합 (이 집합에 있는 레이어만 숨기기/보이기 처리)</param>
     /// <param name="backgroundFloorId">배경으로 반투명하게 표시할 층의 ID</param>
     /// <param name="backgroundOpacity">배경 층의 투명도 (0.0 ~ 1.0)</param>
+    /// <param name="dimAllOtherFloors">true이면 선택된 층 외의 모든 층을 반투명하게 표시</param>
     private void ProcessElementsWithClass(
         XmlElement element,
         Dictionary<string, Dictionary<string, string>> styleRules,
         HashSet<string>? visibleFloors = null,
         HashSet<string>? allFloors = null,
         string? backgroundFloorId = null,
-        double backgroundOpacity = 0.3)
+        double backgroundOpacity = 0.3,
+        bool dimAllOtherFloors = false)
     {
         // 층 필터링: <g id="..."> 요소에 대해 display/opacity 스타일 적용
         if (visibleFloors != null && allFloors != null && element.Name == "g")
@@ -197,9 +205,12 @@ public partial class SvgStylePreprocessor
             {
                 // 이 요소가 층 레이어인 경우
                 var isVisible = visibleFloors.Contains(elementId);
-                var isBackgroundLayer = !string.IsNullOrEmpty(backgroundFloorId) &&
-                                        string.Equals(elementId, backgroundFloorId, StringComparison.OrdinalIgnoreCase) &&
-                                        !visibleFloors.Contains(elementId); // 현재 선택된 층이 아닐 때만 배경으로 표시
+
+                // dimAllOtherFloors가 true이면 모든 비가시 층을 배경으로 표시
+                // 그렇지 않으면 지정된 backgroundFloorId만 배경으로 표시
+                var isBackgroundLayer = !isVisible && (dimAllOtherFloors ||
+                    (!string.IsNullOrEmpty(backgroundFloorId) &&
+                     string.Equals(elementId, backgroundFloorId, StringComparison.OrdinalIgnoreCase)));
 
                 var existingStyle = element.GetAttribute("style");
 
@@ -262,7 +273,54 @@ public partial class SvgStylePreprocessor
         {
             if (child is XmlElement childElement)
             {
-                ProcessElementsWithClass(childElement, styleRules, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity);
+                ProcessElementsWithClass(childElement, styleRules, visibleFloors, allFloors, backgroundFloorId, backgroundOpacity, dimAllOtherFloors);
+            }
+        }
+    }
+
+    /// <summary>
+    /// wrapper 그룹 내의 rect 요소에서 fill:none을 fill:transparent로 변경합니다.
+    /// SharpVectors가 fill:none인 요소를 bounding box 계산에서 제외하는 문제를 해결합니다.
+    /// </summary>
+    private void FixWrapperRect(XmlElement root)
+    {
+        // id="wrapper"인 그룹 찾기
+        var wrapperGroups = root.GetElementsByTagName("g");
+
+        foreach (XmlNode node in wrapperGroups)
+        {
+            if (node is not XmlElement group) continue;
+
+            var groupId = group.GetAttribute("id");
+            if (groupId == "wrapper")
+            {
+                // wrapper 내의 모든 rect 요소 처리
+                var rects = group.GetElementsByTagName("rect");
+
+                foreach (XmlNode rectNode in rects)
+                {
+                    if (rectNode is not XmlElement rect) continue;
+
+                    var style = rect.GetAttribute("style");
+
+                    if (!string.IsNullOrEmpty(style) && style.Contains("fill:none"))
+                    {
+                        // fill:transparent는 SharpVectors bounding box에 포함되지 않음
+                        // fill-opacity:0인 색상을 사용해야 함
+                        rect.SetAttribute("style", style.Replace("fill:none", "fill:#000000;fill-opacity:0"));
+                    }
+                    else if (string.IsNullOrEmpty(style))
+                    {
+                        // fill 속성이 직접 설정된 경우
+                        var fill = rect.GetAttribute("fill");
+                        if (fill == "none")
+                        {
+                            rect.SetAttribute("fill", "#000000");
+                            rect.SetAttribute("fill-opacity", "0");
+                        }
+                    }
+                }
+                break;
             }
         }
     }
