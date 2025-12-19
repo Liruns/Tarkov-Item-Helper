@@ -320,17 +320,8 @@ public class MapExtractMarkerManager
             canvas.Opacity = 0.5;
         }
 
-        // 툴팁
-        var factionText = faction switch
-        {
-            ExtractFaction.Pmc => "PMC",
-            ExtractFaction.Scav => "Scav",
-            _ => "Extract"
-        };
-        var tooltipFloorText = !string.IsNullOrEmpty(extract.FloorId) ? $" ({extract.FloorId})" : "";
-        var differentFloorIndicator = !isOnCurrentFloor ? " ⬆⬇" : "";
-        canvas.ToolTip = $"[{factionText}] {displayName}{tooltipFloorText}{differentFloorIndicator}";
-        canvas.Cursor = Cursors.Hand;
+        // 마우스 이벤트 무시 (Mouse Through) - 탈출구 마커는 클릭/호버 불필요
+        canvas.IsHitTestVisible = false;
 
         // 보정 모드용 드래그 이벤트 설정 (콜백으로 전달)
         CalibrationMarkerSetup?.Invoke(canvas, extract);

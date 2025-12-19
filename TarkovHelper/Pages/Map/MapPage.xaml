@@ -454,6 +454,9 @@
                             <!-- 맵 이미지 (SVG) - TarkovDBEditor와 동일하게 Stretch="None" 사용 -->
                             <svgc:SvgViewbox x:Name="MapSvg" Stretch="None" Visibility="Collapsed"/>
 
+                            <!-- Map Markers 컨테이너 (PMC Spawn, Sniper Scav, Rogue, Cultist, Lever) -->
+                            <Canvas x:Name="MapMarkersContainer"/>
+
                             <!-- 탈출구 마커 컨테이너 -->
                             <Canvas x:Name="ExtractMarkersContainer"/>
 
@@ -533,6 +536,104 @@
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    HorizontalAlignment="Center" Margin="0,4,0,0"/>
                     </StackPanel>
+
+                    <!-- Map Markers 오버레이 패널 (우측 하단) -->
+                    <Border x:Name="MapMarkersOverlay"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="0,0,16,16" Panel.ZIndex="100"
+                            Background="#E0202020"
+                            CornerRadius="6" Padding="10"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                        <StackPanel>
+                            <!-- 헤더 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock x:Name="TxtMapMarkersTitle" Text="Map Markers"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                <Button x:Name="BtnToggleMapMarkersPanel" Content="▼"
+                                        Background="Transparent" BorderThickness="0"
+                                        Foreground="{StaticResource TextSecondaryBrush}"
+                                        FontSize="10" Padding="4,0" Margin="8,0,0,0"
+                                        Click="BtnToggleMapMarkersPanel_Click"
+                                        VerticalAlignment="Center" Cursor="Hand"/>
+                            </StackPanel>
+
+                            <!-- 마커 토글 목록 -->
+                            <StackPanel x:Name="MapMarkersContent">
+                                <!-- PMC Spawn -->
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <CheckBox x:Name="ChkShowPmcSpawns" IsChecked="True"
+                                              Checked="ChkMapMarker_Changed" Unchecked="ChkMapMarker_Changed"
+                                              VerticalAlignment="Center"/>
+                                    <svgc:SvgViewbox x:Name="IconPmcSpawn" Width="18" Height="18"
+                                                     Margin="4,0,6,0" Stretch="Uniform"/>
+                                    <TextBlock Text="PMC Spawn" FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- Sniper Scav -->
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <CheckBox x:Name="ChkShowSniperScavs" IsChecked="True"
+                                              Checked="ChkMapMarker_Changed" Unchecked="ChkMapMarker_Changed"
+                                              VerticalAlignment="Center"/>
+                                    <svgc:SvgViewbox x:Name="IconSniperScav" Width="18" Height="18"
+                                                     Margin="4,0,6,0" Stretch="Uniform"/>
+                                    <TextBlock Text="Sniper Scav" FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- Rogue -->
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <CheckBox x:Name="ChkShowRogues" IsChecked="True"
+                                              Checked="ChkMapMarker_Changed" Unchecked="ChkMapMarker_Changed"
+                                              VerticalAlignment="Center"/>
+                                    <svgc:SvgViewbox x:Name="IconRogue" Width="18" Height="18"
+                                                     Margin="4,0,6,0" Stretch="Uniform"/>
+                                    <TextBlock Text="Rogue" FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- Cultist -->
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <CheckBox x:Name="ChkShowCultists" IsChecked="True"
+                                              Checked="ChkMapMarker_Changed" Unchecked="ChkMapMarker_Changed"
+                                              VerticalAlignment="Center"/>
+                                    <svgc:SvgViewbox x:Name="IconCultist" Width="18" Height="18"
+                                                     Margin="4,0,6,0" Stretch="Uniform"/>
+                                    <TextBlock Text="Cultist" FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- Lever -->
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <CheckBox x:Name="ChkShowLeversMarker" IsChecked="True"
+                                              Checked="ChkMapMarker_Changed" Unchecked="ChkMapMarker_Changed"
+                                              VerticalAlignment="Center"/>
+                                    <svgc:SvgViewbox x:Name="IconLever" Width="18" Height="18"
+                                                     Margin="4,0,6,0" Stretch="Uniform"/>
+                                    <TextBlock Text="Lever" FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- Boss -->
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <CheckBox x:Name="ChkShowBosses" IsChecked="True"
+                                              Checked="ChkMapMarker_Changed" Unchecked="ChkMapMarker_Changed"
+                                              VerticalAlignment="Center"/>
+                                    <svgc:SvgViewbox x:Name="IconBoss" Width="18" Height="18"
+                                                     Margin="4,0,6,0" Stretch="Uniform"/>
+                                    <TextBlock Text="Boss" FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Border>
 

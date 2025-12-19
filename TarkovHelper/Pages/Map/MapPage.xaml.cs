@@ -15,6 +15,7 @@ using TarkovHelper.Models.Map;
 using TarkovHelper.Services;
 using TarkovHelper.Services.Logging;
 using TarkovHelper.Services.Map;
+using TarkovHelper.Services.Settings;
 using TarkovHelper.Pages.Map.Components;
 using LegacyMapConfig = TarkovHelper.Models.Map.MapConfig;
 using SvgStylePreprocessor = TarkovHelper.Services.Map.SvgStylePreprocessor;
@@ -63,6 +64,15 @@ public partial class MapPage : UserControl
     private double _extractNameTextSize = 10.0;
     private bool _hideCompletedObjectives = true;
 
+    // Map Markers 오버레이 관련 필드
+    private bool _showPmcSpawnsMarker = true;
+    private bool _showSniperScavsMarker = true;
+    private bool _showRoguesMarker = true;
+    private bool _showCultistsMarker = true;
+    private bool _showLeversMarkerOverlay = true;
+    private bool _showBossesMarker = true;
+    private bool _isMapMarkersPanelCollapsed;
+
     // EFT 레이드 이벤트 서비스 (자동 맵 전환 및 레이드 감지용)
     private readonly EftRaidEventService _raidEventService = EftRaidEventService.Instance;
 
@@ -93,6 +103,7 @@ public partial class MapPage : UserControl
     private MapQuestMarkerManager? _questMarkerManager;
     private MapExtractMarkerManager? _extractMarkerManager;
     private MapCalibrationController? _calibrationController;
+    private MapMarkersManager? _mapMarkersManager;
 
     public MapPage()
     {
@@ -166,6 +177,13 @@ public partial class MapPage : UserControl
             _calibrationService);
         _calibrationController.StatusUpdated += msg => Dispatcher.Invoke(() => TxtStatus.Text = msg);
         _calibrationController.CalibrationCompleted += OnCalibrationCompleted;
+
+        // MapMarkersManager 초기화
+        _mapMarkersManager = new MapMarkersManager(
+            MapMarkersContainer,
+            _trackerService,
+            MapMarkerDbService.Instance,
+            _loc);
     }
 
     private void OnObjectiveSelectedFromManager(object? sender, TaskObjectiveWithLocation objective)
@@ -217,6 +235,9 @@ public partial class MapPage : UserControl
 
             // 탈출구 데이터 로드
             await LoadExtractsAsync();
+
+            // Map Markers 데이터 로드
+            await LoadMapMarkersAsync();
 
             // 층 감지 데이터 로드 (자동 층 전환용)
             await FloorDetectionService.Instance.LoadFloorRangesAsync();
@@ -471,6 +492,68 @@ public partial class MapPage : UserControl
 
         // 마커 색상 UI 업데이트
         UpdateMarkerColorUI();
+
+        // Map Markers 오버레이 설정 로드
+        LoadMapMarkersSettings();
+    }
+
+    private void LoadMapMarkersSettings()
+    {
+        var mapSettings = MapSettings.Instance;
+
+        _showPmcSpawnsMarker = mapSettings.ShowPmcSpawns;
+        _showSniperScavsMarker = mapSettings.ShowSniperScavs;
+        _showRoguesMarker = mapSettings.ShowRogues;
+        _showCultistsMarker = mapSettings.ShowCultists;
+        _showLeversMarkerOverlay = mapSettings.ShowLevers;
+        _showBossesMarker = mapSettings.ShowBosses;
+
+        // UI 업데이트
+        ChkShowPmcSpawns.IsChecked = _showPmcSpawnsMarker;
+        ChkShowSniperScavs.IsChecked = _showSniperScavsMarker;
+        ChkShowRogues.IsChecked = _showRoguesMarker;
+        ChkShowCultists.IsChecked = _showCultistsMarker;
+        ChkShowLeversMarker.IsChecked = _showLeversMarkerOverlay;
+        ChkShowBosses.IsChecked = _showBossesMarker;
+
+        // SVG 아이콘 로드
+        LoadMapMarkerIcons();
+    }
+
+    private void LoadMapMarkerIcons()
+    {
+        try
+        {
+            var basePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "DB", "Icons", "Markers");
+
+            LoadSvgIcon(IconPmcSpawn, System.IO.Path.Combine(basePath, "PMC Spawn.svg"));
+            LoadSvgIcon(IconSniperScav, System.IO.Path.Combine(basePath, "SniperScav.svg"));
+            LoadSvgIcon(IconRogue, System.IO.Path.Combine(basePath, "Rogue.svg"));
+            LoadSvgIcon(IconCultist, System.IO.Path.Combine(basePath, "Cultist.svg"));
+            LoadSvgIcon(IconLever, System.IO.Path.Combine(basePath, "Lever.svg"));
+            LoadSvgIcon(IconBoss, System.IO.Path.Combine(basePath, "Boss.svg"));
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"Failed to load map marker icons: {ex.Message}");
+        }
+    }
+
+    private void LoadSvgIcon(SharpVectors.Converters.SvgViewbox svgViewbox, string path)
+    {
+        if (svgViewbox == null) return;
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                svgViewbox.Source = new Uri(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"Failed to load SVG icon {path}: {ex.Message}");
+        }
     }
 
     private void PopulateMapComboBox()
@@ -978,6 +1061,10 @@ public partial class MapPage : UserControl
             {
                 RefreshExtractMarkers();
             }
+            if (MapMarkerDbService.Instance.IsLoaded)
+            {
+                RefreshMapMarkers();
+            }
 
             // 패널이 열려있으면 내용 갱신 (닫지 않음)
             if (QuestDrawerPanel?.Visibility == Visibility.Visible)
@@ -1021,6 +1108,7 @@ public partial class MapPage : UserControl
                     // 마커들도 새로고침 (층 정보에 따른 표시 업데이트)
                     RefreshExtractMarkers();
                     RefreshQuestMarkers();
+                    RefreshMapMarkers();
                 }
             }
         }
@@ -1697,6 +1785,13 @@ public partial class MapPage : UserControl
             _extractMarkerManager.UpdateMarkerScales();
         }
 
+        // 컴포넌트를 통해 Map Markers 스케일 업데이트
+        if (_mapMarkersManager != null)
+        {
+            _mapMarkersManager.SetZoomLevel(_zoomLevel);
+            _mapMarkersManager.UpdateMarkerScales();
+        }
+
         // 플레이어 마커 업데이트
         UpdatePlayerMarkerScale(inverseScale);
 
@@ -2285,6 +2380,36 @@ public partial class MapPage : UserControl
         // 마커 새로고침
         _extractMarkerManager.RefreshMarkers();
     }
+
+    #endregion
+
+    #region Map Markers (PMC Spawn, Sniper Scav, Rogue, Cultist, Boss, Lever)
+
+    private async Task LoadMapMarkersAsync()
+    {
+        try
+        {
+            TxtStatus.Text = "Loading map markers...";
+
+            await MapMarkerDbService.Instance.LoadMarkersAsync();
+
+            var count = MapMarkerDbService.Instance.MarkerCount;
+            TxtStatus.Text = $"Loaded {count} map markers";
+
+            if (!string.IsNullOrEmpty(_currentMapKey))
+            {
+                RefreshMapMarkers();
+            }
+        }
+        catch (Exception ex)
+        {
+            TxtStatus.Text = $"Error loading map markers: {ex.Message}";
+        }
+    }
+
+    #endregion
+
+    #region Floor Helpers
 
     /// <summary>
     /// 마커가 현재 선택된 층에 있는지 확인합니다.
@@ -3097,6 +3222,76 @@ public partial class MapPage : UserControl
         }
 
         return result.ToList();
+    }
+
+    #endregion
+
+    #region Map Markers 오버레이 이벤트 핸들러
+
+    private void BtnToggleMapMarkersPanel_Click(object sender, RoutedEventArgs e)
+    {
+        _isMapMarkersPanelCollapsed = !_isMapMarkersPanelCollapsed;
+
+        if (_isMapMarkersPanelCollapsed)
+        {
+            MapMarkersContent.Visibility = Visibility.Collapsed;
+            BtnToggleMapMarkersPanel.Content = "▲";
+        }
+        else
+        {
+            MapMarkersContent.Visibility = Visibility.Visible;
+            BtnToggleMapMarkersPanel.Content = "▼";
+        }
+    }
+
+    private void ChkMapMarker_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+
+        var mapSettings = MapSettings.Instance;
+
+        // 각 체크박스 상태 저장
+        _showPmcSpawnsMarker = ChkShowPmcSpawns?.IsChecked ?? true;
+        _showSniperScavsMarker = ChkShowSniperScavs?.IsChecked ?? true;
+        _showRoguesMarker = ChkShowRogues?.IsChecked ?? true;
+        _showCultistsMarker = ChkShowCultists?.IsChecked ?? true;
+        _showLeversMarkerOverlay = ChkShowLeversMarker?.IsChecked ?? true;
+        _showBossesMarker = ChkShowBosses?.IsChecked ?? true;
+
+        // 설정 저장
+        mapSettings.ShowPmcSpawns = _showPmcSpawnsMarker;
+        mapSettings.ShowSniperScavs = _showSniperScavsMarker;
+        mapSettings.ShowRogues = _showRoguesMarker;
+        mapSettings.ShowCultists = _showCultistsMarker;
+        mapSettings.ShowLevers = _showLeversMarkerOverlay;
+        mapSettings.ShowBosses = _showBossesMarker;
+
+        // 마커 새로고침
+        RefreshMapMarkers();
+    }
+
+    /// <summary>
+    /// Map Markers (PMC Spawn, Sniper Scav, Rogue, Cultist, Boss, Lever) 새로고침
+    /// </summary>
+    private void RefreshMapMarkers()
+    {
+        if (_mapMarkersManager == null) return;
+
+        // 가시성 설정 업데이트
+        _mapMarkersManager.SetShowPmcSpawns(_showPmcSpawnsMarker);
+        _mapMarkersManager.SetShowSniperScavs(_showSniperScavsMarker);
+        _mapMarkersManager.SetShowRogues(_showRoguesMarker);
+        _mapMarkersManager.SetShowCultists(_showCultistsMarker);
+        _mapMarkersManager.SetShowLevers(_showLeversMarkerOverlay);
+        _mapMarkersManager.SetShowBosses(_showBossesMarker);
+
+        // 현재 맵 및 층 설정
+        _mapMarkersManager.SetCurrentMap(_currentMapKey);
+        _mapMarkersManager.SetCurrentFloor(_currentFloorId);
+        _mapMarkersManager.SetZoomLevel(_zoomLevel);
+
+        // 마커 새로고침
+        _mapMarkersManager.RefreshMarkers();
     }
 
     #endregion
