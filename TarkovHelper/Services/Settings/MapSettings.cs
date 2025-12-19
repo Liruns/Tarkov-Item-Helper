@@ -58,6 +58,10 @@ public class MapSettings
     private const string KeyMapShowSpawns = "map.showSpawns";
     private const string KeyMapShowLevers = "map.showLevers";
     private const string KeyMapShowKeys = "map.showKeys";
+    private const string KeyMapShowCultists = "map.showCultists";
+    private const string KeyMapShowRogues = "map.showRogues";
+    private const string KeyMapShowSniperScavs = "map.showSniperScavs";
+    private const string KeyMapShowPmcSpawns = "map.showPmcSpawns";
     private const string KeyMapLeftPanelExpanded = "map.leftPanelExpanded";
     private const string KeyExpanderLayersExpanded = "map.expanderLayers";
     private const string KeyExpanderFloorExpanded = "map.expanderFloor";
@@ -124,6 +128,10 @@ public class MapSettings
     private bool? _showSpawns;
     private bool? _showLevers;
     private bool? _showKeys;
+    private bool? _showCultists;
+    private bool? _showRogues;
+    private bool? _showSniperScavs;
+    private bool? _showPmcSpawns;
     private bool? _leftPanelExpanded;
     private bool? _expanderLayersExpanded;
     private bool? _expanderFloorExpanded;
@@ -896,6 +904,74 @@ public class MapSettings
         }
     }
 
+    public bool ShowCultists
+    {
+        get
+        {
+            EnsureLoaded();
+            return _showCultists ?? true;
+        }
+        set
+        {
+            if (_showCultists != value)
+            {
+                _showCultists = value;
+                SaveSetting(KeyMapShowCultists, value.ToString());
+            }
+        }
+    }
+
+    public bool ShowRogues
+    {
+        get
+        {
+            EnsureLoaded();
+            return _showRogues ?? true;
+        }
+        set
+        {
+            if (_showRogues != value)
+            {
+                _showRogues = value;
+                SaveSetting(KeyMapShowRogues, value.ToString());
+            }
+        }
+    }
+
+    public bool ShowSniperScavs
+    {
+        get
+        {
+            EnsureLoaded();
+            return _showSniperScavs ?? true;
+        }
+        set
+        {
+            if (_showSniperScavs != value)
+            {
+                _showSniperScavs = value;
+                SaveSetting(KeyMapShowSniperScavs, value.ToString());
+            }
+        }
+    }
+
+    public bool ShowPmcSpawns
+    {
+        get
+        {
+            EnsureLoaded();
+            return _showPmcSpawns ?? true;
+        }
+        set
+        {
+            if (_showPmcSpawns != value)
+            {
+                _showPmcSpawns = value;
+                SaveSetting(KeyMapShowPmcSpawns, value.ToString());
+            }
+        }
+    }
+
     #endregion
 
     #region Properties - Panels
@@ -1300,6 +1376,18 @@ public class MapSettings
 
             if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowKeys), out var showKeys))
                 _showKeys = showKeys;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowCultists), out var showCultists))
+                _showCultists = showCultists;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowRogues), out var showRogues))
+                _showRogues = showRogues;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowSniperScavs), out var showSniperScavs))
+                _showSniperScavs = showSniperScavs;
+
+            if (bool.TryParse(_userDataDb.GetSetting(KeyMapShowPmcSpawns), out var showPmcSpawns))
+                _showPmcSpawns = showPmcSpawns;
 
             // Panels
             if (bool.TryParse(_userDataDb.GetSetting(KeyMapLeftPanelExpanded), out var leftPanelExpanded))

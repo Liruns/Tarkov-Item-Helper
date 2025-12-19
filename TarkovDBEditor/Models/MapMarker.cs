@@ -57,7 +57,22 @@ public enum MapMarkerType
     /// <summary>
     /// 키 필요 장소
     /// </summary>
-    Keys
+    Keys,
+
+    /// <summary>
+    /// 로그 스폰 지점
+    /// </summary>
+    RogueSpawn,
+
+    /// <summary>
+    /// 컬티스트 스폰 지점
+    /// </summary>
+    CultistSpawn,
+
+    /// <summary>
+    /// 스나이퍼 스캐브 스폰 지점
+    /// </summary>
+    SniperScavSpawn
 }
 
 /// <summary>
@@ -182,6 +197,9 @@ public class MapMarker : INotifyPropertyChanged
             MapMarkerType.RaiderSpawn => (156, 39, 176),     // Purple
             MapMarkerType.Lever => (255, 235, 59),           // Yellow
             MapMarkerType.Keys => (33, 150, 243),            // Blue
+            MapMarkerType.RogueSpawn => (0, 150, 136),       // Teal
+            MapMarkerType.CultistSpawn => (63, 81, 181),     // Indigo
+            MapMarkerType.SniperScavSpawn => (121, 85, 72),  // Brown
             _ => (158, 158, 158)                              // Gray
         };
     }
@@ -203,6 +221,9 @@ public class MapMarker : INotifyPropertyChanged
             MapMarkerType.RaiderSpawn => "Raider Spawn",
             MapMarkerType.Lever => "Lever",
             MapMarkerType.Keys => "Keys",
+            MapMarkerType.RogueSpawn => "Rogue Spawn",
+            MapMarkerType.CultistSpawn => "Cultist Spawn",
+            MapMarkerType.SniperScavSpawn => "Sniper Scav Spawn",
             _ => "Unknown"
         };
     }
@@ -224,6 +245,9 @@ public class MapMarker : INotifyPropertyChanged
             MapMarkerType.RaiderSpawn => "Raider Spawn.webp",
             MapMarkerType.Lever => "Lever.webp",
             MapMarkerType.Keys => "Keys.webp",
+            MapMarkerType.RogueSpawn => "Raider Spawn.webp",      // Use Raider icon for now
+            MapMarkerType.CultistSpawn => "BOSS Spawn.webp",      // Use Boss icon for now
+            MapMarkerType.SniperScavSpawn => "SCAV Spawn.webp",   // Use Scav icon for now
             _ => "PMC Spawn.webp"
         };
     }

@@ -14,7 +14,11 @@ public enum MarkerType
     BossSpawn,
     RaiderSpawn,
     Lever,
-    Keys
+    Keys,
+    // DB에 존재하는 추가 타입
+    CultistSpawn,
+    SniperScavSpawn,
+    RogueSpawn
 }
 
 /// <summary>
@@ -89,7 +93,28 @@ public class MapMarker
             MarkerType.RaiderSpawn => "Raider Spawn.webp",
             MarkerType.Lever => "Lever.webp",
             MarkerType.Keys => "Keys.webp",
+            MarkerType.CultistSpawn => "Cultist.svg",
+            MarkerType.SniperScavSpawn => "SniperScav.svg",
+            MarkerType.RogueSpawn => "Rogue.svg",
             _ => "PMC Spawn.webp"
+        };
+    }
+
+    /// <summary>
+    /// Get SVG icon filename for this marker type (used in Map Markers overlay).
+    /// Returns null if no SVG icon available.
+    /// </summary>
+    public static string? GetSvgIconFileName(MarkerType type)
+    {
+        return type switch
+        {
+            MarkerType.PmcSpawn => "PMC Spawn.svg",
+            MarkerType.SniperScavSpawn => "SniperScav.svg",
+            MarkerType.RogueSpawn => "Rogue.svg",
+            MarkerType.CultistSpawn => "Cultist.svg",
+            MarkerType.Lever => "Lever.svg",
+            MarkerType.BossSpawn => "Boss.svg",
+            _ => null
         };
     }
 
@@ -120,6 +145,9 @@ public class MapMarker
             "RaiderSpawn" => MarkerType.RaiderSpawn,
             "Lever" => MarkerType.Lever,
             "Keys" => MarkerType.Keys,
+            "CultistSpawn" => MarkerType.CultistSpawn,
+            "SniperScavSpawn" => MarkerType.SniperScavSpawn,
+            "RogueSpawn" => MarkerType.RogueSpawn,
             _ => MarkerType.PmcSpawn
         };
     }
@@ -139,8 +167,11 @@ public class MapMarker
             MarkerType.Transit => (0x21, 0x96, 0xF3),        // Blue
             MarkerType.BossSpawn => (0xF4, 0x43, 0x36),      // Red
             MarkerType.RaiderSpawn => (0xE9, 0x1E, 0x63),    // Pink
-            MarkerType.Lever => (0x9C, 0x27, 0xB0),          // Purple
+            MarkerType.Lever => (0x21, 0x96, 0xF3),          // Blue
             MarkerType.Keys => (0xFF, 0xC1, 0x07),           // Amber
+            MarkerType.CultistSpawn => (0x9C, 0x27, 0xB0),   // Purple
+            MarkerType.SniperScavSpawn => (0x9E, 0x9E, 0x9E), // Gray
+            MarkerType.RogueSpawn => (0xF4, 0x43, 0x36),     // Red
             _ => (0x9E, 0x9E, 0x9E)                          // Grey
         };
     }
