@@ -136,8 +136,8 @@ public class MapExtractMarkerManager
             // 진영 필터 적용
             if (!ShouldShowExtract(extract.Faction)) continue;
 
-            // TarkovDBEditor 방식: config.GameToScreen 직접 사용
-            var (screenX, screenY) = config.GameToScreen(extract.X, extract.Z);
+            // TarkovDBEditor 방식: config.GameToScreenForPlayer 사용
+            var (screenX, screenY) = config.GameToScreenForPlayer(extract.X, extract.Z);
 
             // 디버그: 탈출구 좌표 변환 결과 출력
             System.Diagnostics.Debug.WriteLine($"[MapExtractMarkerManager] Extract '{extract.Name}': Game({extract.X:F2}, {extract.Z:F2}) -> Screen({screenX:F2}, {screenY:F2})");

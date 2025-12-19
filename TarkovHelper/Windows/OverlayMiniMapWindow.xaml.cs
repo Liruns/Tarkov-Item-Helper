@@ -438,7 +438,7 @@ public partial class OverlayMiniMapWindow : Window
 
             if (!shouldShow) continue;
 
-            var (screenX, screenY) = _currentMapConfig!.GameToScreen(extract.X, extract.Z);
+            var (screenX, screenY) = _currentMapConfig!.GameToScreenForPlayer(extract.X, extract.Z);
             _log.Debug($"  Extract '{extract.Name}': Game({extract.X:F1}, {extract.Z:F1}) -> Screen({screenX:F1}, {screenY:F1})");
 
             // 줌에 반비례하는 마커 크기 (줌 후에도 일정한 화면 크기 유지)
@@ -494,7 +494,7 @@ public partial class OverlayMiniMapWindow : Window
             if (obj.Locations == null || obj.Locations.Count == 0) continue;
 
             var firstLocation = obj.Locations[0];
-            var (screenX, screenY) = _currentMapConfig.GameToScreen(firstLocation.X, firstLocation.Y);
+            var (screenX, screenY) = _currentMapConfig.GameToScreenForPlayer(firstLocation.X, firstLocation.Y);
 
             // 줌에 반비례하는 마커 크기
             var baseScreenSize = 8.0;

@@ -111,6 +111,15 @@ public class MapQuestMarkerManager
         UpdateMarkerHighlight();
     }
 
+    /// <summary>
+    /// 현재 맵에 해당하는 활성 퀘스트 목표 목록을 반환합니다.
+    /// RefreshMarkers() 호출 후에 유효한 값을 반환합니다.
+    /// </summary>
+    public List<TaskObjectiveWithLocation> GetCurrentMapObjectives()
+    {
+        return _currentMapObjectives;
+    }
+
     #endregion
 
     #region Public Methods - Marker Management
@@ -186,9 +195,9 @@ public class MapQuestMarkerManager
                 else
                 {
                     // 단일 포인트 마커
-                    // TarkovDBEditor 방식: config.GameToScreen 직접 사용
+                    // TarkovDBEditor 방식: config.GameToScreenForPlayer 사용
                     // QuestObjectiveLocation: X = game X, Y = game Z (수평면), Z = game Y (높이)
-                    var (screenX, screenY) = config.GameToScreen(location.X, location.Y);
+                    var (screenX, screenY) = config.GameToScreenForPlayer(location.X, location.Y);
                     var screenPos = new ScreenPosition
                     {
                         MapKey = _currentMapKey!,
@@ -251,7 +260,25 @@ public class MapQuestMarkerManager
         {
             if (marker is Canvas canvas)
             {
-                canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                // Area 마커인 경우: 외부 컨테이너는 그대로 두고, 내부 centerCanvas만 역스케일 적용
+                // (폴리곤은 맵과 함께 줌되어야 하므로)
+                if (canvas.Tag is AreaMarkerTag)
+                {
+                    // 내부 centerCanvas 찾아서 역스케일 적용
+                    foreach (var child in canvas.Children)
+                    {
+                        if (child is Canvas centerCanvas && centerCanvas.Tag is TaskObjectiveWithLocation)
+                        {
+                            centerCanvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // 일반 마커: 전체에 역스케일 적용
+                    canvas.RenderTransform = new ScaleTransform(inverseScale, inverseScale);
+                }
             }
         }
 
@@ -598,7 +625,7 @@ public class MapQuestMarkerManager
         double sumX = 0, sumY = 0;
         foreach (var point in location.Outline!)
         {
-            var (sx, sy) = config.GameToScreen(point.X, point.Y);
+            var (sx, sy) = config.GameToScreenForPlayer(point.X, point.Y);
             polygon.Points.Add(new Point(sx, sy));
             sumX += sx;
             sumY += sy;

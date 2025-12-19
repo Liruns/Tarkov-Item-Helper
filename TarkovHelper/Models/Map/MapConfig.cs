@@ -172,20 +172,32 @@ public sealed class MapConfig
     /// 게임 좌표를 맵 픽셀 좌표로 변환.
     /// TarkovDBEditor와 동일한 변환 방식 사용.
     /// </summary>
+    [Obsolete("Use GameToScreenForPlayer() instead. CalibratedTransform is deprecated.")]
     public (double screenX, double screenY) GameToScreen(double gameX, double gameZ)
     {
-        if (CalibratedTransform == null || CalibratedTransform.Length < 6)
+        return GameToScreenForPlayer(gameX, gameZ);
+    }
+
+    /// <summary>
+    /// 게임 좌표를 플레이어 마커용 맵 픽셀 좌표로 변환.
+    /// PlayerMarkerTransform이 있으면 사용하고, 없으면 CalibratedTransform 사용.
+    /// </summary>
+    public (double screenX, double screenY) GameToScreenForPlayer(double gameX, double gameZ)
+    {
+        var transform = PlayerMarkerTransform ?? CalibratedTransform;
+
+        if (transform == null || transform.Length < 6)
         {
             // Fallback: 단순 변환 (중앙 기준)
             return (ImageWidth / 2.0 + gameX, ImageHeight / 2.0 + gameZ);
         }
 
-        var a = CalibratedTransform[0];
-        var b = CalibratedTransform[1];
-        var c = CalibratedTransform[2];
-        var d = CalibratedTransform[3];
-        var tx = CalibratedTransform[4];
-        var ty = CalibratedTransform[5];
+        var a = transform[0];
+        var b = transform[1];
+        var c = transform[2];
+        var d = transform[3];
+        var tx = transform[4];
+        var ty = transform[5];
 
         var screenX = a * gameX + b * gameZ + tx;
         var screenY = c * gameX + d * gameZ + ty;
@@ -196,19 +208,31 @@ public sealed class MapConfig
     /// <summary>
     /// 맵 픽셀 좌표를 게임 좌표로 변환 (역행렬).
     /// </summary>
+    [Obsolete("Use ScreenToGameForPlayer() instead. CalibratedTransform is deprecated.")]
     public (double gameX, double gameZ) ScreenToGame(double screenX, double screenY)
     {
-        if (CalibratedTransform == null || CalibratedTransform.Length < 6)
+        return ScreenToGameForPlayer(screenX, screenY);
+    }
+
+    /// <summary>
+    /// 맵 픽셀 좌표를 플레이어 좌표계 게임 좌표로 변환 (역행렬).
+    /// PlayerMarkerTransform이 있으면 사용하고, 없으면 CalibratedTransform 사용.
+    /// </summary>
+    public (double gameX, double gameZ) ScreenToGameForPlayer(double screenX, double screenY)
+    {
+        var transform = PlayerMarkerTransform ?? CalibratedTransform;
+
+        if (transform == null || transform.Length < 6)
         {
             return (screenX - ImageWidth / 2.0, screenY - ImageHeight / 2.0);
         }
 
-        var a = CalibratedTransform[0];
-        var b = CalibratedTransform[1];
-        var c = CalibratedTransform[2];
-        var d = CalibratedTransform[3];
-        var tx = CalibratedTransform[4];
-        var ty = CalibratedTransform[5];
+        var a = transform[0];
+        var b = transform[1];
+        var c = transform[2];
+        var d = transform[3];
+        var tx = transform[4];
+        var ty = transform[5];
 
         var det = a * d - b * c;
         if (Math.Abs(det) < 1e-10)
