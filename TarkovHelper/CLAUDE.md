@@ -416,6 +416,7 @@ Custom commands (located in `.claude/commands/`):
 | Command | Description |
 |---------|-------------|
 | `/build-and-run` | Build and run the WPF application |
+| `/commit` | Stage and commit changes by feature (conventional commits) |
 | `/db-check` | Check database schema and statistics |
 
 ### Usage Examples
